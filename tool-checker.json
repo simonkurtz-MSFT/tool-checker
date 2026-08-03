@@ -1,0 +1,270 @@
+{
+  "tools": {
+    "NodeJS": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-NodeJS",
+      "Command": "node",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade --id OpenJS.NodeJS -e --silent --disable-interactivity",
+      "ReleaseNotesUrl": "https://nodejs.org/en/blog/release/",
+      "ApiUrl": "https://nodejs.org/dist/index.json",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id OpenJS.NodeJS -e --silent --disable-interactivity",
+        "Windows (arm64)": "winget install --id OpenJS.NodeJS -e --silent --disable-interactivity",
+        "Linux (amd64)": "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs",
+        "Linux (arm64)": "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs"
+      }
+    },
+    "ncu": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "ncu",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "^v?(.+)$",
+      "VersionExtractor": "npmDistTagLatest",
+      "NpmPackageName": "npm-check-updates",
+      "UpdateType": "npm-global",
+      "UpdateCommand": "npm install -g npm-check-updates@latest --loglevel=error",
+      "ReleaseNotesUrl": "https://github.com/raineorshine/npm-check-updates/releases",
+      "ApiUrl": "https://registry.npmjs.org/npm-check-updates",
+      "InstallCommands": {
+        "Windows (amd64)": "npm install -g npm-check-updates@latest --loglevel=error",
+        "Windows (arm64)": "npm install -g npm-check-updates@latest --loglevel=error",
+        "Linux (amd64)": "npm install -g npm-check-updates@latest --loglevel=error",
+        "Linux (arm64)": "npm install -g npm-check-updates@latest --loglevel=error"
+      }
+    },
+    "Global npm packages": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-NCUGlobal",
+      "UpdateType": "npm-global-bulk",
+      "UpdateCommand": "ncu -g -u --loglevel=error",
+      "ReleaseNotesUrl": ""
+    },
+    "pnpm": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "pnpm",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "^v?(.+)$",
+      "VersionExtractor": "npmDistTagLatest",
+      "NpmPackageName": "pnpm",
+      "UpdateType": "npm-global",
+      "UpdateCommand": "npm install -g pnpm@latest --loglevel=error",
+      "ReleaseNotesUrl": "https://github.com/pnpm/pnpm/releases",
+      "ApiUrl": "https://registry.npmjs.org/pnpm",
+      "InstallCommands": {
+        "Windows (amd64)": "npm install -g pnpm@latest --loglevel=error",
+        "Windows (arm64)": "npm install -g pnpm@latest --loglevel=error",
+        "Linux (amd64)": "npm install -g pnpm@latest --loglevel=error",
+        "Linux (arm64)": "npm install -g pnpm@latest --loglevel=error"
+      }
+    },
+    "Deno": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "deno",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "deno\\s+([0-9]+(?:\\.[0-9]+){1,3})",
+      "UpdateType": "direct",
+      "UpdateCommand": "deno upgrade --quiet",
+      "ReleaseNotesUrl": "https://github.com/denoland/deno/releases",
+      "ApiUrl": "https://api.github.com/repos/denoland/deno/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id DenoLand.Deno --silent; $denoBin = Get-ChildItem \"$env:LOCALAPPDATA\\Microsoft\\WinGet\\Packages\\DenoLand.Deno*\" -Filter 'deno.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName; if (-not $denoBin) { $denoBin = Join-Path $env:USERPROFILE '.deno\\bin' }; if (Test-Path $denoBin) { $userPath = [Environment]::GetEnvironmentVariable('Path','User'); if ($userPath -notlike ('*' + $denoBin + '*')) { [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $denoBin), 'User') }; if ($env:Path -notlike ('*' + $denoBin + '*')) { $env:Path += ';' + $denoBin } }",
+        "Windows (arm64)": "winget install --id DenoLand.Deno --silent; $denoBin = Get-ChildItem \"$env:LOCALAPPDATA\\Microsoft\\WinGet\\Packages\\DenoLand.Deno*\" -Filter 'deno.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName; if (-not $denoBin) { $denoBin = Join-Path $env:USERPROFILE '.deno\\bin' }; if (Test-Path $denoBin) { $userPath = [Environment]::GetEnvironmentVariable('Path','User'); if ($userPath -notlike ('*' + $denoBin + '*')) { [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $denoBin), 'User') }; if ($env:Path -notlike ('*' + $denoBin + '*')) { $env:Path += ';' + $denoBin } }",
+        "Linux (amd64)": "curl -fsSL https://deno.land/install.sh | sh",
+        "Linux (arm64)": "curl -fsSL https://deno.land/install.sh | sh"
+      }
+    },
+    "uv": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "uv",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "uv\\s+([0-9]+(?:\\.[0-9]+){1,3})",
+      "UpdateType": "direct",
+      "UpdateCommand": "uv self update",
+      "ReleaseNotesUrl": "https://github.com/astral-sh/uv/releases",
+      "ApiUrl": "https://api.github.com/repos/astral-sh/uv/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id=astral-sh.uv -e --silent",
+        "Windows (arm64)": "winget install --id=astral-sh.uv -e --silent",
+        "Linux (amd64)": "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        "Linux (arm64)": "curl -LsSf https://astral.sh/uv/install.sh | sh"
+      }
+    },
+    "Azure CLI": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "az",
+      "VersionCommand": "az version --output json",
+      "VersionExtractor": "azCliJson",
+      "RefreshMethod": "azure-cli",
+      "UpdateType": "direct",
+      "UpdateCommand": "az upgrade --yes --only-show-errors",
+      "ReleaseNotesUrl": "https://learn.microsoft.com/en-us/cli/azure/release-notes-azure-cli?view=azure-cli-latest",
+      "ApiUrl": "https://pypi.org/pypi/azure-cli/json",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install Microsoft.AzureCLI --silent",
+        "Windows (arm64)": "winget install Microsoft.AzureCLI --silent",
+        "Linux (amd64)": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash",
+        "Linux (arm64)": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+      }
+    },
+    "Azure CLI Extensions": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-AzureExtensions",
+      "Command": "az",
+      "UpdateType": "az-extension",
+      "UpdateCommand": "az extension update --name {name} --only-show-errors",
+      "ReleaseNotesUrl": "https://learn.microsoft.com/en-us/cli/azure/azure-cli-extensions-list"
+    },
+    "Azure Bicep CLI": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "az",
+      "VersionCommand": "az bicep version",
+      "VersionExtractor": "azBicep",
+      "VersionParseRegex": "Bicep CLI version\\s+(\\S+)",
+      "UpdateParseRegex": "A new Bicep release is available:\\s+v(\\d+(?:\\.\\d+){1,3})",
+      "RefreshMethod": "bicep",
+      "UpdateType": "az-command",
+      "UpdateCommand": "az bicep upgrade --only-show-errors",
+      "ReleaseNotesUrl": "https://github.com/Azure/bicep/releases",
+      "ApiUrl": "https://api.github.com/repos/Azure/bicep/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "az bicep install",
+        "Windows (arm64)": "az bicep install",
+        "Linux (amd64)": "az bicep install",
+        "Linux (arm64)": "az bicep install"
+      }
+    },
+    ".NET SDK": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-DotNetSDKs",
+      "Command": "dotnet",
+      "RefreshMethod": "dotnet",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade Microsoft.DotNet.SDK.{major} --silent",
+      "ReleaseNotesUrl": "https://dotnet.microsoft.com/en-us/download",
+      "ApiUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install Microsoft.DotNet.SDK.9 --silent",
+        "Windows (arm64)": "winget install Microsoft.DotNet.SDK.9 --silent",
+        "Linux (amd64)": "curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS",
+        "Linux (arm64)": "curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS --architecture arm64"
+      }
+    },
+    "Python": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-Python",
+      "Command": "py",
+      "RefreshMethod": "python",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade Python.Python.{version} --silent",
+      "ReleaseNotesUrl": "https://www.python.org/downloads/",
+      "ApiUrl": "https://endoflife.date/api/python.json",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install Python.Python.3 --silent",
+        "Windows (arm64)": "winget install Python.Python.3 --silent",
+        "Linux (amd64)": "sudo apt-get install -y python3",
+        "Linux (arm64)": "sudo apt-get install -y python3"
+      }
+    },
+    "Git": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "git",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "git version (.+)",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget install --id Git.Git -e --source winget --silent",
+      "ReleaseNotesUrl": "https://github.com/git-for-windows/git/releases",
+      "ApiUrl": "https://api.github.com/repos/git-for-windows/git/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id Git.Git -e --source winget --silent",
+        "Windows (arm64)": "winget install --id Git.Git -e --source winget --silent",
+        "Linux (amd64)": "sudo apt-get install -y git",
+        "Linux (arm64)": "sudo apt-get install -y git"
+      }
+    },
+    "GitHub CLI": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "gh",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "gh version ([\\d.]+)",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget install --id GitHub.cli -e --source winget --silent",
+      "ReleaseNotesUrl": "https://github.com/cli/cli/releases",
+      "ApiUrl": "https://api.github.com/repos/cli/cli/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id GitHub.cli -e --source winget --silent",
+        "Windows (arm64)": "winget install --id GitHub.cli -e --source winget --silent",
+        "Linux (amd64)": "sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=amd64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y",
+        "Linux (arm64)": "sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=arm64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y"
+      }
+    },
+    "ripgrep": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "rg",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "ripgrep ([0-9]+(?:\\.[0-9]+){1,3})",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade BurntSushi.ripgrep.MSVC --silent --disable-interactivity",
+      "ReleaseNotesUrl": "https://github.com/BurntSushi/ripgrep/releases",
+      "ApiUrl": "https://api.github.com/repos/BurntSushi/ripgrep/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install BurntSushi.ripgrep.MSVC --silent --disable-interactivity",
+        "Windows (arm64)": "winget install BurntSushi.ripgrep.MSVC --silent --disable-interactivity",
+        "Linux (amd64)": "sudo apt-get install -y ripgrep",
+        "Linux (arm64)": "sudo apt-get install -y ripgrep"
+      }
+    },
+    "WSL": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": false,
+      "CustomFunction": "Test-WSL",
+      "Command": "wslc",
+      "VersionCommand": "wslc -v",
+      "VersionParseRegex": "wslc\\s+([0-9]+(?:\\.[0-9]+){1,3})",
+      "UpdateType": "direct",
+      "UpdateCommand": "wsl --update --pre-release",
+      "ReleaseNotesUrl": "https://github.com/microsoft/WSL/releases",
+      "ApiUrl": "https://api.github.com/repos/microsoft/WSL/releases?per_page=100"
+    },
+    "PowerShell": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-PowerShell",
+      "Command": "pwsh",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade Microsoft.PowerShell --silent",
+      "ReleaseNotesUrl": "https://github.com/PowerShell/PowerShell/releases",
+      "ApiUrl": "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+    }
+  }
+}

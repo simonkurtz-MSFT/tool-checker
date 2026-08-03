@@ -1,0 +1,16 @@
+# Normalize text files for consistent cross-platform behavior.
+* text=auto
+
+*.ps1  text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Documentation assets are binary.
+*.gif  binary
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.webp binary

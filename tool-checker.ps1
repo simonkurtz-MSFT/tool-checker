@@ -88,6 +88,11 @@ if (-not (Test-Path $configPath)) {
 
 $toolsConfig = @{}
 $toolsJson   = Get-Content $configPath -Raw | ConvertFrom-Json
+$script:NpmRegistryResolution = @{
+    Source = 'tool-checker.json'
+    Url = $null
+    Details = $null
+}
 
 foreach ($toolName in $toolsJson.tools.PSObject.Properties.Name) {
     $jsonTool  = $toolsJson.tools.$toolName
@@ -128,18 +133,57 @@ function Test-CommandExists {
     return $?
 }
 
+function Get-DetailedErrorMessage {
+    param([object]$ErrorRecord)
+
+    if (-not $ErrorRecord) { return 'Unknown error' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add("$ErrorRecord")
+    if ($ErrorRecord.Exception) {
+        $parts.Add("Exception: $($ErrorRecord.Exception.GetType().FullName)")
+    }
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        $parts.Add("Details: $($ErrorRecord.ErrorDetails.Message)")
+    }
+    if ($ErrorRecord.InvocationInfo -and $ErrorRecord.InvocationInfo.PositionMessage) {
+        $parts.Add($ErrorRecord.InvocationInfo.PositionMessage.Trim())
+    }
+    $parts -join ' | '
+}
+
 function Set-NpmRegistryApiUrls {
-    if (-not (Test-CommandExists "npm")) { return }
+    $npmConfigs = @($toolsConfig.GetEnumerator() | Where-Object {
+        $_.Value.VersionExtractor -eq 'npmDistTagLatest' -and $_.Value.NpmPackageName -and $_.Value.ApiUrl
+    })
+    if ($npmConfigs.Count -gt 0) {
+        $fallbackConfig = $npmConfigs[0].Value
+        $packageSuffix = [Uri]::EscapeDataString($fallbackConfig.NpmPackageName)
+        $script:NpmRegistryResolution.Url = $fallbackConfig.ApiUrl.Substring(
+            0,
+            $fallbackConfig.ApiUrl.Length - $packageSuffix.Length
+        ).TrimEnd('/')
+    }
+    if (-not (Test-CommandExists "npm")) {
+        $script:NpmRegistryResolution.Details = 'npm was not found; using configured package endpoints.'
+        return
+    }
 
     try {
-        $registryValue = (& npm config get registry 2>$null | Select-Object -First 1).Trim()
+        $registryOutput = @(& npm config get registry 2>&1)
+        $registryExitCode = $LASTEXITCODE
+        if ($registryExitCode -ne 0) {
+            throw "npm config get registry exited with code $registryExitCode. Output: $($registryOutput -join ' ')"
+        }
+        $registryValue = ($registryOutput | Select-Object -First 1).ToString().Trim()
         $registryUri = $null
         if (-not [Uri]::TryCreate($registryValue, [UriKind]::Absolute, [ref]$registryUri) -or
             $registryUri.Scheme -notin @('http', 'https')) {
-            return
+            throw "npm returned an invalid registry URL: '$registryValue'"
         }
 
         $registryBaseUrl = $registryUri.AbsoluteUri.TrimEnd('/')
+        $script:NpmRegistryResolution.Source = 'npm machine/user configuration'
+        $script:NpmRegistryResolution.Url = $registryBaseUrl
         foreach ($toolName in $toolsConfig.Keys) {
             $config = $toolsConfig[$toolName]
             if ($config.VersionExtractor -eq "npmDistTagLatest" -and $config.NpmPackageName) {
@@ -148,7 +192,7 @@ function Set-NpmRegistryApiUrls {
             }
         }
     } catch {
-        # Retain the portable registry URLs from tool-checker.json.
+        $script:NpmRegistryResolution.Details = Get-DetailedErrorMessage $_
     }
 }
 
@@ -212,7 +256,13 @@ function Get-LatestProductionNpmVersion {
 function Invoke-SafeApiRequest {
     param([string]$Uri, [int]$Timeout = 10)
     try   { Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout -ErrorAction Stop }
-    catch { Write-Warning "  API request failed for $Uri : $_"; $null }
+    catch {
+        $details = Get-DetailedErrorMessage $_
+        $message = "API request failed for $Uri. $details"
+        Write-Error "  $message"
+        $results.Errors += $message
+        $null
+    }
 }
 
 function Add-NotInstalledTool {
@@ -1325,7 +1375,7 @@ function Show-ResultsTable {
     if ($maxUrl -lt 13)   { $maxUrl = 13 }
 
     Write-Host ""
-    $hdr = "  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,-$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f "Name","Installed","Latest","Age","Update / Install","Release Notes"
+    $hdr = "  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f "Name","Installed","Latest","Age","Update / Install","Release Notes"
     Write-Host "$ColorCyan$hdr$ColorReset"
     Write-Host ("  {0}  {1}  {2}  {3}  {4}  {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxLat),("-"*$maxAge),("-"*$maxUpd),("-"*$maxUrl))
 
@@ -1358,7 +1408,7 @@ function Show-ResultsTable {
             elseif ($lat -eq "-" -or $currentOrNewer -or $covered) { $ColorGreen }
             elseif ($_.Key -in $results.MaturityBlockedUpdates.Name) { $ColorOrange }
                 else { $ColorYellow }
-        $row  = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,-$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $_.Key,$inst,$lat,$age,$cmd,$url).TrimEnd()
+        $row  = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $_.Key,$inst,$lat,$age,$cmd,$url).TrimEnd()
         Write-Host "$clr$row$ColorReset"
 
         # Inline ncu global package sub-rows
@@ -1372,7 +1422,7 @@ function Show-ResultsTable {
                     $pc = if ($pi -eq $pl) { $ColorGreen }
                         elseif (-not $pkg.Installable) { $ColorOrange }
                         else { $ColorYellow }
-                $row = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,-$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $pn,$pi,$pl,$pa,"","").TrimEnd()
+                $row = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $pn,$pi,$pl,$pa,"","").TrimEnd()
                 Write-Host "$pc$row$ColorReset"
             }
         }
@@ -1400,7 +1450,7 @@ function Invoke-ToolCommand {
 
     $isWinget = $Type -like 'winget*' -or $Command -match '^\s*winget(?:\.exe)?\s'
     if (-not $isWinget) {
-        $output = Invoke-Expression $Command 2>&1 | Out-String
+        $output = Invoke-Expression "$Command 2>&1" | Out-String
         return @{ Output = $output; ExitCode = $LASTEXITCODE }
     }
 
@@ -1573,12 +1623,13 @@ function Invoke-ActionMenu {
                         $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $a.Name })
                         $completedIdx += $remaining[$ri].Idx
                     } elseif ($wingetNoUpgrade) {
-                        Write-Warning "Install skipped: $($a.Name) is already installed and no newer package is available."
-                        Write-Warning "Command is not visible in this shell yet — restart it to refresh PATH."
-                        $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $a.Name })
-                        $completedIdx += $remaining[$ri].Idx
+                        $message = "Install could not be verified for $($a.Name). Command: $($a.Command) | Exit code: $exitCode | The package manager reports no applicable package, but '$($cfg.Command)' is not available."
+                        Write-Error $message
+                        $results.Errors += $message
                     } else {
-                        Write-Error "Install failed for $($a.Name): Exit code $exitCode"
+                        $message = "Install failed for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
+                        Write-Error $message
+                        $results.Errors += $message
                     }
                 } elseif ($exitCode -eq 0) {
                     Write-Success "Update completed: $($a.Name)"
@@ -1636,7 +1687,7 @@ function Invoke-ActionMenu {
                         '^1$' {
                             $fallback = "winget upgrade --id=astral-sh.uv -e --silent"
                             Write-Host "Executing: $fallback"
-                            $fbOut = (Invoke-Expression $fallback 2>&1 | Out-String)
+                            $fbOut = (Invoke-Expression "$fallback 2>&1" | Out-String)
                             $fbExit = $LASTEXITCODE
                             if ($fbOut) { Write-Host $fbOut.TrimEnd() }
 
@@ -1670,7 +1721,7 @@ function Invoke-ActionMenu {
                             # recommended way to update in these edge cases.
                             $fallback = 'powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"'
                             Write-Host "Executing: $fallback"
-                            $fbOut = (Invoke-Expression $fallback 2>&1 | Out-String)
+                            $fbOut = (Invoke-Expression "$fallback 2>&1" | Out-String)
                             $fbExit = $LASTEXITCODE
                             if ($fbOut) { Write-Host $fbOut.TrimEnd() }
                             if ($fbExit -eq 0) {
@@ -1766,7 +1817,7 @@ function Invoke-ActionMenu {
                                             Write-Success "Removed previous uv install ($source)."
                                             $install = "winget install --id=astral-sh.uv -e --silent"
                                             Write-Host "Executing: $install"
-                                            $inOut = (Invoke-Expression $install 2>&1 | Out-String)
+                                            $inOut = (Invoke-Expression "$install 2>&1" | Out-String)
                                             $inExit = $LASTEXITCODE
                                             if ($inOut) { Write-Host $inOut.TrimEnd() }
                                             if ($inExit -eq 0) {
@@ -1786,14 +1837,25 @@ function Invoke-ActionMenu {
 
                     if ($installedLatest) {
                         Refresh-ToolVersion -ToolName $a.Name | Out-Null
+                        $results.UpdateFailed = @($results.UpdateFailed | Where-Object { $_ -ne $a.Name })
+                        $completedIdx += $remaining[$ri].Idx
+                    } else {
+                        $message = "Update failed or was skipped for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
+                        if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
+                        $results.Errors += $message
+                        Write-Error $message
                     }
-                    # Mark complete either way so the menu doesn't re-offer it.
-                    $completedIdx += $remaining[$ri].Idx
                 } else {
-                    Write-Error "Update failed for $($a.Name): Exit code $exitCode"
+                    $message = "Update failed for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
+                    Write-Error $message
+                    if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
+                    $results.Errors += $message
                 }
             } catch {
-                Write-Error "$($a.Type) failed for $($a.Name): $_"
+                $message = "$($a.Type) failed for $($a.Name). Command: $($a.Command) | $(Get-DetailedErrorMessage $_)"
+                Write-Error $message
+                if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
+                $results.Errors += $message
             }
             Write-Host ""
             Show-ResultsTable
@@ -1811,8 +1873,16 @@ function Invoke-ForceUpdates {
 
     Write-Host "Running all updates in parallel...`n"
     Invoke-ParallelUpdates -Updates $results.AvailableUpdates
-    foreach ($u in $results.AvailableUpdates) { Refresh-ToolVersion -ToolName $u.Name | Out-Null }
-    Show-ResultsTable; Write-Host "All updates have been installed.`n"
+    foreach ($u in $results.AvailableUpdates | Where-Object { $_.Name -notin $results.UpdateFailed }) {
+        Refresh-ToolVersion -ToolName $u.Name | Out-Null
+    }
+    Show-ResultsTable
+    if ($results.UpdateFailed.Count -gt 0) {
+        Write-Error "$($results.UpdateFailed.Count) update(s) failed or were skipped: $($results.UpdateFailed -join ', ')"
+    } else {
+        Write-Success "All updates were installed successfully."
+    }
+    Write-Host ""
 }
 
 function Invoke-ParallelUpdates {
@@ -1823,21 +1893,34 @@ function Invoke-ParallelUpdates {
     foreach ($u in $Updates) {
         Write-Host "Starting: $($u.Name)"
         $jobs += @{
-            Job = Start-Job -ScriptBlock { param($cmd) Invoke-Expression $cmd 2>&1; return $LASTEXITCODE } -ArgumentList $u.Command
+            Job = Start-Job -ScriptBlock {
+                param($cmd)
+                try {
+                    $output = @(Invoke-Expression "$cmd 2>&1" | ForEach-Object { "$_" })
+                    $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+                    [PSCustomObject]@{ Output = $output; ExitCode = $exitCode; Error = $null }
+                } catch {
+                    [PSCustomObject]@{
+                        Output = @()
+                        ExitCode = 1
+                        Error = "$_ | Exception: $($_.Exception.GetType().FullName)"
+                    }
+                }
+            } -ArgumentList $u.Command
             Update = $u
         }
     }
     Write-Host "`nWaiting for all updates to complete...`n"
 
     foreach ($j in $jobs) {
-        $result = Receive-Job -Job $j.Job -Wait; $state = $j.Job.State
+        $execution = Receive-Job -Job $j.Job -Wait
+        $state = $j.Job.State
+        $result = @()
         if ($state -eq "Completed") {
-            $exitCode = 1
-            if ($result -is [array] -and $result.Count -gt 0 -and $result[-1] -is [int]) {
-                $exitCode = $result[-1]; $result = $result[0..($result.Count-2)]
-            } elseif ($result -is [int]) { $exitCode = $result; $result = @() }
-
-            $outputText = if ($result) { ($result | Out-String) } else { "" }
+            $exitCode = if ($null -ne $execution.ExitCode) { [int]$execution.ExitCode } else { 1 }
+            $result = @($execution.Output)
+            if ($execution.Error) { $result += $execution.Error }
+            $outputText = if ($result.Count -gt 0) { ($result | Out-String) } else { "" }
             $cmd        = $j.Update.Command
             $isWinget   = $j.Update.Type -like 'winget*' -or $cmd -match '(^|\s)winget(\s|$)'
             $wingetNoUpdateCodes = @(-1978335212, -1978335189, -1978335215)
@@ -1856,14 +1939,35 @@ function Invoke-ParallelUpdates {
                 $outputText -match 'failed to replace|failed to rename'
             )
 
-            if ($exitCode -eq 0)          { Write-Success "Completed: $($j.Update.Name)" }
-            elseif ($wingetSoft)          { Write-Warning "Skipped: $($j.Update.Name) — winget has no newer package yet"; if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name } }
-            elseif ($uvInUse)             { Write-Warning "Skipped: $($j.Update.Name) — uv.exe is in use; close other shells or run 'winget upgrade --id=astral-sh.uv -e --silent'" }
-            elseif ($uvSelfUpdateFailed)  { Write-Warning "Skipped: $($j.Update.Name) — 'uv self update' failed (exit $exitCode). If uv was installed by a package manager, run 'winget upgrade --id=astral-sh.uv -e --silent' (or pipx/brew/apt upgrade)" }
-            else                          { Write-Error   "Failed: $($j.Update.Name) (Exit code: $exitCode)" }
+            if ($exitCode -eq 0) {
+                Write-Success "Completed successfully: $($j.Update.Name)"
+            } elseif ($wingetSoft) {
+                $message = "Skipped: $($j.Update.Name) — winget has no newer package yet | Command: $cmd | Exit code: $exitCode"
+                Write-Warning $message
+                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+                $results.Errors += $message
+            } elseif ($uvInUse) {
+                $message = "Failed: $($j.Update.Name) — uv.exe is in use | Command: $cmd | Exit code: $exitCode"
+                Write-Error $message
+                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+                $results.Errors += $message
+            } elseif ($uvSelfUpdateFailed) {
+                $message = "Failed: $($j.Update.Name) — 'uv self update' failed | Command: $cmd | Exit code: $exitCode"
+                Write-Error $message
+                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+                $results.Errors += $message
+            } else {
+                $message = "Failed: $($j.Update.Name) | Command: $cmd | Exit code: $exitCode"
+                Write-Error $message
+                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+                $results.Errors += $message
+            }
             if ($result) { $result | ForEach-Object { Write-Host "  $_" } }
         } else {
-            Write-Error "Failed: $($j.Update.Name)"
+            $message = "Failed: $($j.Update.Name) | Job state: $state | Command: $($j.Update.Command)"
+            Write-Error $message
+            if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+            $results.Errors += $message
             if ($result) { $result | ForEach-Object { Write-Host "  $_" } }
         }
         Remove-Job -Job $j.Job; Write-Host ""
@@ -1887,7 +1991,7 @@ function Invoke-ParallelChecks {
     $scriptContent = Get-Content $PSCommandPath -Raw
     $functionNames = @(
         'Write-Header','Write-Success','Write-Warning','Write-Error',
-        'Test-CommandExists','Get-CommandVersion',
+        'Test-CommandExists','Get-DetailedErrorMessage','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry',
@@ -2112,6 +2216,17 @@ function Main {
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }
     if ($Force)      { Write-Warning "Running with automatic update (no prompts)" }
 
+    $registryLabelWidth = 20
+    Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry source', $script:NpmRegistryResolution.Source)
+    Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry URL', $script:NpmRegistryResolution.Url)
+    if ($script:NpmRegistryResolution.Details) {
+        Write-Warning "Registry resolution detail: $($script:NpmRegistryResolution.Details)"
+    }
+    foreach ($toolName in $toolsConfig.Keys | Where-Object { $toolsConfig[$_].VersionExtractor -eq 'npmDistTagLatest' } | Sort-Object) {
+        Write-Host ("  {0,-$registryLabelWidth}: {1}" -f "$toolName metadata URL", $toolsConfig[$toolName].ApiUrl)
+    }
+    Write-Host ""
+
     # Build check list from JSON — order is preserved
     $checks = @()
     foreach ($toolName in $toolsJson.tools.PSObject.Properties.Name) {
@@ -2171,3 +2286,6 @@ function Main {
 
 # Entry point
 Main
+if ($results.Errors.Count -gt 0 -or $results.UpdateFailed.Count -gt 0) {
+    exit 1
+}

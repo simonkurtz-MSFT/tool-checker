@@ -170,6 +170,22 @@
         "Linux (arm64)": "curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS --architecture arm64"
       }
     },
+    "Python Install Manager (py)": {
+      "enabled": true,
+      "CheckType": "custom",
+      "ProductionReleasesOnly": true,
+      "CustomFunction": "Test-PythonInstallManager",
+      "Command": "py",
+      "PackageName": "PythonSoftwareFoundation.PythonManager",
+      "WingetId": "Python.PythonInstallManager",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget install --id Python.PythonInstallManager -e --source winget --silent --disable-interactivity",
+      "ReleaseNotesUrl": "https://github.com/python/pymanager/releases",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id Python.PythonInstallManager -e --source winget --silent --disable-interactivity",
+        "Windows (arm64)": "winget install --id Python.PythonInstallManager -e --source winget --silent --disable-interactivity"
+      }
+    },
     "Python": {
       "enabled": true,
       "CheckType": "custom",

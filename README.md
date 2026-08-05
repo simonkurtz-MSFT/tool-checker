@@ -7,7 +7,7 @@ The included configuration checks:
 - Node.js and global npm packages
 - npm-check-updates (`ncu`), pnpm, Deno, and uv
 - Azure CLI, Azure CLI extensions, and Bicep
-- .NET SDKs and Python installations
+- .NET SDKs, Python Install Manager (`py`), and Python installations
 - Git, GitHub CLI, and ripgrep
 - WSL and PowerShell
 

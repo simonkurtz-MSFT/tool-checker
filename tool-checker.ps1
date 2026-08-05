@@ -36,7 +36,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.0.1'
+$script:ToolCheckerVersion = '1.0.2'
 $script:NpmUpdateCooldownDays = 7
 
 if ($Version) {
@@ -1070,6 +1070,64 @@ function Test-DotNetSDKs {
     }
 }
 
+# --- Python Install Manager: Windows AppX package behind py -----------------
+
+function Test-PythonInstallManager {
+    param([string]$Progress)
+    $toolName = "Python Install Manager (py)"
+    $config = $toolsConfig[$toolName]
+    Write-Header "Checking $toolName" -Progress $Progress
+
+    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+        Write-Warning "$toolName check skipped: Windows only"
+        return
+    }
+
+    $package = Get-AppxPackage -Name $config.PackageName -ErrorAction SilentlyContinue |
+        Sort-Object Version -Descending |
+        Select-Object -First 1
+    if (-not $package) {
+        Write-Error "$toolName not installed"
+        Add-NotInstalledTool $toolName
+        return
+    }
+
+    $installedVersion = $package.Version.ToString()
+    Write-Success "$toolName installed: $installedVersion"
+    $results.Tools[$toolName] = @{ Installed = $installedVersion; Latest = "" }
+
+    if ($SkipUpdate) { return }
+    if (-not (Test-CommandExists "winget")) {
+        Write-Warning "Could not check $toolName updates: winget not found"
+        return
+    }
+
+    Write-Host "  Checking for $toolName updates..."
+    try {
+        $metadata = @(& winget show --id $config.WingetId -e --source winget --accept-source-agreements --disable-interactivity 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget show exited with code $LASTEXITCODE. Output: $($metadata -join ' ')"
+        }
+        $metadataText = $metadata -join "`n"
+        if ($metadataText -notmatch '(?m)^Version:\s*(\S+)\s*$') {
+            throw "Could not parse the package version from winget output."
+        }
+
+        $latestVersion = $Matches[1]
+        $results.Tools[$toolName].Latest = $latestVersion
+        if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
+            Write-Warning "  $toolName has available updates: $installedVersion -> $latestVersion"
+            $results.Updates += $toolName
+            Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
+            $results.AvailableUpdates += New-UpdateEntry -ToolName $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
+        } else {
+            Write-Success "$toolName is up to date"
+        }
+    } catch {
+        Write-Warning "  Could not check $toolName updates: $_"
+    }
+}
+
 # --- Python: multiple installed versions via py launcher --------------------
 
 function Test-Python {
@@ -1997,7 +2055,7 @@ function Invoke-ParallelChecks {
         'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
         'Test-NodeJS','Test-NCUGlobal','Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
-        'Test-AzureExtensions','Test-DotNetSDKs','Test-Python',
+        'Test-AzureExtensions','Test-DotNetSDKs','Test-PythonInstallManager','Test-Python',
         'Get-PythonUpdateViaPy','Get-PythonUpdateConventional','Test-WSL','Test-PowerShell'
     )
     # Parse function blocks from source using the PS AST

@@ -1404,7 +1404,10 @@ function Show-ResultsTable {
     # Column widths
     $maxName = ($results.Tools.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
     $maxInst = ($results.Tools.Values | ForEach-Object { $_.Installed.Length } | Measure-Object -Maximum).Maximum
-    $maxLat  = ($results.Tools.Values | ForEach-Object { $_.Latest.Length } | Measure-Object -Maximum).Maximum
+    $maxLat  = ($results.Tools.Values | ForEach-Object {
+        if (-not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Latest)) { "unknown".Length }
+        else { $_.Latest.Length }
+    } | Measure-Object -Maximum).Maximum
     $ageLabels = @($results.Tools.Values | Where-Object { $null -ne $_.AgeDays } | ForEach-Object { "$($_.AgeDays)d" })
     $ageLabels += @($results.GlobalNpmPackageUpdates | Where-Object { $null -ne $_.AgeDays } | ForEach-Object { "$($_.AgeDays)d" })
     $maxAge = if ($ageLabels.Count -gt 0) { ($ageLabels | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum } else { 0 }
@@ -1454,15 +1457,19 @@ function Show-ResultsTable {
     }
 
     $sorted | ForEach-Object {
-        $inst = $_.Value.Installed; $lat = if ($_.Value.Latest) { $_.Value.Latest } else { "-" }
-        $currentOrNewer = $lat -ne "-" -and (Compare-SemanticVersions $inst $lat) -ge 0
+        $inst = $_.Value.Installed
+        $latestUnknown = -not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Value.Latest)
+        $lat = if ($latestUnknown) { "unknown" } elseif ($_.Value.Latest) { $_.Value.Latest } else { "-" }
+        $currentOrNewer = -not $latestUnknown -and $lat -ne "-" -and (Compare-SemanticVersions $inst $lat) -ge 0
         $age  = if (-not $currentOrNewer -and $null -ne $_.Value.AgeDays) { "$($_.Value.AgeDays)d" } else { "-" }
-        $cmd  = Get-UpdateCommand -ToolName $_.Key -Installed $inst -Latest $lat
+        $cmd  = Get-UpdateCommand -ToolName $_.Key -Installed $inst -Latest $_.Value.Latest
         # Only show release notes for tools with a pending update/install
         $url  = if ($cmd -or $_.Key -in $actionableNames) { Get-ReleaseNotesUrl -ToolName $_.Key } else { "" }
         $hi   = $_.Value.HighestInstalled
-        $covered = $hi -and [version]$hi -ge [version]$lat
+        $covered = -not $latestUnknown -and $hi -and [version]$hi -ge [version]$lat
         $clr  = if ($_.Key -in $results.UpdateFailed) { $ColorRed }
+            elseif ($_.Value.CheckTimedOut) { $ColorRed }
+            elseif ($latestUnknown) { $ColorYellow }
             elseif ($lat -eq "-" -or $currentOrNewer -or $covered) { $ColorGreen }
             elseif ($_.Key -in $results.MaturityBlockedUpdates.Name) { $ColorOrange }
                 else { $ColorYellow }
@@ -2210,12 +2217,12 @@ $ColorBlue   = $Global:ColorBlue
                 # Kill the runspace that exceeded the timeout
                 $job.PS.Stop()
                 $job.PS.Dispose()
-                $results.Errors += "$($job.Name) check timed out after ${TimeoutSec}s"
                 # Provide a minimal result so the merge loop can handle it
                 $collectedResults[$job.Index] = @{
                     Index = $job.Index
                     Output = @("", "$ColorRed  ✗ $($job.Name) check timed out after ${TimeoutSec}s$ColorReset")
-                    Tools = @{}; DotNetSDKs = @{}; NotInstalled = @()
+                    Tools = @{ $job.Name = @{ Installed = "unknown"; Latest = ""; CheckTimedOut = $true } }
+                    DotNetSDKs = @{}; NotInstalled = @()
                     Updates = @(); Errors = @("$($job.Name) check timed out after ${TimeoutSec}s")
                     AvailableUpdates = @(); UpdateFailed = @()
                     MaturityBlockedUpdates = @()
@@ -2308,7 +2315,7 @@ function Main {
     Write-Host ""
     Write-Host ""
     Write-Host "  npm release cooldown: $script:NpmUpdateCooldownDays full days"
-    Write-Host "  $ColorYellow■ Installable update$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
+    Write-Host "  $ColorYellow■ Installable update / latest unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
     Write-Header "Summary"
     Show-ResultsTable
 

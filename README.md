@@ -181,11 +181,11 @@ Custom checker functions must accept a `Progress` string and must be included in
 
 ## Output and behavior
 
-- Green rows are installed and current, or have no update information.
-- Yellow rows have an actionable install or update.
+- Green rows are installed and current, or were run in check-only mode without an update lookup.
+- Yellow rows have an actionable install or update, or the latest version could not be determined.
 - Orange rows identify npm releases still in cooldown.
-- Red rows identify failed updates or missing tools.
-- A timed-out check is stopped and reported without preventing other checks from completing.
+- Red rows identify failed updates, missing tools, or checks that timed out before inventory completed.
+- A timed-out check is stopped and reported without preventing other checks from completing. A whole-check timeout shows `unknown` in red; an installed tool whose latest-version lookup did not complete shows `unknown` in yellow rather than appearing current.
 - After an interactive action, Tool Checker refreshes the displayed version when a refresh handler is available.
 
 Release APIs and package catalogs can disagree temporarily. In particular, WinGet may publish a release later than the upstream project. Tool Checker treats known "no applicable upgrade" responses as a retry-later condition rather than a successful update.

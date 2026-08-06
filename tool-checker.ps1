@@ -36,7 +36,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.0.2'
+$script:ToolCheckerVersion = '1.0.3'
 $script:NpmUpdateCooldownDays = 7
 
 if ($Version) {

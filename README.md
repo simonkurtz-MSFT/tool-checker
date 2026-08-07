@@ -190,6 +190,8 @@ Custom checker functions must accept a `Progress` string and must be included in
 
 Release APIs and package catalogs can disagree temporarily. In particular, WinGet may publish a release later than the upstream project. Tool Checker treats known "no applicable upgrade" responses as a retry-later condition rather than a successful update.
 
+On Windows, uv installs and updates use one non-interactive WinGet path. Before installing, Tool Checker removes a registered WinGet copy, detected pipx or Cargo copies, and leftover `uv`, `uvx`, and `uvw` binaries from the current user's `.local\bin` and `.cargo\bin` directories. It then performs a clean WinGet install. This standardizes future updates without deleting uv's cache, managed Python installations, or installed tools. On Linux, uv continues to use Astral's standalone installer and `uv self update`.
+
 ## License
 
 Licensed under the terms in [`LICENSE`](LICENSE).

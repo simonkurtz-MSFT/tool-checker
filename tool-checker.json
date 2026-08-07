@@ -96,8 +96,8 @@
       "ReleaseNotesUrl": "https://github.com/astral-sh/uv/releases",
       "ApiUrl": "https://api.github.com/repos/astral-sh/uv/releases/latest",
       "InstallCommands": {
-        "Windows (amd64)": "winget install --id=astral-sh.uv -e --silent",
-        "Windows (arm64)": "winget install --id=astral-sh.uv -e --silent",
+        "Windows (amd64)": "winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force",
+        "Windows (arm64)": "winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force",
         "Linux (amd64)": "curl -LsSf https://astral.sh/uv/install.sh | sh",
         "Linux (arm64)": "curl -LsSf https://astral.sh/uv/install.sh | sh"
       }

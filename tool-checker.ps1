@@ -405,7 +405,12 @@ function Get-StandardToolUpdates {
                 Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
                 $results.Updates += $ToolName
                 $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-                $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+                $updateCommand = if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+                    'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+                } else {
+                    $config.UpdateCommand
+                }
+                $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
             } else {
                 Write-Success "$ToolName is up to date"
             }
@@ -453,7 +458,9 @@ function Get-StandardToolUpdates {
                 }
             } elseif (-not $SkipUpdate) {
                 $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-                $updateCommand = if ($isNpmPackage) {
+                $updateCommand = if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+                    'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+                } elseif ($isNpmPackage) {
                     $config.UpdateCommand.Replace("$($config.NpmPackageName)@latest", "$($config.NpmPackageName)@$latestVersion")
                 } else {
                     $config.UpdateCommand
@@ -1378,6 +1385,9 @@ function Get-UpdateCommand {
             if ($null -eq $ageDays -or $ageDays -lt $script:NpmUpdateCooldownDays) { return "" }
             return $config.UpdateCommand.Replace("$($config.NpmPackageName)@latest", "$($config.NpmPackageName)@$Latest")
         }
+        if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+            return 'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+        }
         return $config.UpdateCommand
     }
 
@@ -1664,12 +1674,21 @@ function Invoke-ActionMenu {
                 continue
             }
 
-            Write-Host "Executing: $($a.Command)"
+            $isUvWindowsAction = $a.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')
+            if ($isUvWindowsAction) {
+                Write-Host 'Executing: standardize uv via winget (cleanup + install)'
+            } else {
+                Write-Host "Executing: $($a.Command)"
+            }
             try {
                 # WinGet emits terminal progress controls that become noisy text
                 # when captured through the PowerShell pipeline. Run it as a
                 # native process with file redirection, then read its final output.
-                $execution  = Invoke-ToolCommand -Command $a.Command -Type $a.Type
+                $execution = if ($isUvWindowsAction) {
+                    Invoke-UvWindowsInstall
+                } else {
+                    Invoke-ToolCommand -Command $a.Command -Type $a.Type
+                }
                 $outputText = $execution.Output
                 $exitCode   = $execution.ExitCode
                 if ($outputText) { Write-Host $outputText.TrimEnd() }
@@ -1690,31 +1709,6 @@ function Invoke-ActionMenu {
                     $outputText -match 'No newer package version(s)? found' -or
                     $outputText -match 'No available upgrade found' -or
                     $outputText -match 'No installed package found matching'
-                )
-
-                # `uv self update` has two well-known failure modes:
-                #  - The running uv.exe is in use and cannot be replaced.
-                #  - uv was installed by a package manager (winget/MSI/pipx/
-                #    brew/apt), so uv refuses to self-update (exit code 2).
-                # The exact message varies across uv versions, and stderr from
-                # native binaries captured via `2>&1` can arrive as ErrorRecord
-                # objects whose string form differs from what the user sees.
-                # So: any non-zero exit from `uv self update` triggers the
-                # remediation flow. We still classify in-use vs externally-
-                # managed for a better message when we can recognize it.
-                $isUvSelfUpdate      = $a.Command -match '^\s*uv\s+self\s+update\b'
-                $uvSelfUpdateFailed  = $isUvSelfUpdate -and $exitCode -ne 0
-                $uvInUse = $uvSelfUpdateFailed -and (
-                    $outputText -match 'being used by another process' -or
-                    $outputText -match 'Access is denied' -or
-                    $outputText -match 'os error 32' -or
-                    $outputText -match 'failed to replace|failed to rename|cannot (?:replace|rename).*uv(?:\.exe)?'
-                )
-                $uvExternallyManaged = $uvSelfUpdateFailed -and -not $uvInUse -and (
-                    $outputText -match 'self.?update' -or
-                    $outputText -match 'package manager|winget|homebrew|apt|pipx|brew|msi' -or
-                    $outputText -match 'external(?:ly)? managed' -or
-                    $outputText -match 'standalone install(?:er|ation)'
                 )
 
                 if ($a.Type -eq "install") {
@@ -1758,204 +1752,6 @@ function Invoke-ActionMenu {
                     Write-Host "  trails upstream publishing by hours or days. Try again later."
                     Write-Host "  Release notes: $(Get-ReleaseNotesUrl -ToolName $a.Name)"
                     if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
-                } elseif ($uvSelfUpdateFailed) {
-                    if ($uvInUse) {
-                        Write-Warning "uv self update could not replace uv: the executable is in use."
-                        Write-Host "  This happens when another shell, editor, or language server is"
-                        Write-Host "  holding uv.exe open. Options:"
-                        Write-Host "    1) Close other terminals / VS Code Python extensions and retry."
-                        Write-Host "    2) Run 'winget upgrade --id=astral-sh.uv -e --silent' instead"
-                        Write-Host "       (winget replaces the binary atomically)."
-                    } elseif ($uvExternallyManaged) {
-                        Write-Warning "uv self update is disabled: uv was installed by a package manager."
-                        Write-Host "  'uv self update' only works for the standalone installer build."
-                        Write-Host "  Update through whichever package manager installed uv:"
-                        Write-Host "    winget:   winget upgrade --id=astral-sh.uv -e --silent"
-                        Write-Host "    pipx:     pipx upgrade uv"
-                        Write-Host "    brew:     brew upgrade uv"
-                        Write-Host "    apt:      sudo apt update && sudo apt install --only-upgrade uv"
-                    } else {
-                        Write-Warning "uv self update failed (exit code $exitCode)."
-                        Write-Host "  The two common causes are:"
-                        Write-Host "    1) uv.exe is in use by another shell / editor / language server."
-                        Write-Host "    2) uv was installed by a package manager (winget, pipx, brew, apt)"
-                        Write-Host "       — in which case 'uv self update' is disabled and you need to"
-                        Write-Host "       update through that manager instead."
-                        Write-Host "  For Windows installs the reliable fix is winget:"
-                        Write-Host "    winget upgrade --id=astral-sh.uv -e --silent"
-                    }
-                    Write-Host ""
-                    Write-Host "  Remediation options:"
-                    Write-Host "    [1] Run winget upgrade  (winget upgrade --id=astral-sh.uv -e --silent)"
-                    Write-Host "    [2] Run uv standalone installer (authoritative — replaces uv.exe"
-                    Write-Host "        regardless of how it was originally installed)"
-                    Write-Host "    [3] Remove non-winget uv and reinstall via winget (standardize)"
-                    Write-Host "    [0] Skip"
-                    $resp = Read-Host "  Choose"
-
-                    $installedLatest = $false
-                    switch -Regex ($resp) {
-                        '^1$' {
-                            $fallback = "winget upgrade --id=astral-sh.uv -e --silent"
-                            Write-Host "Executing: $fallback"
-                            $fbOut = (Invoke-Expression "$fallback 2>&1" | Out-String)
-                            $fbExit = $LASTEXITCODE
-                            if ($fbOut) { Write-Host $fbOut.TrimEnd() }
-
-                            # Known winget "no applicable upgrade" exit codes
-                            # (0x8A150014 and friends, reported as signed ints).
-                            # See https://github.com/microsoft/winget-cli/blob/master/doc/windows/package-manager/winget/returnCodes.md
-                            $wingetNoUpdateCodes = @(-1978335212, -1978335189, -1978335215)
-                            $fbSoft = ($fbExit -in $wingetNoUpdateCodes) -or (
-                                $fbOut -match 'No applicable upgrade found' -or
-                                $fbOut -match 'No newer package version(s)? found' -or
-                                $fbOut -match 'No available upgrade found' -or
-                                $fbOut -match 'No installed package found matching'
-                            )
-
-                            if ($fbExit -eq 0) {
-                                Write-Success "Update completed via winget: $($a.Name)"
-                                $installedLatest = $true
-                            } elseif ($fbSoft) {
-                                Write-Warning "winget has no newer uv package than what's installed."
-                                Write-Host "  This usually means uv was installed outside winget, or"
-                                Write-Host "  winget's catalog is behind upstream. Try option [2]"
-                                Write-Host "  (standalone installer) or [3] (standardize on winget)."
-                                Write-Host "  Release notes: $(Get-ReleaseNotesUrl -ToolName $a.Name)"
-                            } else {
-                                Write-Error "winget fallback failed for $($a.Name): Exit code $fbExit"
-                            }
-                        }
-                        '^2$' {
-                            # uv's official standalone installer — works regardless
-                            # of how uv was originally installed and is the upstream-
-                            # recommended way to update in these edge cases.
-                            $fallback = 'powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"'
-                            Write-Host "Executing: $fallback"
-                            $fbOut = (Invoke-Expression "$fallback 2>&1" | Out-String)
-                            $fbExit = $LASTEXITCODE
-                            if ($fbOut) { Write-Host $fbOut.TrimEnd() }
-                            if ($fbExit -eq 0) {
-                                Write-Success "Update completed via uv standalone installer: $($a.Name)"
-                                Write-Warning "You may need to restart your shell for the new uv to take effect."
-                                $installedLatest = $true
-                            } else {
-                                Write-Error "Standalone installer failed for $($a.Name): Exit code $fbExit"
-                            }
-                        }
-                        '^3$' {
-                            # Detect, remove, and reinstall via winget so future
-                            # updates go through a single, predictable path.
-                            $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
-                            if (-not $uvCmd) {
-                                Write-Warning "uv is not on PATH; cannot determine install location."
-                            } else {
-                                $uvPath = $uvCmd.Source
-                                Write-Host "  uv is installed at: $uvPath"
-
-                                # Classify the install by path. The winget-managed
-                                # location is under WindowsApps, so anything else
-                                # is fair game to remove.
-                                $localAppDataWingetRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
-                                $windowsApps            = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
-                                $isWingetManaged        = $uvPath -like "$localAppDataWingetRoot*" -or $uvPath -like "$windowsApps*"
-
-                                $standaloneBin = Join-Path $env:USERPROFILE '.local\bin'
-                                $cargoBin      = Join-Path $env:USERPROFILE '.cargo\bin'
-
-                                $source =
-                                    if     ($isWingetManaged)                 { 'winget' }
-                                    elseif ($uvPath -like "$standaloneBin*")  { 'standalone' }
-                                    elseif ($uvPath -like "$cargoBin*")       { 'cargo' }
-                                    elseif ($uvPath -match '\\pipx\\')        { 'pipx' }
-                                    else                                      { 'unknown' }
-
-                                Write-Host "  Detected install source: $source"
-
-                                if ($isWingetManaged) {
-                                    Write-Warning "uv is already winget-managed; nothing to standardize."
-                                } else {
-                                    $confirm = Read-Host "  Remove the $source install and reinstall via winget? [y/N]"
-                                    if ($confirm -match '^(y|yes)$') {
-                                        $removed = $false
-                                        try {
-                                            switch ($source) {
-                                                'standalone' {
-                                                    foreach ($bin in @('uv.exe','uvx.exe')) {
-                                                        $p = Join-Path $standaloneBin $bin
-                                                        if (Test-Path $p) {
-                                                            Write-Host "  Removing $p"
-                                                            Remove-Item -Path $p -Force -ErrorAction Stop
-                                                        }
-                                                    }
-                                                    $removed = $true
-                                                }
-                                                'cargo' {
-                                                    # `cargo uninstall` is the clean way, but falling
-                                                    # back to a plain delete covers cargo-less machines.
-                                                    if (Get-Command cargo -ErrorAction SilentlyContinue) {
-                                                        Write-Host "  Executing: cargo uninstall uv"
-                                                        cargo uninstall uv 2>&1 | ForEach-Object { Write-Host "  $_" }
-                                                    }
-                                                    foreach ($bin in @('uv.exe','uvx.exe')) {
-                                                        $p = Join-Path $cargoBin $bin
-                                                        if (Test-Path $p) {
-                                                            Write-Host "  Removing $p"
-                                                            Remove-Item -Path $p -Force -ErrorAction Stop
-                                                        }
-                                                    }
-                                                    $removed = $true
-                                                }
-                                                'pipx' {
-                                                    if (Get-Command pipx -ErrorAction SilentlyContinue) {
-                                                        Write-Host "  Executing: pipx uninstall uv"
-                                                        pipx uninstall uv 2>&1 | ForEach-Object { Write-Host "  $_" }
-                                                        $removed = ($LASTEXITCODE -eq 0)
-                                                    } else {
-                                                        Write-Warning "pipx is not on PATH; cannot uninstall automatically."
-                                                    }
-                                                }
-                                                default {
-                                                    Write-Warning "Unrecognized install location — please uninstall manually:"
-                                                    Write-Host "    $uvPath"
-                                                }
-                                            }
-                                        } catch {
-                                            Write-Error "Failed to remove existing uv: $_"
-                                        }
-
-                                        if ($removed) {
-                                            Write-Success "Removed previous uv install ($source)."
-                                            $install = "winget install --id=astral-sh.uv -e --silent"
-                                            Write-Host "Executing: $install"
-                                            $inOut = (Invoke-Expression "$install 2>&1" | Out-String)
-                                            $inExit = $LASTEXITCODE
-                                            if ($inOut) { Write-Host $inOut.TrimEnd() }
-                                            if ($inExit -eq 0) {
-                                                Write-Success "uv reinstalled via winget."
-                                                Write-Warning "Open a new shell so PATH picks up the winget-managed uv."
-                                                $installedLatest = $true
-                                            } else {
-                                                Write-Error "winget install failed: Exit code $inExit"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        default { }
-                    }
-
-                    if ($installedLatest) {
-                        Refresh-ToolVersion -ToolName $a.Name | Out-Null
-                        $results.UpdateFailed = @($results.UpdateFailed | Where-Object { $_ -ne $a.Name })
-                        $completedIdx += $remaining[$ri].Idx
-                    } else {
-                        $message = "Update failed or was skipped for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
-                        if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
-                        $results.Errors += $message
-                        Write-Error $message
-                    }
                 } else {
                     $message = "Update failed for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
                     Write-Error $message
@@ -2002,6 +1798,22 @@ function Invoke-ParallelUpdates {
 
     $jobs = @()
     foreach ($u in $Updates) {
+        if ($u.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+            Write-Host 'Starting: uv (cleanup + winget install)'
+            $execution = Invoke-UvWindowsInstall
+            if ($execution.Output) { Write-Host $execution.Output.TrimEnd() }
+            if ($execution.ExitCode -eq 0) {
+                Write-Success 'Completed successfully: uv'
+            } else {
+                $message = "Failed: uv cleanup and winget install | Exit code: $($execution.ExitCode)"
+                Write-Error $message
+                if ('uv' -notin $results.UpdateFailed) { $results.UpdateFailed += 'uv' }
+                $results.Errors += $message
+            }
+            Write-Host ''
+            continue
+        }
+
         Write-Host "Starting: $($u.Name)"
         $jobs += @{
             Job = Start-Job -ScriptBlock {

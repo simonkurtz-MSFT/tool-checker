@@ -2,7 +2,7 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Version `1.1.0` also checks package registry configuration for npm, pnpm, pip, and NuGet against an optional local `.env` policy. Misaligned registries are reported and are changed only after explicit user selection.
+Version `1.1.0` added package registry configuration checks for npm, pnpm, pip, uv, and NuGet against an optional local `.env` policy. Misaligned registries are reported and are changed only after explicit user selection.
 
 The included configuration checks:
 
@@ -84,12 +84,19 @@ Tool Checker executes the commands shown in the summary or action menu. Review [
 Copy [`.env.example`](.env.example) to `.env`, then uncomment only the registries the checker should enforce. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
 
 - `NPM_CONFIG_REGISTRY`: checks the npm user registry; repairs it with `npm config set registry <url> --location=user`.
-- `PNPM_CONFIG_REGISTRY`: checks the pnpm global registry; repairs it with `pnpm config set registry <url> --global`.
+- `PNPM_CONFIG_REGISTRY`: checks the pnpm global registry; repairs it with `pnpm config set registry <url> --location=global`. The location form avoids pnpm's unrelated global executable-directory validation.
 - `PIP_INDEX_URL`: checks pip's user `global.index-url`; repairs it with `<python> -m pip config --user set global.index-url <url>`.
+- `UV_DEFAULT_INDEX`: checks uv's user-level default index; repairs it as `index-url` in uv's user `uv.toml` configuration file. Tool Checker also migrates the invalid `default-index` key written by versions 1.1.0 and 1.1.1.
 - `NUGET_SOURCE_NAME`: identifies the NuGet source to check and defaults to `nuget.org`.
 - `NUGET_SOURCE_URL`: checks the named NuGet source URL; repairs it with `dotnet nuget update source` or `dotnet nuget add source`.
 
 Missing variables are ignored. The checker masks credentials embedded in registry URLs when displaying drift or actions. Keep `.env` local and restrict its filesystem permissions if it contains credentials.
+
+For pip, Tool Checker selects an installed interpreter that provides pip. On Windows it explicitly targets the global Python 3 installation through `py -V:3`, preventing an active project virtual environment from intercepting user-level registry checks or repairs.
+
+uv lock files contain exact package and artifact URLs. After changing `UV_DEFAULT_INDEX`, regenerate an existing lock with `uv lock` and commit the reviewed lock-file changes. `uv sync --locked` intentionally continues using the URLs already recorded in `uv.lock`; changing the user registry alone does not rewrite a lock file.
+
+Before regenerating a lock, verify that the proxy exposes all metadata required by the project. In particular, projects that enforce uv's `exclude-newer` policy need artifact upload timestamps, and projects using PEP 658 metadata need every advertised metadata URL to be reachable. As of August 2026, Microsoft's PyPI proxy does not provide artifact upload timestamps and can advertise metadata URLs on `files.pythonhosted.org`. Consequently, registry alignment alone cannot repair `uv sync --locked` for APIM-Samples: preserve its existing lock file and resolve access to `files.pythonhosted.org`, or have the proxy corrected upstream without weakening the repository's dependency-age policy.
 
 Registry alignment is intentionally approval-gated. In a normal run, each misaligned registry appears as an `Align ... registry` action. `-SkipUpdate` reports drift without offering a repair. `-Force` may apply tool updates automatically, but registry repairs still require an explicit action-menu selection.
 

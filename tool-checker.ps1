@@ -41,7 +41,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.1.0'
+$script:ToolCheckerVersion = '1.1.1'
 $script:NpmUpdateCooldownDays = 7
 
 if ($Version) {
@@ -248,10 +248,74 @@ function Invoke-RegistryCommand {
 }
 
 function Get-PythonCommand {
-    if (Test-CommandExists 'py') { return [PSCustomObject]@{ Command = 'py'; Prefix = @('-m', 'pip') } }
-    if (Test-CommandExists 'python') { return [PSCustomObject]@{ Command = 'python'; Prefix = @('-m', 'pip') } }
-    if (Test-CommandExists 'python3') { return [PSCustomObject]@{ Command = 'python3'; Prefix = @('-m', 'pip') } }
+    $candidates = @()
+    if (Test-CommandExists 'py') {
+        $candidates += [PSCustomObject]@{ Command = 'py'; Prefix = @('-V:3', '-m', 'pip') }
+        $candidates += [PSCustomObject]@{ Command = 'py'; Prefix = @('-m', 'pip') }
+    }
+    if (Test-CommandExists 'python') {
+        $candidates += [PSCustomObject]@{ Command = 'python'; Prefix = @('-m', 'pip') }
+    }
+    if (Test-CommandExists 'python3') {
+        $candidates += [PSCustomObject]@{ Command = 'python3'; Prefix = @('-m', 'pip') }
+    }
+
+    foreach ($candidate in $candidates) {
+        $probe = Invoke-RegistryCommand -Command $candidate.Command -Arguments (@($candidate.Prefix) + @('--version'))
+        if ($probe.ExitCode -eq 0) { return $candidate }
+    }
     $null
+}
+
+function Get-UvUserConfigPath {
+    if ($IsWindows) {
+        return Join-Path $env:APPDATA 'uv\uv.toml'
+    }
+    $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+    Join-Path $configHome 'uv/uv.toml'
+}
+
+function Get-UvDefaultIndex {
+    $configPath = Get-UvUserConfigPath
+    if (-not (Test-Path -LiteralPath $configPath)) { return '' }
+
+    foreach ($line in Get-Content -LiteralPath $configPath) {
+        if ($line -match '^\s*(?:index-url|default-index)\s*=\s*["''](.*)["'']\s*(?:#.*)?$') {
+            return $Matches[1]
+        }
+    }
+    ''
+}
+
+function Set-UvDefaultIndex {
+    param([string]$IndexUrl)
+
+    try {
+        $configPath = Get-UvUserConfigPath
+        $configDirectory = Split-Path -Parent $configPath
+        if (-not (Test-Path -LiteralPath $configDirectory)) {
+            New-Item -ItemType Directory -Path $configDirectory -Force -ErrorAction Stop | Out-Null
+        }
+
+        $setting = "index-url = $($IndexUrl | ConvertTo-Json -Compress)"
+        $lines = if (Test-Path -LiteralPath $configPath) { @(Get-Content -LiteralPath $configPath) } else { @() }
+        $settingWritten = $false
+        $updatedLines = foreach ($line in $lines) {
+            if ($line -match '^\s*(?:index-url|default-index)\s*=') {
+                if (-not $settingWritten) {
+                    $setting
+                    $settingWritten = $true
+                }
+                continue
+            }
+            $line
+        }
+        if (-not $settingWritten) { $updatedLines = @($setting) + @($updatedLines) }
+        Set-Content -LiteralPath $configPath -Value $updatedLines -Encoding utf8 -ErrorAction Stop
+        [PSCustomObject]@{ Output = "Configured uv index URL in $configPath"; ExitCode = 0 }
+    } catch {
+        [PSCustomObject]@{ Output = Get-DetailedErrorMessage $_; ExitCode = 1 }
+    }
 }
 
 function Get-NuGetSource {
@@ -315,6 +379,8 @@ function Test-RegistryConfiguration {
     param([System.Collections.IDictionary]$EnvironmentConfig)
 
     Write-Header 'Registry Configuration'
+    Write-Host ""
+
     if ($EnvironmentConfig.Count -eq 0) {
         Write-Host "  No registry policy loaded from $EnvFile"
         Write-Host '  Copy .env.example to .env and uncomment the registries you want to enforce.'
@@ -331,7 +397,7 @@ function Test-RegistryConfiguration {
     }
     if ($EnvironmentConfig.Contains('PNPM_CONFIG_REGISTRY')) {
         if (Test-CommandExists 'pnpm') {
-            $current = (Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'get', 'registry')).Output
+            $current = (Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'get', 'registry', '--location=global')).Output
             Add-RegistryCheck -Key 'pnpm' -Name 'pnpm' -Current $current -Expected $EnvironmentConfig.PNPM_CONFIG_REGISTRY
         } else {
             Add-RegistryCheck -Key 'pnpm' -Name 'pnpm' -Expected $EnvironmentConfig.PNPM_CONFIG_REGISTRY -Details 'pnpm is not installed'
@@ -344,7 +410,14 @@ function Test-RegistryConfiguration {
             $current = if ($query.ExitCode -eq 0) { $query.Output } else { '' }
             Add-RegistryCheck -Key 'pip' -Name 'pip' -Current $current -Expected $EnvironmentConfig.PIP_INDEX_URL
         } else {
-            Add-RegistryCheck -Key 'pip' -Name 'pip' -Expected $EnvironmentConfig.PIP_INDEX_URL -Details 'Python is not installed'
+            Add-RegistryCheck -Key 'pip' -Name 'pip' -Expected $EnvironmentConfig.PIP_INDEX_URL -Details 'No installed Python interpreter provides pip'
+        }
+    }
+    if ($EnvironmentConfig.Contains('UV_DEFAULT_INDEX')) {
+        if (Test-CommandExists 'uv') {
+            Add-RegistryCheck -Key 'uv' -Name 'uv' -Current (Get-UvDefaultIndex) -Expected $EnvironmentConfig.UV_DEFAULT_INDEX
+        } else {
+            Add-RegistryCheck -Key 'uv' -Name 'uv' -Expected $EnvironmentConfig.UV_DEFAULT_INDEX -Details 'uv is not installed'
         }
     }
     if ($EnvironmentConfig.Contains('NUGET_SOURCE_URL')) {
@@ -363,8 +436,8 @@ function Test-RegistryConfiguration {
     foreach ($check in $results.RegistryChecks) {
         $color = if ($check.Status -eq 'Aligned') { $ColorGreen } elseif ($check.Status -eq 'Misaligned') { $ColorYellow } else { $ColorRed }
         Write-Host "  $color$($check.Name): $($check.Status)$ColorReset"
-        Write-Host "    Current : $(Protect-RegistryUrl $check.Current)"
-        Write-Host "    Expected: $(Protect-RegistryUrl $check.Expected)"
+        Write-Host "    Current  : $(Protect-RegistryUrl $check.Current)"
+        Write-Host "    Expected : $(Protect-RegistryUrl $check.Expected)"
         if ($check.Details) { Write-Host "    Detail  : $($check.Details)" }
     }
 }
@@ -377,12 +450,15 @@ function Set-RegistryConfiguration {
             Invoke-RegistryCommand -Command 'npm' -Arguments @('config', 'set', 'registry', $EnvironmentConfig.NPM_CONFIG_REGISTRY, '--location=user')
         }
         'pnpm' {
-            Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'set', 'registry', $EnvironmentConfig.PNPM_CONFIG_REGISTRY, '--global')
+            Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'set', 'registry', $EnvironmentConfig.PNPM_CONFIG_REGISTRY, '--location=global')
         }
         'pip' {
             $python = Get-PythonCommand
-            if (-not $python) { return [PSCustomObject]@{ Output = 'Python is not installed'; ExitCode = 1 } }
+            if (-not $python) { return [PSCustomObject]@{ Output = 'No installed Python interpreter provides pip'; ExitCode = 1 } }
             Invoke-RegistryCommand -Command $python.Command -Arguments (@($python.Prefix) + @('config', '--user', 'set', 'global.index-url', $EnvironmentConfig.PIP_INDEX_URL))
+        }
+        'uv' {
+            Set-UvDefaultIndex -IndexUrl $EnvironmentConfig.UV_DEFAULT_INDEX
         }
         'nuget' {
             $sourceName = if ($EnvironmentConfig.NUGET_SOURCE_NAME) { $EnvironmentConfig.NUGET_SOURCE_NAME } else { 'nuget.org' }
@@ -2504,6 +2580,7 @@ function Main {
     Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
 
     $registryLabelWidth = 20
+    Write-Host ""
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry source', $script:NpmRegistryResolution.Source)
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry URL', $script:NpmRegistryResolution.Url)
     if ($script:NpmRegistryResolution.Details) {
@@ -2528,6 +2605,9 @@ function Main {
         }
         # Tools with no CheckType (e.g. metadata-only entries) are skipped
     }
+
+    Write-Host "  -----------------------------------"
+    Write-Host ""
 
     $total = $checks.Count
     Write-Host "  Running $total checks in parallel (${Timeout}s timeout)...`n"

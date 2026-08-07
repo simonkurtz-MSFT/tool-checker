@@ -2,6 +2,8 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
+Version `1.1.0` also checks package registry configuration for npm, pnpm, pip, and NuGet against an optional local `.env` policy. Misaligned registries are reported and are changed only after explicit user selection.
+
 The included configuration checks:
 
 - Node.js and global npm packages
@@ -29,6 +31,7 @@ The following screenshots show Tool Checker `1.0.0` starting in check-only mode,
 - Internet access to query release APIs and package registries
 - The package managers used by your configured install and update commands, such as WinGet, npm, or `apt`
 - `tool-checker.ps1` and `tool-checker.json` in the same directory
+- An optional `.env` registry policy based on [`.env.example`](.env.example)
 
 The script does not require installation or additional PowerShell modules.
 
@@ -49,6 +52,7 @@ Checks run concurrently, followed by a summary showing installed and latest vers
 | `-SkipUpdate`        | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
 | `-Force`             | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools.                      |
 | `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 30 seconds.                                                                        |
+| `-EnvFile <path>`    | Read registry policy from a specific dotenv file instead of `.env` beside the script.                                                             |
 | `-Version`           | Print the Tool Checker version and exit.                                                                                                          |
 
 Examples:
@@ -66,11 +70,28 @@ Examples:
 # Allow slower checks up to 60 seconds each
 ./tool-checker.ps1 -Timeout 60
 
+# Use a registry policy stored outside the repository
+./tool-checker.ps1 -EnvFile C:\secure\tool-checker.env
+
 # Print the script version
 ./tool-checker.ps1 -Version
 ```
 
 Tool Checker executes the commands shown in the summary or action menu. Review [`tool-checker.json`](tool-checker.json) before using interactive actions or `-Force`, especially on a shared or managed machine.
+
+### Registry policy
+
+Copy [`.env.example`](.env.example) to `.env`, then uncomment only the registries the checker should enforce. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
+
+- `NPM_CONFIG_REGISTRY`: checks the npm user registry; repairs it with `npm config set registry <url> --location=user`.
+- `PNPM_CONFIG_REGISTRY`: checks the pnpm global registry; repairs it with `pnpm config set registry <url> --global`.
+- `PIP_INDEX_URL`: checks pip's user `global.index-url`; repairs it with `<python> -m pip config --user set global.index-url <url>`.
+- `NUGET_SOURCE_NAME`: identifies the NuGet source to check and defaults to `nuget.org`.
+- `NUGET_SOURCE_URL`: checks the named NuGet source URL; repairs it with `dotnet nuget update source` or `dotnet nuget add source`.
+
+Missing variables are ignored. The checker masks credentials embedded in registry URLs when displaying drift or actions. Keep `.env` local and restrict its filesystem permissions if it contains credentials.
+
+Registry alignment is intentionally approval-gated. In a normal run, each misaligned registry appears as an `Align ... registry` action. `-SkipUpdate` reports drift without offering a repair. `-Force` may apply tool updates automatically, but registry repairs still require an explicit action-menu selection.
 
 ## Configuration
 

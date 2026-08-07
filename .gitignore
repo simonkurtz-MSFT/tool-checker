@@ -16,6 +16,11 @@ Desktop.ini
 *.tmp
 *.temp
 
+# Local registry policy and credentials
+.env
+.env.*
+!.env.example
+
 # Browser automation artifacts
 .playwright-mcp/
 capture.html

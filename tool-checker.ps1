@@ -20,11 +20,15 @@
 .PARAMETER Version
     Print the tool checker version and exit.
 
+.PARAMETER EnvFile
+    Path to the optional registry policy file. Default: .env beside this script.
+
 .EXAMPLE
     .\tool-checker.ps1
     .\tool-checker.ps1 -SkipUpdate
     .\tool-checker.ps1 -Force
     .\tool-checker.ps1 -Timeout 60
+    .\tool-checker.ps1 -EnvFile C:\secure\tool-checker.env
     .\tool-checker.ps1 -Version
 #>
 
@@ -33,10 +37,11 @@ param(
     [switch]$SkipUpdate,
     [switch]$Force,
     [int]$Timeout = 30,
+    [string]$EnvFile = (Join-Path $PSScriptRoot '.env'),
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.0.5'
+$script:ToolCheckerVersion = '1.1.0'
 $script:NpmUpdateCooldownDays = 7
 
 if ($Version) {
@@ -76,6 +81,7 @@ $results = @{
     MaturityBlockedUpdates  = @()        # @{ Name; AgeDays; RequiredAgeDays }
     GlobalNpmPackageUpdates = @()        # @{ Name; Current; Latest }
     GlobalNpmUpdateCommand  = "ncu -g -u --loglevel=error"
+    RegistryChecks          = @()        # @{ Key; Name; Current; Expected; Status; Details }
 }
 
 # --- Load tool-checker.json ------------------------------------------------
@@ -179,6 +185,222 @@ function Get-DetailedErrorMessage {
         $parts.Add($ErrorRecord.InvocationInfo.PositionMessage.Trim())
     }
     $parts -join ' | '
+}
+
+function Read-DotEnvFile {
+    param([string]$Path)
+
+    $values = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $values }
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed.StartsWith('export ')) { $trimmed = $trimmed.Substring(7).TrimStart() }
+        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') { continue }
+
+        $key = $Matches[1]
+        $value = $Matches[2].Trim()
+        if ($value.Length -ge 2 -and (
+            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            ($value.StartsWith("'") -and $value.EndsWith("'"))
+        )) {
+            $value = $value.Substring(1, $value.Length - 2)
+        } else {
+            $value = ($value -replace '\s+#.*$', '').Trim()
+        }
+        $values[$key] = $value
+    }
+    $values
+}
+
+function ConvertTo-NormalizedRegistryUrl {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
+    $Value.Trim().TrimEnd('/')
+}
+
+function Protect-RegistryUrl {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '(not configured)' }
+    try {
+        $uri = [Uri]$Value
+        if (-not $uri.UserInfo) { return $Value }
+        $builder = [UriBuilder]$uri
+        $builder.UserName = '***'
+        $builder.Password = '***'
+        $builder.Uri.AbsoluteUri.TrimEnd('/')
+    } catch {
+        if ($Value -match '://[^/@]+@') { return ($Value -replace '://[^/@]+@', '://***@') }
+        $Value
+    }
+}
+
+function Invoke-RegistryCommand {
+    param([string]$Command, [string[]]$Arguments)
+
+    try {
+        $output = @(& $Command @Arguments 2>&1)
+        [PSCustomObject]@{ Output = ($output -join "`n").Trim(); ExitCode = $LASTEXITCODE }
+    } catch {
+        [PSCustomObject]@{ Output = Get-DetailedErrorMessage $_; ExitCode = 1 }
+    }
+}
+
+function Get-PythonCommand {
+    if (Test-CommandExists 'py') { return [PSCustomObject]@{ Command = 'py'; Prefix = @('-m', 'pip') } }
+    if (Test-CommandExists 'python') { return [PSCustomObject]@{ Command = 'python'; Prefix = @('-m', 'pip') } }
+    if (Test-CommandExists 'python3') { return [PSCustomObject]@{ Command = 'python3'; Prefix = @('-m', 'pip') } }
+    $null
+}
+
+function Get-NuGetSource {
+    param([string]$SourceName)
+    if (-not (Test-CommandExists 'dotnet')) { return $null }
+
+    $result = Invoke-RegistryCommand -Command 'dotnet' -Arguments @('nuget', 'list', 'source', '--format', 'Detailed')
+    if ($result.ExitCode -ne 0) { return $null }
+    $lines = $result.Output -split "`r?`n"
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -match '^\s*\d+\.\s+(.+?)\s+\[(Enabled|Disabled)\]\s*$' -and $Matches[1].Trim() -eq $SourceName) {
+            if ($index + 1 -lt $lines.Count) {
+                return [PSCustomObject]@{
+                    Url = $lines[$index + 1].Trim()
+                    Enabled = $Matches[2] -eq 'Enabled'
+                }
+            }
+        }
+    }
+    $null
+}
+
+function Add-RegistryCheck {
+    param(
+        [string]$Key,
+        [string]$Name,
+        [string]$Current,
+        [string]$Expected,
+        [string]$Details = '',
+        [switch]$ForceMisaligned
+    )
+
+    $currentNormalized = ConvertTo-NormalizedRegistryUrl $Current
+    $expectedNormalized = ConvertTo-NormalizedRegistryUrl $Expected
+    $status = if ($ForceMisaligned) { 'Misaligned' }
+        elseif (-not $Details -and $currentNormalized -eq $expectedNormalized) { 'Aligned' }
+        elseif ($Details) { 'Unavailable' }
+        else { 'Misaligned' }
+    $results.RegistryChecks += [PSCustomObject]@{
+        Key = $Key
+        Name = $Name
+        Current = $Current
+        Expected = $Expected
+        Status = $status
+        Details = $Details
+    }
+    if ($status -eq 'Misaligned' -and -not $SkipUpdate) {
+        $actionDetails = "$(Protect-RegistryUrl $Current) -> $(Protect-RegistryUrl $Expected)"
+        if ($Details) { $actionDetails = "$Details; $actionDetails" }
+        $results.AvailableUpdates += @{
+            Name = "$Name registry"
+            Command = ''
+            Type = 'registry'
+            Details = $actionDetails
+            RegistryKey = $Key
+        }
+    }
+}
+
+function Test-RegistryConfiguration {
+    param([System.Collections.IDictionary]$EnvironmentConfig)
+
+    Write-Header 'Registry Configuration'
+    if ($EnvironmentConfig.Count -eq 0) {
+        Write-Host "  No registry policy loaded from $EnvFile"
+        Write-Host '  Copy .env.example to .env and uncomment the registries you want to enforce.'
+        return
+    }
+
+    if ($EnvironmentConfig.Contains('NPM_CONFIG_REGISTRY')) {
+        if (Test-CommandExists 'npm') {
+            $current = (Invoke-RegistryCommand -Command 'npm' -Arguments @('config', 'get', 'registry')).Output
+            Add-RegistryCheck -Key 'npm' -Name 'npm' -Current $current -Expected $EnvironmentConfig.NPM_CONFIG_REGISTRY
+        } else {
+            Add-RegistryCheck -Key 'npm' -Name 'npm' -Expected $EnvironmentConfig.NPM_CONFIG_REGISTRY -Details 'npm is not installed'
+        }
+    }
+    if ($EnvironmentConfig.Contains('PNPM_CONFIG_REGISTRY')) {
+        if (Test-CommandExists 'pnpm') {
+            $current = (Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'get', 'registry')).Output
+            Add-RegistryCheck -Key 'pnpm' -Name 'pnpm' -Current $current -Expected $EnvironmentConfig.PNPM_CONFIG_REGISTRY
+        } else {
+            Add-RegistryCheck -Key 'pnpm' -Name 'pnpm' -Expected $EnvironmentConfig.PNPM_CONFIG_REGISTRY -Details 'pnpm is not installed'
+        }
+    }
+    if ($EnvironmentConfig.Contains('PIP_INDEX_URL')) {
+        $python = Get-PythonCommand
+        if ($python) {
+            $query = Invoke-RegistryCommand -Command $python.Command -Arguments (@($python.Prefix) + @('config', 'get', 'global.index-url'))
+            $current = if ($query.ExitCode -eq 0) { $query.Output } else { '' }
+            Add-RegistryCheck -Key 'pip' -Name 'pip' -Current $current -Expected $EnvironmentConfig.PIP_INDEX_URL
+        } else {
+            Add-RegistryCheck -Key 'pip' -Name 'pip' -Expected $EnvironmentConfig.PIP_INDEX_URL -Details 'Python is not installed'
+        }
+    }
+    if ($EnvironmentConfig.Contains('NUGET_SOURCE_URL')) {
+        $sourceName = if ($EnvironmentConfig.Contains('NUGET_SOURCE_NAME') -and $EnvironmentConfig.NUGET_SOURCE_NAME) {
+            $EnvironmentConfig.NUGET_SOURCE_NAME
+        } else { 'nuget.org' }
+        if (Test-CommandExists 'dotnet') {
+            $source = Get-NuGetSource $sourceName
+            $details = if ($source -and -not $source.Enabled) { 'source is disabled' } else { '' }
+            Add-RegistryCheck -Key 'nuget' -Name "NuGet ($sourceName)" -Current $source.Url -Expected $EnvironmentConfig.NUGET_SOURCE_URL -Details $details -ForceMisaligned:($source -and -not $source.Enabled)
+        } else {
+            Add-RegistryCheck -Key 'nuget' -Name "NuGet ($sourceName)" -Expected $EnvironmentConfig.NUGET_SOURCE_URL -Details '.NET SDK is not installed'
+        }
+    }
+
+    foreach ($check in $results.RegistryChecks) {
+        $color = if ($check.Status -eq 'Aligned') { $ColorGreen } elseif ($check.Status -eq 'Misaligned') { $ColorYellow } else { $ColorRed }
+        Write-Host "  $color$($check.Name): $($check.Status)$ColorReset"
+        Write-Host "    Current : $(Protect-RegistryUrl $check.Current)"
+        Write-Host "    Expected: $(Protect-RegistryUrl $check.Expected)"
+        if ($check.Details) { Write-Host "    Detail  : $($check.Details)" }
+    }
+}
+
+function Set-RegistryConfiguration {
+    param([string]$RegistryKey, [System.Collections.IDictionary]$EnvironmentConfig)
+
+    switch ($RegistryKey) {
+        'npm' {
+            Invoke-RegistryCommand -Command 'npm' -Arguments @('config', 'set', 'registry', $EnvironmentConfig.NPM_CONFIG_REGISTRY, '--location=user')
+        }
+        'pnpm' {
+            Invoke-RegistryCommand -Command 'pnpm' -Arguments @('config', 'set', 'registry', $EnvironmentConfig.PNPM_CONFIG_REGISTRY, '--global')
+        }
+        'pip' {
+            $python = Get-PythonCommand
+            if (-not $python) { return [PSCustomObject]@{ Output = 'Python is not installed'; ExitCode = 1 } }
+            Invoke-RegistryCommand -Command $python.Command -Arguments (@($python.Prefix) + @('config', '--user', 'set', 'global.index-url', $EnvironmentConfig.PIP_INDEX_URL))
+        }
+        'nuget' {
+            $sourceName = if ($EnvironmentConfig.NUGET_SOURCE_NAME) { $EnvironmentConfig.NUGET_SOURCE_NAME } else { 'nuget.org' }
+            $source = Get-NuGetSource $sourceName
+            $write = if ($source) {
+                Invoke-RegistryCommand -Command 'dotnet' -Arguments @('nuget', 'update', 'source', $sourceName, '--source', $EnvironmentConfig.NUGET_SOURCE_URL)
+            } else {
+                Invoke-RegistryCommand -Command 'dotnet' -Arguments @('nuget', 'add', 'source', $EnvironmentConfig.NUGET_SOURCE_URL, '--name', $sourceName)
+            }
+            if ($write.ExitCode -ne 0) { return $write }
+            $enable = Invoke-RegistryCommand -Command 'dotnet' -Arguments @('nuget', 'enable', 'source', $sourceName)
+            [PSCustomObject]@{
+                Output = @($write.Output, $enable.Output) | Where-Object { $_ } | Join-String -Separator "`n"
+                ExitCode = $enable.ExitCode
+            }
+        }
+        default { [PSCustomObject]@{ Output = "Unknown registry key: $RegistryKey"; ExitCode = 1 } }
+    }
 }
 
 function Set-NpmRegistryApiUrls {
@@ -1717,6 +1939,8 @@ function Invoke-UvWindowsInstall {
 }
 
 function Invoke-ActionMenu {
+    param([switch]$RegistryOnly)
+
     $hasInstalls = $results.NotInstalled.Count -gt 0
     $hasUpdates  = $results.AvailableUpdates.Count -gt 0 -and -not $SkipUpdate
 
@@ -1725,16 +1949,17 @@ function Invoke-ActionMenu {
     # Build a unified flat list: installs first, then updates
     $actions = @()   # each entry: @{ Name; Label; Type; Command }
 
-    foreach ($ni in $results.NotInstalled) {
+    foreach ($ni in $results.NotInstalled | Where-Object { -not $RegistryOnly }) {
         $cmd = Get-InstallCommand -NotInstalledEntry $ni
         $suffix = if ([string]::IsNullOrWhiteSpace($cmd)) { " (no install command for this platform)" } else { "" }
         $actions += @{ Name = $ni.Name; Label = "Install $($ni.Name)$suffix"; Type = "install"; Command = $cmd }
     }
 
     if ($hasUpdates) {
-        foreach ($u in $results.AvailableUpdates) {
+        foreach ($u in $results.AvailableUpdates | Where-Object { -not $RegistryOnly -or $_.Type -eq 'registry' }) {
             $d = if ($u.Details) { " ($($u.Details))" } else { "" }
-            $actions += @{ Name = $u.Name; Label = "Update $($u.Name)$d"; Type = "update"; Command = $u.Command }
+            $verb = if ($u.Type -eq 'registry') { 'Align' } else { 'Update' }
+            $actions += @{ Name = $u.Name; Label = "$verb $($u.Name)$d"; Type = $u.Type; Command = $u.Command; RegistryKey = $u.RegistryKey }
         }
     }
 
@@ -1779,13 +2004,15 @@ function Invoke-ActionMenu {
             $ri = $num - 1
             $a  = $remaining[$ri].Action
 
-            if ([string]::IsNullOrWhiteSpace($a.Command)) {
+            if ($a.Type -ne 'registry' -and [string]::IsNullOrWhiteSpace($a.Command)) {
                 Write-Warning "No command configured for $($a.Name) on $script:PlatformKey"
                 continue
             }
 
             $isUvWindowsAction = $a.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')
-            if ($isUvWindowsAction) {
+            if ($a.Type -eq 'registry') {
+                Write-Host "Executing approved registry alignment: $($a.Name)"
+            } elseif ($isUvWindowsAction) {
                 Write-Host 'Executing: standardize uv via winget (cleanup + install)'
             } else {
                 Write-Host "Executing: $($a.Command)"
@@ -1794,7 +2021,9 @@ function Invoke-ActionMenu {
                 # WinGet emits terminal progress controls that become noisy text
                 # when captured through the PowerShell pipeline. Run it as a
                 # native process with file redirection, then read its final output.
-                $execution = if ($isUvWindowsAction) {
+                $execution = if ($a.Type -eq 'registry') {
+                    Set-RegistryConfiguration -RegistryKey $a.RegistryKey -EnvironmentConfig $script:RegistryEnvironment
+                } elseif ($isUvWindowsAction) {
                     Invoke-UvWindowsInstall
                 } else {
                     Invoke-ToolCommand -Command $a.Command -Type $a.Type
@@ -1821,7 +2050,16 @@ function Invoke-ActionMenu {
                     $outputText -match 'No installed package found matching'
                 )
 
-                if ($a.Type -eq "install") {
+                if ($a.Type -eq 'registry') {
+                    if ($exitCode -eq 0) {
+                        Write-Success "Registry aligned: $($a.Name)"
+                        $completedIdx += $remaining[$ri].Idx
+                    } else {
+                        $message = "Registry alignment failed for $($a.Name). $outputText"
+                        Write-Error $message
+                        $results.Errors += $message
+                    }
+                } elseif ($a.Type -eq "install") {
                     # For installs, command availability is the real success indicator
                     # (winget may return non-zero even when the app is already installed)
                     $cfg = $toolsConfig[$a.Name]
@@ -1891,11 +2129,12 @@ function Invoke-ActionMenu {
 
 function Invoke-ForceUpdates {
     Write-Header "Available Updates (Force mode)"
-    if ($results.AvailableUpdates.Count -eq 0) { Write-Success "No updates available"; return }
+    $automaticUpdates = @($results.AvailableUpdates | Where-Object { $_.Type -ne 'registry' })
+    if ($automaticUpdates.Count -eq 0) { Write-Success "No automatic tool updates available"; return }
 
     Write-Host "Running all updates in parallel...`n"
-    Invoke-ParallelUpdates -Updates $results.AvailableUpdates
-    foreach ($u in $results.AvailableUpdates | Where-Object { $_.Name -notin $results.UpdateFailed }) {
+    Invoke-ParallelUpdates -Updates $automaticUpdates
+    foreach ($u in $automaticUpdates | Where-Object { $_.Name -notin $results.UpdateFailed }) {
         Refresh-ToolVersion -ToolName $u.Name | Out-Null
     }
     Show-ResultsTable
@@ -2259,6 +2498,11 @@ function Main {
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }
     if ($Force)      { Write-Warning "Running with automatic update (no prompts)" }
 
+    $resolvedEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
+    $script:RegistryEnvironment = Read-DotEnvFile -Path $resolvedEnvFile
+    Write-Host "  Registry policy file : $resolvedEnvFile"
+    Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
+
     $registryLabelWidth = 20
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry source', $script:NpmRegistryResolution.Source)
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry URL', $script:NpmRegistryResolution.Url)
@@ -2322,6 +2566,10 @@ function Main {
 
     if ($Force) {
         Invoke-ForceUpdates
+        if ($results.AvailableUpdates | Where-Object { $_.Type -eq 'registry' }) {
+            Write-Warning 'Registry changes always require explicit approval, including in Force mode.'
+            Invoke-ActionMenu -RegistryOnly
+        }
     } else {
         Invoke-ActionMenu
     }

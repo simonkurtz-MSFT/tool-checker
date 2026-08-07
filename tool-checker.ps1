@@ -484,7 +484,10 @@ function Get-StandardToolUpdates {
 function Refresh-ToolVersion {
     param([string]$ToolName)
     try {
-        if ($ToolName -eq "ncu global packages") { Refresh-NcuGlobalPackagesStatus; return $true }
+        if ($ToolName -eq "ncu global packages" -or $ToolName -like 'npm: *') {
+            Refresh-NcuGlobalPackagesStatus
+            return $true
+        }
 
         # Dynamic tool names don't have a direct config entry — route by pattern.
         # (e.g. ".NET SDK 10.0.201" maps to the ".NET SDK" config + dotnet refresh)
@@ -830,6 +833,13 @@ function Test-NCUGlobal {
         $outputString = $output -join "`n"
         $results.GlobalNpmPackageUpdates = @()
 
+        if ($LASTEXITCODE -ne 0 -and $outputString -match 'EALLOWREMOTE') {
+            $message = 'ncu could not inspect a global package installed from a remote source. Reinstall that package by registry name, then retry.'
+            Write-Warning $message
+            $results.Errors += $message
+            return
+        }
+
         # Parse update lines: packageName currentVer → latestVer
         foreach ($line in $output) {
             $s = $line.ToString().Trim()
@@ -893,12 +903,14 @@ function Test-NCUGlobal {
                 $results.Updates += "ncu global packages"
                 $specs = $installablePackages | ForEach-Object { "$($_.Name)@$($_.Latest)" }
                 $results.GlobalNpmUpdateCommand = "npm install -g $($specs -join ' ') --loglevel=error"
-                $count = $installablePackages.Count
-                $label = if ($count -eq 1) { "1 package" } else { "$count packages" }
                 if (!$SkipUpdate) {
-                    $results.AvailableUpdates += @{
-                        Name = "ncu global packages"; Command = $results.GlobalNpmUpdateCommand
-                        Type = "npm-global-bulk"; Details = $label
+                    foreach ($pkg in $installablePackages) {
+                        $results.AvailableUpdates += @{
+                            Name = "npm: $($pkg.Name)"
+                            Command = "npm install -g $($pkg.Name)@$($pkg.Latest) --loglevel=error"
+                            Type = "npm-global-package"
+                            Details = "$($pkg.Current) -> $($pkg.Latest)"
+                        }
                     }
                 }
             }
@@ -1753,7 +1765,12 @@ function Invoke-ActionMenu {
                     Write-Host "  Release notes: $(Get-ReleaseNotesUrl -ToolName $a.Name)"
                     if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
                 } else {
-                    $message = "Update failed for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
+                    $reason = if ($outputText -match 'EALLOWREMOTE') {
+                        'npm rejected this package as a remote dependency; reinstall it from the configured registry before retrying'
+                    } else {
+                        "Exit code: $exitCode"
+                    }
+                    $message = "Update failed for $($a.Name). Command: $($a.Command) | $reason"
                     Write-Error $message
                     if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
                     $results.Errors += $message
@@ -1867,6 +1884,11 @@ function Invoke-ParallelUpdates {
             } elseif ($wingetSoft) {
                 $message = "Skipped: $($j.Update.Name) — winget has no newer package yet | Command: $cmd | Exit code: $exitCode"
                 Write-Warning $message
+                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
+                $results.Errors += $message
+            } elseif ($outputText -match 'EALLOWREMOTE') {
+                $message = "Failed: $($j.Update.Name) — npm rejected this package as a remote dependency; reinstall it from the configured registry before retrying | Command: $cmd"
+                Write-Error $message
                 if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
                 $results.Errors += $message
             } elseif ($uvInUse) {

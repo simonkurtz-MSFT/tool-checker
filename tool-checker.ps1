@@ -279,6 +279,36 @@ function New-UpdateEntry {
     @{ Name = $ToolName; Command = $Command; Type = $Type; Details = $Details }
 }
 
+function Get-WingetLatestVersion {
+    param([string]$ToolName, [string]$PackageId)
+
+    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT') -or [string]::IsNullOrWhiteSpace($PackageId)) {
+        return $null
+    }
+    if (-not (Test-CommandExists 'winget')) {
+        Write-Warning "  Could not check $ToolName in WinGet: winget not found"
+        return $null
+    }
+
+    try {
+        $metadata = @(& winget show --id $PackageId -e --source winget --accept-source-agreements --disable-interactivity 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget show exited with code $LASTEXITCODE. Output: $($metadata -join ' ')"
+        }
+        $metadataText = $metadata -join "`n"
+        $versionMatch = [regex]::Match($metadataText, '(?m)^Version:\s*(\S+)\s*$')
+        if (-not $versionMatch.Success) {
+            throw 'Could not parse the package version from winget output.'
+        }
+        $versionMatch.Groups[1].Value
+    } catch {
+        $message = "Could not check $ToolName in WinGet. $(Get-DetailedErrorMessage $_)"
+        Write-Warning "  $message"
+        $results.Errors += $message
+        $null
+    }
+}
+
 # ─────────────────────────────────────────────
 # 4. STANDARD TOOL FRAMEWORK
 #    Handles any tool with CheckType = "standard"
@@ -391,6 +421,27 @@ function Get-StandardToolUpdates {
 
     $config = $toolsConfig[$ToolName]
     Write-Host "  Checking for $ToolName updates..."
+
+    if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
+        $latestVersion = Get-WingetLatestVersion -ToolName $ToolName -PackageId $config.WingetId
+        if (-not $latestVersion) { return }
+
+        $results.Tools[$ToolName].Latest = $latestVersion
+        if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
+            Write-Warning "  $ToolName has available updates in WinGet: $InstalledVersion -> $latestVersion"
+            $results.Updates += $ToolName
+            $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
+            $updateCommand = if ($ToolName -eq 'uv') {
+                'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+            } else {
+                $config.UpdateCommand
+            }
+            $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+        } else {
+            Write-Success "$ToolName is up to date with WinGet"
+        }
+        return
+    }
 
     # Self-reporting tools: the version command itself reveals available updates
     if ($config.UpdateParseRegex) {
@@ -699,6 +750,21 @@ function Test-NodeJS {
     if ($SkipUpdate) { return }
 
     Write-Host "  Checking for NodeJS updates..."
+    if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
+        $latestVersion = Get-WingetLatestVersion -ToolName 'NodeJS' -PackageId $config.WingetId
+        if (-not $latestVersion) { return }
+
+        $results.Tools['NodeJS'].Latest = "v$latestVersion"
+        if (Test-UpdateAvailable -InstalledVersion $currentVersion -LatestVersion $latestVersion) {
+            Write-Warning "  NodeJS has an available update in WinGet: v$currentVersion -> v$latestVersion"
+            $results.Updates += 'NodeJS'
+            $results.AvailableUpdates += New-UpdateEntry -ToolName 'NodeJS' -Command $config.UpdateCommand -Type $config.UpdateType -Details "v$currentVersion -> v$latestVersion"
+        } else {
+            Write-Success 'NodeJS is up to date with WinGet'
+        }
+        return
+    }
+
     $currentParts = $currentVersion -split '\.'
     $currentMajor = [int]$currentParts[0]
     $currentMinor = if ($currentParts.Count -gt 1) { [int]$currentParts[1] } else { 0 }
@@ -1036,7 +1102,12 @@ function Test-DotNetSDKs {
 
             $chVer = ($highest -split '\.')[0..1] -join '.'
             if ($latestSdkByChannel.ContainsKey($chVer)) {
-                $latestSdk = $latestSdkByChannel[$chVer].LatestSdk
+                $latestSdk = if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+                    Get-WingetLatestVersion -ToolName ".NET SDK $maj" -PackageId "Microsoft.DotNet.SDK.$maj"
+                } else {
+                    $latestSdkByChannel[$chVer].LatestSdk
+                }
+                if (-not $latestSdk) { continue }
                 foreach ($v in $sorted) {
                     $results.DotNetSDKs[$v].Latest = $latestSdk; $results.DotNetSDKs[$v].HighestInstalled = $highest
                     $results.Tools[".NET SDK $v"].Latest = $latestSdk; $results.Tools[".NET SDK $v"].HighestInstalled = $highest
@@ -1058,9 +1129,17 @@ function Test-DotNetSDKs {
                 if ($mv -notin $availableMajors) { $availableMajors += $mv }
             }
         }
-        $newerMajors = $availableMajors | Where-Object { $_ -gt $maxInstalledMajor } | Sort-Object -Descending
+        $newerMajorVersions = @{}
+        $newerMajors = @($availableMajors | Where-Object { $_ -gt $maxInstalledMajor } | Sort-Object -Descending)
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            $newerMajors = @($newerMajors | Where-Object {
+                $wingetVersion = Get-WingetLatestVersion -ToolName ".NET SDK $_" -PackageId "Microsoft.DotNet.SDK.$_"
+                if ($wingetVersion) { $newerMajorVersions[$_] = $wingetVersion; $true } else { $false }
+            })
+        }
         foreach ($m in $newerMajors) {
-            Write-Warning "    Newer .NET major version available: $m (you have up to $maxInstalledMajor)"
+            $versionLabel = if ($newerMajorVersions[$m]) { " (WinGet: $($newerMajorVersions[$m]))" } else { "" }
+            Write-Warning "    Newer .NET major version available: $m$versionLabel (you have up to $maxInstalledMajor)"
             $results.Updates += ".NET SDK: Major version $m available"
         }
 
@@ -1078,7 +1157,7 @@ function Test-DotNetSDKs {
             foreach ($m in $newerMajors) {
                 $results.AvailableUpdates += @{
                     Name = ".NET SDK $m (new major version)"; Command = "winget install Microsoft.DotNet.SDK.$m --silent"
-                    Type = "winget-new"; Details = "New major version"
+                    Type = "winget-new"; Details = $(if ($newerMajorVersions[$m]) { "Latest in WinGet: $($newerMajorVersions[$m])" } else { "New major version" })
                 }
             }
         } else {
@@ -1117,34 +1196,19 @@ function Test-PythonInstallManager {
     $results.Tools[$toolName] = @{ Installed = $installedVersion; Latest = "" }
 
     if ($SkipUpdate) { return }
-    if (-not (Test-CommandExists "winget")) {
-        Write-Warning "Could not check $toolName updates: winget not found"
-        return
-    }
 
     Write-Host "  Checking for $toolName updates..."
-    try {
-        $metadata = @(& winget show --id $config.WingetId -e --source winget --accept-source-agreements --disable-interactivity 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw "winget show exited with code $LASTEXITCODE. Output: $($metadata -join ' ')"
-        }
-        $metadataText = $metadata -join "`n"
-        if ($metadataText -notmatch '(?m)^Version:\s*(\S+)\s*$') {
-            throw "Could not parse the package version from winget output."
-        }
+    $latestVersion = Get-WingetLatestVersion -ToolName $toolName -PackageId $config.WingetId
+    if (-not $latestVersion) { return }
 
-        $latestVersion = $Matches[1]
-        $results.Tools[$toolName].Latest = $latestVersion
-        if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
-            Write-Warning "  $toolName has available updates: $installedVersion -> $latestVersion"
-            $results.Updates += $toolName
-            Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-            $results.AvailableUpdates += New-UpdateEntry -ToolName $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
-        } else {
-            Write-Success "$toolName is up to date"
-        }
-    } catch {
-        Write-Warning "  Could not check $toolName updates: $_"
+    $results.Tools[$toolName].Latest = $latestVersion
+    if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
+        Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"
+        $results.Updates += $toolName
+        Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
+        $results.AvailableUpdates += New-UpdateEntry -ToolName $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
+    } else {
+        Write-Success "$toolName is up to date with WinGet"
     }
 }
 
@@ -1241,21 +1305,32 @@ function Get-PythonUpdateConventional {
     $config = $toolsConfig["Python"]
     Write-Host "  Checking for Python updates..."
     try {
-        $major    = ($InstalledVersion -split '\.')[0..1] -join '.'
-        $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
-        $match    = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
-        if ($match) {
-            $latest = $match.latest; $results.Tools["Python $major"].Latest = $latest
+        $major = ($InstalledVersion -split '\.')[0..1] -join '.'
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            $latest = Get-WingetLatestVersion -ToolName "Python $major" -PackageId "Python.Python.$major"
+            if ($latest) {
+                $results.Tools["Python $major"].Latest = $latest
+            }
+        } else {
+            $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+            $match = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
+            $latest = if ($match) { $match.latest } else { $null }
+            if ($latest) { $results.Tools["Python $major"].Latest = $latest }
+        }
+        if ($latest) {
             if ([version]$latest -gt [version]$InstalledVersion) {
-                Write-Warning "  Python $major has update available: $InstalledVersion -> $latest"
+                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
+                Write-Warning "  Python $major has update available${sourceLabel}: $InstalledVersion -> $latest"
                 $results.Updates += "Python $major"
                 if (!$SkipUpdate) {
                     $results.AvailableUpdates += @{ Name = "Python $major"; Command = ($config.UpdateCommand -replace '\{version\}',$major); Type = $config.UpdateType; Details = "$InstalledVersion -> $latest" }
                 }
             } else { Write-Success "Python $major is up to date" }
         }
-        $newerMajors = $releases | Where-Object { $_.eol -eq $false -and [double]$_.cycle -gt [double]$major } | Sort-Object { [double]$_.cycle } -Descending | Select-Object -First 1
-        if ($newerMajors) { Write-Warning "  Newer Python major version available: $($newerMajors.cycle) (latest: $($newerMajors.latest))" }
+        if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+            $newerMajors = $releases | Where-Object { $_.eol -eq $false -and [double]$_.cycle -gt [double]$major } | Sort-Object { [double]$_.cycle } -Descending | Select-Object -First 1
+            if ($newerMajors) { Write-Warning "  Newer Python major version available: $($newerMajors.cycle) (latest: $($newerMajors.latest))" }
+        }
     } catch { Write-Warning "  Could not check Python updates: $_" }
 }
 
@@ -1278,13 +1353,19 @@ function Test-PowerShell {
 
         Write-Host "  Checking for PowerShell updates..."
         try {
-            $releases      = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
-            $latestVersion = $releases.tag_name -replace 'v', ''
+            $latestVersion = if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
+                Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
+            } else {
+                $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+                $releases.tag_name -replace 'v', ''
+            }
+            if (-not $latestVersion) { return }
             $results.Tools["PowerShell"].Latest = $latestVersion
             if ($results.Tools["PowerShell Core"]) { $results.Tools["PowerShell Core"].Latest = $latestVersion }
 
-            if ($latestVersion -ne $pwshVersion) {
-                Write-Warning "  PowerShell has available updates: $pwshVersion -> $latestVersion"
+            if (Test-UpdateAvailable -InstalledVersion $pwshVersion -LatestVersion $latestVersion) {
+                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
+                Write-Warning "  PowerShell has available updates${sourceLabel}: $pwshVersion -> $latestVersion"
                 $results.Updates += "PowerShell"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
                 $results.AvailableUpdates += @{
@@ -1939,7 +2020,7 @@ function Invoke-ParallelChecks {
         'Test-CommandExists','Get-DetailedErrorMessage','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion',
-        'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry',
+        'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
         'Test-NodeJS','Test-NCUGlobal','Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
         'Test-AzureExtensions','Test-DotNetSDKs','Test-PythonInstallManager','Test-Python',

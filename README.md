@@ -95,6 +95,7 @@ Add an entry like this:
       "Command": "example",
       "VersionFlag": "--version",
       "VersionParseRegex": "example ([0-9]+(?:\\.[0-9]+){1,3})",
+      "WingetId": "Vendor.Example",
       "UpdateType": "winget",
       "UpdateCommand": "winget upgrade Vendor.Example --silent --disable-interactivity",
       "ReleaseNotesUrl": "https://github.com/vendor/example/releases",
@@ -124,6 +125,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `VersionParseRegex`      | Recommended           | Regex whose first capture group is the installed version.                                                              |
 | `VersionExtractor`       | No                    | Named parser for special installed/API output. Built-in values include `npmDistTagLatest`, `azCliJson`, and `azBicep`. |
 | `ApiUrl`                 | Yes for update checks | Endpoint used to determine the latest release.                                                                         |
+| `WingetId`               | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.              |
 | `ProductionReleasesOnly` | No                    | Excludes alpha, beta, preview, RC, canary, and similar versions. Defaults to `true`.                                   |
 | `UpdateParseRegex`       | No                    | Extracts an available version from a self-reporting version command instead of the API result.                         |
 | `UpdateType`             | Recommended           | Identifies the command family for execution and error handling, such as `winget`, `direct`, or `npm-global`.           |
@@ -188,7 +190,7 @@ Custom checker functions must accept a `Progress` string and must be included in
 - A timed-out check is stopped and reported without preventing other checks from completing. A whole-check timeout shows `unknown` in red; an installed tool whose latest-version lookup did not complete shows `unknown` in yellow rather than appearing current.
 - After an interactive action, Tool Checker refreshes the displayed version when a refresh handler is available.
 
-Release APIs and package catalogs can disagree temporarily. In particular, WinGet may publish a release later than the upstream project. Tool Checker treats known "no applicable upgrade" responses as a retry-later condition rather than a successful update.
+Release APIs and package catalogs can disagree temporarily. For Windows tools updated through WinGet, Tool Checker treats the exact package's WinGet catalog version as authoritative for both the displayed latest version and update availability. It does not fall back to a newer upstream release that WinGet cannot install. Known "no applicable upgrade" responses remain retry-later conditions rather than successful updates.
 
 On Windows, uv installs and updates use one non-interactive WinGet path. Before installing, Tool Checker removes a registered WinGet copy, detected pipx or Cargo copies, and leftover `uv`, `uvx`, and `uvw` binaries from the current user's `.local\bin` and `.cargo\bin` directories. It then performs a clean WinGet install. This standardizes future updates without deleting uv's cache, managed Python installations, or installed tools. On Linux, uv continues to use Astral's standalone installer and `uv self update`.
 

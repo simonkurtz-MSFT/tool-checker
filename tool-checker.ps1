@@ -80,13 +80,42 @@ $results = @{
 
 # --- Load tool-checker.json ------------------------------------------------
 
+function Get-ToolSortKey {
+    param([string]$ToolName)
+
+    if ($ToolName -eq "Azure CLI") { return "Azure CLI|0|0" }
+    if ($ToolName -eq "Azure CLI Extensions") { return "Azure CLI|1|Azure CLI Extensions" }
+    if ($ToolName -match "^\s*az ext:") { return "Azure CLI|1|$ToolName" }
+    if ($ToolName -match "^\.NET SDK ([\d.]+)") {
+        $version = [version]$Matches[1]
+        return ".NET SDK|0|{0:D10}.{1:D10}.{2:D10}" -f (
+            [int]::MaxValue - $version.Major
+        ), (
+            [int]::MaxValue - $version.Minor
+        ), (
+            [int]::MaxValue - $version.Build
+        )
+    }
+    if ($ToolName -match "^Python ([\d.]+)") {
+        $parts = $Matches[1] -split '\.'
+        $major = if ($parts.Count -gt 0) { [int]$parts[0] } else { 0 }
+        $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
+        return "Python|0|{0:D10}.{1:D10}" -f (
+            [int]::MaxValue - $major
+        ), (
+            [int]::MaxValue - $minor
+        )
+    }
+    "$ToolName|0|0"
+}
+
 $configPath = Join-Path $PSScriptRoot "tool-checker.json"
 if (-not (Test-Path $configPath)) {
     Write-Host "`e[31m✗ tool-checker.json not found at: $configPath`e[0m"
     exit 1
 }
 
-$toolsConfig = @{}
+$toolsConfig = [ordered]@{}
 $toolsJson   = Get-Content $configPath -Raw | ConvertFrom-Json
 $script:NpmRegistryResolution = @{
     Source = 'tool-checker.json'
@@ -94,7 +123,8 @@ $script:NpmRegistryResolution = @{
     Details = $null
 }
 
-foreach ($toolName in $toolsJson.tools.PSObject.Properties.Name) {
+$sortedToolNames = @($toolsJson.tools.PSObject.Properties.Name | Sort-Object { Get-ToolSortKey $_ })
+foreach ($toolName in $sortedToolNames) {
     $jsonTool  = $toolsJson.tools.$toolName
     $toolEntry = @{}
     foreach ($prop in $jsonTool.PSObject.Properties) {
@@ -1545,20 +1575,7 @@ function Show-ResultsTable {
     Write-Host ("  {0}  {1}  {2}  {3}  {4}  {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxLat),("-"*$maxAge),("-"*$maxUpd),("-"*$maxUrl))
 
     # Sort: Azure CLI + extensions grouped, .NET SDKs descending, Python descending
-    $sorted = $results.Tools.GetEnumerator() | Sort-Object {
-        $n = $_.Key
-        if ($n -eq "Azure CLI")            { "Azure CLI|0|0" }
-        elseif ($n -match "^\s*az ext:")   { "Azure CLI|1|$n" }
-        elseif ($n -match "^\.NET SDK ([\d.]+)") {
-            $v = [version]$Matches[1]
-            ".NET SDK|0|{0:D10}.{1:D10}.{2:D10}" -f ([int]::MaxValue-$v.Major),([int]::MaxValue-$v.Minor),([int]::MaxValue-$v.Build)
-        }
-        elseif ($n -match "^Python ([\d.]+)") {
-            $p = $Matches[1] -split '\.'; $ma = if($p.Count -gt 0){[int]$p[0]}else{0}; $mi = if($p.Count -gt 1){[int]$p[1]}else{0}
-            "Python|0|{0:D10}.{1:D10}" -f ([int]::MaxValue-$ma),([int]::MaxValue-$mi)
-        }
-        else { "$n|0|0" }
-    }
+    $sorted = $results.Tools.GetEnumerator() | Sort-Object { Get-ToolSortKey $_.Key }
 
     $sorted | ForEach-Object {
         $inst = $_.Value.Installed
@@ -2228,7 +2245,7 @@ $ColorBlue   = $Global:ColorBlue
 }
 
 # ─────────────────────────────────────────────
-# 10. MAIN — driven by tool-checker.json order
+# 10. MAIN — driven by sorted tool configuration
 # ─────────────────────────────────────────────
 
 function Main {
@@ -2253,9 +2270,9 @@ function Main {
     }
     Write-Host ""
 
-    # Build check list from JSON — order is preserved
+    # Build check list from the sorted configuration order.
     $checks = @()
-    foreach ($toolName in $toolsJson.tools.PSObject.Properties.Name) {
+    foreach ($toolName in $toolsConfig.Keys) {
         $cfg = $toolsConfig[$toolName]
         if (-not $cfg.Enabled) { continue }
         $name = $toolName  # capture for closure

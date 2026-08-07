@@ -74,7 +74,7 @@ Tool Checker executes the commands shown in the summary or action menu. Review [
 
 ## Configuration
 
-Tools are defined under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Object order controls display order.
+Tools are defined under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Tool Checker sorts entries when loading the file and uses that order for both processing and display. Names are sorted alphabetically, with Azure CLI extensions grouped under Azure CLI and versioned .NET SDK and Python entries sorted by version descending.
 
 There are two kinds of checks:
 

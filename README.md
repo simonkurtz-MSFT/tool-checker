@@ -17,13 +17,13 @@ Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tool
 
 ## See it in action
 
-The following screenshots show Tool Checker `1.0.0` starting in check-only mode, reporting a consolidated inventory, and refreshing the summary after a selected update completes.
+The following screenshots show Tool Checker `1.1.1` validating registry policy in check-only mode, reporting a consolidated inventory, and refreshing the registry checks after an explicitly approved alignment.
 
-![Tool Checker starting parallel checks and reporting detected tools](docs/assets/tool-checker-execution.png)
+![Tool Checker validating npm, pnpm, pip, uv, and NuGet registry configuration before starting parallel checks](docs/assets/tool-checker-execution.png)
 
-![Tool Checker completed inventory summary](docs/assets/tool-checker-summary.png)
+![Tool Checker completed inventory summary with aligned registry checks](docs/assets/tool-checker-summary.png)
 
-![Tool Checker post-execution summary after a completed update](docs/assets/tool-checker-post-execution-summary.png)
+![Tool Checker registry checks and summary after an explicitly approved registry alignment](docs/assets/tool-checker-post-execution-summary.png)
 
 ## Requirements
 

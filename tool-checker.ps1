@@ -41,8 +41,9 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.1.1'
+$script:ToolCheckerVersion = '1.2.0'
 $script:NpmUpdateCooldownDays = 7
+$script:ApiRequestTimeout = $Timeout
 
 if ($Version) {
     Write-Output $script:ToolCheckerVersion
@@ -583,7 +584,7 @@ function Get-LatestProductionNpmVersion {
 }
 
 function Invoke-SafeApiRequest {
-    param([string]$Uri, [int]$Timeout = 10)
+    param([string]$Uri, [int]$Timeout = $script:ApiRequestTimeout)
     try   { Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout -ErrorAction Stop }
     catch {
         $details = Get-DetailedErrorMessage $_
@@ -978,7 +979,7 @@ function Refresh-DotNetVersion {
     $latestSdkByChannel = @{}
     if ($cfg -and $cfg.ApiUrl) {
         try {
-            $releasesIndex = Invoke-RestMethod -Uri $cfg.ApiUrl -TimeoutSec 10
+            $releasesIndex = Invoke-RestMethod -Uri $cfg.ApiUrl -TimeoutSec $script:ApiRequestTimeout
             foreach ($ch in $releasesIndex.'releases-index') {
                 $latestSdkByChannel[$ch.'channel-version'] = $ch.'latest-sdk'
             }
@@ -1100,7 +1101,7 @@ function Test-NodeJS {
 
     try {
         Write-Host "  Querying nodejs.org distribution API..."
-        $distIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+        $distIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
         if (-not $distIndex) { return }
 
         $latestLTS            = $distIndex | Where-Object { $_.lts } | Select-Object -First 1
@@ -1405,7 +1406,7 @@ function Test-DotNetSDKs {
         if ($SkipUpdate) { return }
 
         Write-Host "  Checking for .NET SDK updates..."
-        $releasesIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+        $releasesIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
 
         # Build channel -> latest-sdk lookup
         $latestSdkByChannel = @{}
@@ -1640,7 +1641,7 @@ function Get-PythonUpdateConventional {
                 $results.Tools["Python $major"].Latest = $latest
             }
         } else {
-            $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+            $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
             $match = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
             $latest = if ($match) { $match.latest } else { $null }
             if ($latest) { $results.Tools["Python $major"].Latest = $latest }
@@ -1684,7 +1685,7 @@ function Test-PowerShell {
             $latestVersion = if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
                 Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
             } else {
-                $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec 10
+                $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
                 $releases.tag_name -replace 'v', ''
             }
             if (-not $latestVersion) { return }
@@ -2384,6 +2385,28 @@ function Invoke-ParallelChecks {
     $snap_ColorBlue    = $ColorBlue
 
     $padWidth    = $Total.ToString().Length
+    $successIcon = [char]0x2713
+    $threadStatusLines = [string[]]::new($Checks.Count)
+    $parallelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $supportsStatusUpdates = $false
+    try {
+        $supportsStatusUpdates = $Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected
+    } catch { }
+    $renderThreadStatuses = {
+        if (-not $supportsStatusUpdates) { return }
+        $elapsedSeconds = [Math]::Floor($parallelStopwatch.Elapsed.TotalSeconds)
+        $Host.UI.Write("`e[s`e[$($threadStatusLines.Count + 2)A")
+        $Host.UI.Write("`e[2K`r  Elapsed: ${elapsedSeconds}s`n")
+        $Host.UI.Write("`e[2K`r`n")
+        foreach ($line in $threadStatusLines) {
+            $Host.UI.Write("`e[2K`r$line`n")
+        }
+        $Host.UI.Write("`e[u")
+    }
+
+    if ($supportsStatusUpdates) { $Host.UI.Write("`e[?25l") }
+    Write-Host "  Elapsed: 0s"
+    Write-Host ""
     $runningJobs = @()
     for ($i = 0; $i -lt $Checks.Count; $i++) {
         $idx      = $i
@@ -2392,14 +2415,15 @@ function Invoke-ParallelChecks {
         $checkStr = $Checks[$i].Block.ToString()
         $progress = "{0,$padWidth}/{1}" -f ($i + 1), $Total
 
-        Write-Host "  $ColorCyan⟳ [$progress] Starting thread: $toolName$ColorReset"
+        $threadStatusLines[$i] = "  $ColorCyan⟳ [$progress] Running: $toolName$ColorReset"
+        Write-Host $threadStatusLines[$i]
 
         $ps = [System.Management.Automation.PowerShell]::Create()
         $ps.RunspacePool = $pool
 
         [void]$ps.AddScript({
             param($fnBlock, $checkStr, $progress, $idx,
-                $toolsConfig, $SkipUpdate, $PlatformKey, $NpmUpdateCooldownDays,
+                $toolsConfig, $SkipUpdate, $PlatformKey, $NpmUpdateCooldownDays, $ApiRequestTimeout,
                   $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue)
 
             # Set up global state so all re-hydrated functions can access it
@@ -2420,6 +2444,7 @@ function Invoke-ParallelChecks {
             $Global:SkipUpdate   = $SkipUpdate
             $Global:PlatformKey  = $PlatformKey
             $Global:NpmUpdateCooldownDays = $NpmUpdateCooldownDays
+            $Global:ApiRequestTimeout = $ApiRequestTimeout
             $Global:ColorReset   = $ColorReset
             $Global:ColorGreen   = $ColorGreen
             $Global:ColorYellow  = $ColorYellow
@@ -2437,6 +2462,7 @@ function Write-Host {
 # Alias shared state to the names the tool functions expect (as global vars)
 $script:PlatformKey = $Global:PlatformKey
 $script:NpmUpdateCooldownDays = $Global:NpmUpdateCooldownDays
+$script:ApiRequestTimeout = $Global:ApiRequestTimeout
 $results    = $Global:results
 $toolsConfig = $Global:toolsConfig
 $SkipUpdate  = $Global:SkipUpdate
@@ -2478,6 +2504,7 @@ $ColorBlue   = $Global:ColorBlue
         [void]$ps.AddArgument($snap_SkipUpdate)
         [void]$ps.AddArgument($snap_PlatformKey)
         [void]$ps.AddArgument($snap_NpmUpdateCooldownDays)
+        [void]$ps.AddArgument($TimeoutSec)
         [void]$ps.AddArgument($snap_ColorReset)
         [void]$ps.AddArgument($snap_ColorGreen)
         [void]$ps.AddArgument($snap_ColorYellow)
@@ -2488,32 +2515,44 @@ $ColorBlue   = $Global:ColorBlue
         $runningJobs += @{ PS = $ps; Handle = $ps.BeginInvoke(); Index = $idx; StartTime = [System.Diagnostics.Stopwatch]::StartNew(); Name = $toolName }
     }
 
-    # Show progress dots while waiting for all runspaces to complete
-    Write-Host ""
-    Write-Host -NoNewline "  "
     $collectedResults = @{}
-    while ($runningJobs.Count -gt 0) {
-        $still = @()
-        foreach ($job in $runningJobs) {
+    try {
+        while ($runningJobs.Count -gt 0) {
+            $still = @()
+            foreach ($job in $runningJobs) {
             if ($job.Handle.IsCompleted) {
+                $elapsed = $job.StartTime.Elapsed
                 $rawResult = $job.PS.EndInvoke($job.Handle)
-                if ($job.PS.Streams.Error.Count -gt 0) {
+                $hasErrors = $job.PS.Streams.Error.Count -gt 0
+                if ($hasErrors) {
                     foreach ($err in $job.PS.Streams.Error) {
                         $results.Errors += "Parallel check error (job $($job.Index)): $err"
                     }
                 }
                 $job.PS.Dispose()
                 if ($rawResult -and $rawResult.Count -gt 0) {
+                    $hasErrors = $hasErrors -or $rawResult[0].Errors.Count -gt 0
                     $collectedResults[$job.Index] = $rawResult[0]
                 }
+                $progress = "{0,$padWidth}/{1}" -f ($job.Index + 1), $Total
+                $elapsedLabel = '{0:N1}s' -f $elapsed.TotalSeconds
+                if ($hasErrors) {
+                    $threadStatusLines[$job.Index] = "  $ColorYellow! [$progress] Completed with errors: $($job.Name) ($elapsedLabel)$ColorReset"
+                } else {
+                    $threadStatusLines[$job.Index] = "  $ColorGreen$successIcon [$progress] Completed: $($job.Name) ($elapsedLabel)$ColorReset"
+                }
+                if ($supportsStatusUpdates) { & $renderThreadStatuses } else { Write-Host $threadStatusLines[$job.Index] }
             } elseif ($job.StartTime.Elapsed.TotalSeconds -ge $TimeoutSec) {
                 # Kill the runspace that exceeded the timeout
                 $job.PS.Stop()
                 $job.PS.Dispose()
                 # Provide a minimal result so the merge loop can handle it
+                $progress = "{0,$padWidth}/{1}" -f ($job.Index + 1), $Total
+                $threadStatusLines[$job.Index] = "  $ColorRed✗ [$progress] Timed out: $($job.Name) (${TimeoutSec}s)$ColorReset"
+                if ($supportsStatusUpdates) { & $renderThreadStatuses } else { Write-Host $threadStatusLines[$job.Index] }
                 $collectedResults[$job.Index] = @{
                     Index = $job.Index
-                    Output = @("", "$ColorRed  ✗ $($job.Name) check timed out after ${TimeoutSec}s$ColorReset")
+                    Output = @()
                     Tools = @{ $job.Name = @{ Installed = "unknown"; Latest = ""; CheckTimedOut = $true } }
                     DotNetSDKs = @{}; NotInstalled = @()
                     Updates = @(); Errors = @("$($job.Name) check timed out after ${TimeoutSec}s")
@@ -2521,17 +2560,21 @@ $ColorBlue   = $Global:ColorBlue
                     MaturityBlockedUpdates = @()
                     GlobalNpmPackageUpdates = @(); GlobalNpmUpdateCommand = "ncu -g -u --loglevel=error"
                 }
-            } else {
-                $still += $job
+                } else {
+                    $still += $job
+                }
+            }
+            $runningJobs = $still
+            if ($runningJobs.Count -gt 0) {
+                if ($supportsStatusUpdates) { & $renderThreadStatuses }
+                Start-Sleep -Milliseconds 250
             }
         }
-        $runningJobs = $still
-        if ($runningJobs.Count -gt 0) {
-            Write-Host -NoNewline "."
-            Start-Sleep -Milliseconds 250
-        }
+    } finally {
+        if ($supportsStatusUpdates) { $Host.UI.Write("`e[?25h") }
     }
-    Write-Host ""  # end the dot line
+    $parallelStopwatch.Stop()
+    Write-Host ""
     $pool.Close()
     $pool.Dispose()
 

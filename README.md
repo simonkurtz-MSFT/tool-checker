@@ -2,7 +2,7 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Version `1.1.0` added package registry configuration checks for npm, pnpm, pip, uv, and NuGet against an optional local `.env` policy. Misaligned registries are reported and are changed only after explicit user selection.
+Version `1.2.0` adds a seven-full-day cooldown for newly published npm releases, release-age visibility in the summary, and clearer diagnostics for registry metadata sources and checks that time out. Young npm releases remain visible but cannot be selected until the cooldown expires; incomplete latest-version lookups are reported as `unknown` instead of appearing current.
 
 The included configuration checks:
 
@@ -17,13 +17,13 @@ Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tool
 
 ## See it in action
 
-The following screenshots show Tool Checker `1.1.1` validating registry policy in check-only mode, reporting a consolidated inventory, and refreshing the registry checks after an explicitly approved alignment.
+The following screenshots show Tool Checker `1.2.0` validating registry policy and metadata sources, tracking parallel checks with a live elapsed-time and per-check progress indicator, reporting release age and cooldown status in the consolidated inventory, and refreshing registry checks after an explicitly approved alignment.
 
-![Tool Checker validating npm, pnpm, pip, uv, and NuGet registry configuration before starting parallel checks](docs/assets/tool-checker-execution.png)
+![Tool Checker 1.2.0 validating registry configuration and displaying elapsed time with running and completed parallel checks](docs/assets/tool-checker-execution.png)
 
-![Tool Checker completed inventory summary with aligned registry checks](docs/assets/tool-checker-summary.png)
+![Tool Checker 1.2.0 inventory summary with release age and npm cooldown status](docs/assets/tool-checker-summary.png)
 
-![Tool Checker registry checks and summary after an explicitly approved registry alignment](docs/assets/tool-checker-post-execution-summary.png)
+![Tool Checker 1.2.0 registry checks and summary after an explicitly approved registry alignment](docs/assets/tool-checker-post-execution-summary.png)
 
 ## Requirements
 
@@ -92,6 +92,8 @@ Copy [`.env.example`](.env.example) to `.env`, then uncomment only the registrie
 
 Missing variables are ignored. The checker masks credentials embedded in registry URLs when displaying drift or actions. Keep `.env` local and restrict its filesystem permissions if it contains credentials.
 
+Before parallel checks begin, Tool Checker reports the npm registry source, resolved registry URL, and package metadata URLs used for npm-hosted tools. These diagnostics make proxy and machine-level registry configuration issues visible without exposing credentials embedded in registry URLs.
+
 For pip, Tool Checker selects an installed interpreter that provides pip. On Windows it explicitly targets the global Python 3 installation through `py -V:3`, preventing an active project virtual environment from intercepting user-level registry checks or repairs.
 
 uv lock files contain exact package and artifact URLs. After changing `UV_DEFAULT_INDEX`, regenerate an existing lock with `uv lock` and commit the reviewed lock-file changes. `uv sync --locked` intentionally continues using the URLs already recorded in `uv.lock`; changing the user registry alone does not rewrite a lock file.
@@ -126,8 +128,8 @@ Add an entry like this:
       "WingetId": "Vendor.Example",
       "UpdateType": "winget",
       "UpdateCommand": "winget upgrade Vendor.Example --silent --disable-interactivity",
-      "ReleaseNotesUrl": "https://github.com/vendor/example/releases",
-      "ApiUrl": "https://api.github.com/repos/vendor/example/releases/latest",
+      "ReleaseNotesUrl": "https://github.com/cli/cli/releases",
+      "ApiUrl": "https://api.github.com/repos/cli/cli/releases/latest",
       "InstallCommands": {
         "Windows (amd64)": "winget install Vendor.Example --silent --disable-interactivity",
         "Windows (arm64)": "winget install Vendor.Example --silent --disable-interactivity",

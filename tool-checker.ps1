@@ -569,7 +569,7 @@ function Test-UpdateAvailable {
 
 function Test-IsProductionVersion {
     param([string]$Version)
-    -not [string]::IsNullOrWhiteSpace($Version) -and $Version -notmatch '(?i)(?:^|[-.])(alpha|beta|dev|preview|pre|rc|canary|next)(?:[-.\d]|$)'
+    -not [string]::IsNullOrWhiteSpace($Version) -and $Version.Trim() -match '^v?\d+\.\d+\.\d+$'
 }
 
 function Get-LatestProductionNpmVersion {
@@ -578,7 +578,7 @@ function Get-LatestProductionNpmVersion {
     if (-not $ApiData -or -not $ApiData.versions) { return $null }
     $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object { Test-IsProductionVersion $_ })
     $versions |
-        Where-Object { $_ -match '^\d+(?:\.\d+){1,3}$' } |
+        ForEach-Object { $_ -replace '^v', '' } |
         Sort-Object { [version]$_ } -Descending |
         Select-Object -First 1
 }
@@ -754,6 +754,10 @@ function Get-StandardToolUpdates {
     if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
         $latestVersion = Get-WingetLatestVersion -ToolName $ToolName -PackageId $config.WingetId
         if (-not $latestVersion) { return }
+        if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
+            Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
+            return
+        }
 
         $results.Tools[$ToolName].Latest = $latestVersion
         if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
@@ -779,6 +783,10 @@ function Get-StandardToolUpdates {
             $latestVersion = $Matches[1]
             if ($null -ne $latestVersion) {
                 $latestVersion = "$latestVersion".Trim().TrimEnd('.')
+            }
+            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
+                Write-Warning "  Latest reported version '$latestVersion' is not a full production semantic version"
+                return
             }
             $results.Tools[$ToolName].Latest = $latestVersion
             if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
@@ -811,7 +819,7 @@ function Get-StandardToolUpdates {
         $latestVersion = Get-LatestVersionFromApi -ToolName $ToolName -ApiData $apiData
         if (-not $latestVersion) { Write-Warning "  Could not determine latest version"; return }
         if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-            Write-Warning "  Latest version is a prerelease and production releases are required"
+            Write-Warning "  Latest version '$latestVersion' is not a full production semantic version"
             return
         }
 
@@ -1082,6 +1090,10 @@ function Test-NodeJS {
     if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
         $latestVersion = Get-WingetLatestVersion -ToolName 'NodeJS' -PackageId $config.WingetId
         if (-not $latestVersion) { return }
+        if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
+            Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
+            return
+        }
 
         $results.Tools['NodeJS'].Latest = "v$latestVersion"
         if (Test-UpdateAvailable -InstalledVersion $currentVersion -LatestVersion $latestVersion) {
@@ -1104,14 +1116,19 @@ function Test-NodeJS {
         $distIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
         if (-not $distIndex) { return }
 
-        $latestLTS            = $distIndex | Where-Object { $_.lts } | Select-Object -First 1
+        $allowedDistIndex     = if ($config.ProductionReleasesOnly) {
+            $distIndex | Where-Object { Test-IsProductionVersion $_.version }
+        } else {
+            $distIndex
+        }
+        $latestLTS            = $allowedDistIndex | Where-Object { $_.lts } | Select-Object -First 1
         $latestLTSVersion     = $latestLTS.version -replace 'v', ''
         $latestLTSMajor       = [int]($latestLTSVersion -split '\.')[0]
-        $latestCurrent        = $distIndex | Select-Object -First 1
+        $latestCurrent        = $allowedDistIndex | Select-Object -First 1
         $latestCurrentVersion = $latestCurrent.version -replace 'v', ''
         $latestCurrentMajor   = [int]($latestCurrentVersion -split '\.')[0]
 
-        $latestInCurrentMajor = $distIndex | Where-Object {
+        $latestInCurrentMajor = $allowedDistIndex | Where-Object {
             [int](($_.version -replace 'v','') -split '\.')[0] -eq $currentMajor
         } | Select-Object -First 1
 
@@ -1266,6 +1283,7 @@ function Test-NCUGlobal {
                 $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
                 $pkg.Latest = Get-LatestProductionNpmVersion -ApiData $metadata
             }
+            if (-not $pkg.Latest) { continue }
             $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest
             $pkg.PublishedAt = $release.PublishedAt
             $pkg.AgeDays = $release.AgeDays
@@ -1349,7 +1367,7 @@ function Test-AzureExtensions {
             $stable = $versions | ForEach-Object {
                 $cv = ($_.version -split '\s+')[0]
                 [PSCustomObject]@{ version = $cv }
-            } | Where-Object { $_.version -notmatch '[a-z]' }
+            } | Where-Object { Test-IsProductionVersion $_.version }
             $latest = if ($config.ProductionReleasesOnly) {
                 $stable | Select-Object -Last 1
             } else {
@@ -1411,6 +1429,8 @@ function Test-DotNetSDKs {
         # Build channel -> latest-sdk lookup
         $latestSdkByChannel = @{}
         foreach ($ch in $releasesIndex.'releases-index') {
+            if ($config.ProductionReleasesOnly -and $ch.'support-phase' -eq 'preview') { continue }
+            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $ch.'latest-sdk')) { continue }
             $latestSdkByChannel[$ch.'channel-version'] = @{ LatestSdk = $ch.'latest-sdk'; SupportPhase = $ch.'support-phase' }
         }
 
@@ -1437,6 +1457,7 @@ function Test-DotNetSDKs {
                     $latestSdkByChannel[$chVer].LatestSdk
                 }
                 if (-not $latestSdk) { continue }
+                if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestSdk)) { continue }
                 foreach ($v in $sorted) {
                     $results.DotNetSDKs[$v].Latest = $latestSdk; $results.DotNetSDKs[$v].HighestInstalled = $highest
                     $results.Tools[".NET SDK $v"].Latest = $latestSdk; $results.Tools[".NET SDK $v"].HighestInstalled = $highest
@@ -1454,7 +1475,10 @@ function Test-DotNetSDKs {
         $availableMajors    = @()
         foreach ($ch in $releasesIndex.'releases-index') {
             $mv = [int]($ch.'channel-version' -split '\.')[0]
-            if ($ch.'support-phase' -ne 'eol' -and ($ch.'support-phase' -ne 'preview' -or $mv -in $installedMajors)) {
+            $releaseAllowed = -not $config.ProductionReleasesOnly -or (
+                $ch.'support-phase' -ne 'preview' -and (Test-IsProductionVersion $ch.'latest-sdk')
+            )
+            if ($releaseAllowed -and $ch.'support-phase' -ne 'eol' -and ($ch.'support-phase' -ne 'preview' -or $mv -in $installedMajors)) {
                 if ($mv -notin $availableMajors) { $availableMajors += $mv }
             }
         }
@@ -1529,6 +1553,10 @@ function Test-PythonInstallManager {
     Write-Host "  Checking for $toolName updates..."
     $latestVersion = Get-WingetLatestVersion -ToolName $toolName -PackageId $config.WingetId
     if (-not $latestVersion) { return }
+    if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
+        Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
+        return
+    }
 
     $results.Tools[$toolName].Latest = $latestVersion
     if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
@@ -1637,6 +1665,7 @@ function Get-PythonUpdateConventional {
         $major = ($InstalledVersion -split '\.')[0..1] -join '.'
         if ($IsWindows -or $env:OS -eq 'Windows_NT') {
             $latest = Get-WingetLatestVersion -ToolName "Python $major" -PackageId "Python.Python.$major"
+            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
             if ($latest) {
                 $results.Tools["Python $major"].Latest = $latest
             }
@@ -1644,6 +1673,7 @@ function Get-PythonUpdateConventional {
             $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
             $match = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
             $latest = if ($match) { $match.latest } else { $null }
+            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
             if ($latest) { $results.Tools["Python $major"].Latest = $latest }
         }
         if ($latest) {
@@ -1689,6 +1719,10 @@ function Test-PowerShell {
                 $releases.tag_name -replace 'v', ''
             }
             if (-not $latestVersion) { return }
+            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
+                Write-Warning "  Latest version '$latestVersion' is not a full production semantic version"
+                return
+            }
             $results.Tools["PowerShell"].Latest = $latestVersion
             if ($results.Tools["PowerShell Core"]) { $results.Tools["PowerShell Core"].Latest = $latestVersion }
 
@@ -1744,7 +1778,9 @@ function Test-WSL {
     Write-Host "  Checking for WSL updates..."
     $releases = Invoke-SafeApiRequest -Uri $config.ApiUrl
     $allowedReleases = @($releases) | Where-Object {
-        -not $_.draft -and (-not $config.ProductionReleasesOnly -or -not $_.prerelease)
+        -not $_.draft -and (-not $config.ProductionReleasesOnly -or (
+            -not $_.prerelease -and (Test-IsProductionVersion $_.tag_name)
+        ))
     }
     $versionedReleases = foreach ($release in $allowedReleases) {
         $versionText = "$($release.tag_name)" -replace '^v', ''

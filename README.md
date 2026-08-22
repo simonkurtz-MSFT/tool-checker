@@ -156,7 +156,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `VersionExtractor`       | No                    | Named parser for special installed/API output. Built-in values include `npmDistTagLatest`, `azCliJson`, and `azBicep`. |
 | `ApiUrl`                 | Yes for update checks | Endpoint used to determine the latest release.                                                                         |
 | `WingetId`               | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.              |
-| `ProductionReleasesOnly` | No                    | Excludes alpha, beta, preview, RC, canary, and similar versions. Defaults to `true`.                                   |
+| `ProductionReleasesOnly` | No                    | Accepts only optional `v` + `major.minor.patch`, without a suffix. Defaults to `true`; `false` permits prereleases.    |
 | `UpdateParseRegex`       | No                    | Extracts an available version from a self-reporting version command instead of the API result.                         |
 | `UpdateType`             | Recommended           | Identifies the command family for execution and error handling, such as `winget`, `direct`, or `npm-global`.           |
 | `UpdateCommand`          | Yes for updates       | PowerShell command executed to update the tool.                                                                        |
@@ -177,9 +177,9 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 
 ### npm packages
 
-For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked.
+For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`.
 
-The script enforces a seven-full-day cooldown before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
+The script enforces a seven-full-day cooldown after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
 
 ### Add a custom tool
 

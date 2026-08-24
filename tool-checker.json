@@ -209,7 +209,7 @@
     "Git": {
       "enabled": true,
       "CheckType": "standard",
-      "ProductionReleasesOnly": true,
+      "ProductionReleasesOnly": false,
       "Command": "git",
       "WingetId": "Git.Git",
       "VersionFlag": "--version",

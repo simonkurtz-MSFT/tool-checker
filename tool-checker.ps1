@@ -569,7 +569,7 @@ function Test-UpdateAvailable {
 
 function Test-IsProductionVersion {
     param([string]$Version)
-    -not [string]::IsNullOrWhiteSpace($Version) -and $Version.Trim() -match '^v?\d+\.\d+\.\d+$'
+    -not [string]::IsNullOrWhiteSpace($Version) -and $Version.Trim() -match '^v?\d+\.\d+\.\d+(?:\.0)?$'
 }
 
 function Get-LatestProductionNpmVersion {

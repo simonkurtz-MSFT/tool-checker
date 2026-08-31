@@ -2,7 +2,7 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Version `1.2.0` adds a seven-full-day cooldown for newly published npm releases, release-age visibility in the summary, and clearer diagnostics for registry metadata sources and checks that time out. Young npm releases remain visible but cannot be selected until the cooldown expires; incomplete latest-version lookups are reported as `unknown` instead of appearing current.
+Version `1.2.1` checks npm releases from newest to oldest and selects the newest production version that has completed the seven-full-day cooldown. If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
 
 The included configuration checks:
 

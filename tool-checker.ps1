@@ -41,7 +41,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.2.0'
+$script:ToolCheckerVersion = '1.2.1'
 $script:NpmUpdateCooldownDays = 7
 $script:ApiRequestTimeout = $Timeout
 
@@ -583,6 +583,40 @@ function Get-LatestProductionNpmVersion {
         Select-Object -First 1
 }
 
+function Get-LatestMatureNpmRelease {
+    param(
+        [object]$ApiData,
+        [string]$MinimumVersion,
+        [string]$MaximumVersion,
+        [bool]$ProductionReleasesOnly = $true
+    )
+
+    if (-not $ApiData -or -not $ApiData.versions -or -not $ApiData.time) { return $null }
+    $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object {
+        -not $ProductionReleasesOnly -or (Test-IsProductionVersion $_)
+    }) | ForEach-Object { $_ -replace '^v', '' } | Sort-Object { [version]$_ } -Descending
+
+    foreach ($version in $versions) {
+        if ($MinimumVersion -and (Compare-SemanticVersions $MinimumVersion $version) -ne -1) { continue }
+        if ($MaximumVersion -and (Compare-SemanticVersions $version $MaximumVersion) -eq 1) { continue }
+        $publishedProperty = $ApiData.time.PSObject.Properties[$version]
+        if (-not $publishedProperty) { continue }
+        try {
+            $publishedAt = [DateTimeOffset]::Parse("$($publishedProperty.Value)").ToUniversalTime()
+            $age = [DateTimeOffset]::UtcNow - $publishedAt
+            if ($age.TotalDays -ge $script:NpmUpdateCooldownDays) {
+                return [PSCustomObject]@{
+                    Version     = $version
+                    PublishedAt = $publishedAt
+                    AgeDays     = [Math]::Max(0, [Math]::Floor($age.TotalDays))
+                    Installable = $true
+                }
+            }
+        } catch { continue }
+    }
+    $null
+}
+
 function Invoke-SafeApiRequest {
     param([string]$Uri, [int]$Timeout = $script:ApiRequestTimeout)
     try   { Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout -ErrorAction Stop }
@@ -823,13 +857,19 @@ function Get-StandardToolUpdates {
             return
         }
 
-        $results.Tools[$ToolName].Latest = $latestVersion
         $npmRelease = $null
         $isNpmPackage = $config.VersionExtractor -eq "npmDistTagLatest"
         if ($isNpmPackage) {
-            $npmRelease = Get-NpmVersionReleaseInfo -PackageName $config.NpmPackageName -Version $latestVersion
+            $matureRelease = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion $InstalledVersion -MaximumVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly
+            if ($matureRelease) {
+                $latestVersion = $matureRelease.Version
+                $npmRelease = $matureRelease
+            } else {
+                $npmRelease = Get-NpmVersionReleaseInfo -PackageName $config.NpmPackageName -Version $latestVersion
+            }
             $results.Tools[$ToolName].AgeDays = if ($npmRelease) { $npmRelease.AgeDays } else { $null }
         }
+        $results.Tools[$ToolName].Latest = $latestVersion
 
         if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
             $ageLabel = if ($npmRelease) { " ($($npmRelease.AgeDays) days old)" } elseif ($isNpmPackage) { " (age unknown)" } else { "" }
@@ -1279,12 +1319,19 @@ function Test-NCUGlobal {
         }
 
         foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-            if ($toolsConfig["Global npm packages"].ProductionReleasesOnly -and -not (Test-IsProductionVersion $pkg.Latest)) {
-                $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
+            $productionReleasesOnly = $toolsConfig["Global npm packages"].ProductionReleasesOnly
+            $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
+            if ($productionReleasesOnly -and -not (Test-IsProductionVersion $pkg.Latest)) {
                 $pkg.Latest = Get-LatestProductionNpmVersion -ApiData $metadata
             }
             if (-not $pkg.Latest) { continue }
-            $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest
+            $minimumVersion = if ($pkg.Current -and $pkg.Current -ne '?') { $pkg.Current } else { $null }
+            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MinimumVersion $minimumVersion -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly
+            if ($release) {
+                $pkg.Latest = $release.Version
+            } else {
+                $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest
+            }
             $pkg.PublishedAt = $release.PublishedAt
             $pkg.AgeDays = $release.AgeDays
             $pkg.Installable = $release -and $release.Installable
@@ -2388,7 +2435,7 @@ function Invoke-ParallelChecks {
         'Write-Header','Write-Success','Write-Warning','Write-Error',
         'Test-CommandExists','Get-DetailedErrorMessage','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
-        'Test-IsProductionVersion','Get-LatestProductionNpmVersion',
+        'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
         'Test-NodeJS','Test-NCUGlobal','Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',

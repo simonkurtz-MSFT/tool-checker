@@ -112,13 +112,14 @@
       "VersionCommand": "az version --output json",
       "VersionExtractor": "azCliJson",
       "RefreshMethod": "azure-cli",
-      "UpdateType": "direct",
-      "UpdateCommand": "az upgrade --yes --only-show-errors",
+      "WingetId": "Microsoft.AzureCLI",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade --id Microsoft.AzureCLI -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
       "ReleaseNotesUrl": "https://learn.microsoft.com/en-us/cli/azure/release-notes-azure-cli?view=azure-cli-latest",
       "ApiUrl": "https://pypi.org/pypi/azure-cli/json",
       "InstallCommands": {
-        "Windows (amd64)": "winget install Microsoft.AzureCLI --silent",
-        "Windows (arm64)": "winget install Microsoft.AzureCLI --silent",
+        "Windows (amd64)": "winget install --id Microsoft.AzureCLI -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
+        "Windows (arm64)": "winget install --id Microsoft.AzureCLI -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
         "Linux (amd64)": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash",
         "Linux (arm64)": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
       }

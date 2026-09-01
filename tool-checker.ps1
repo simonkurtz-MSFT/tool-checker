@@ -170,6 +170,16 @@ function Test-CommandExists {
     return $?
 }
 
+function Test-IsAdministrator {
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+
+    try { return [int](& id -u) -eq 0 } catch { return $false }
+}
+
 function Get-DetailedErrorMessage {
     param([object]$ErrorRecord)
 
@@ -1215,7 +1225,7 @@ function Test-NodeJS {
                 $catalogVersion = if ($wingetLatestVersion) { "v$wingetLatestVersion" } else { 'unknown' }
                 Write-Warning "  NodeJS v$latestInMajor is available upstream but not yet in WinGet (catalog: $catalogVersion); using the official installer."
                 $results.AvailableUpdates += @{
-                    Name = "NodeJS"; Command = "Official Node.js MSI v$latestInMajor (silent)"; Type = "node-direct"
+                    Name = "NodeJS"; Command = "Official Node.js MSI v$latestInMajor (silent; UAC elevation)"; Type = "node-direct"
                     Version = $latestInMajor; Details = "v$currentVersion -> v$latestInMajor"
                 }
             }
@@ -2069,13 +2079,17 @@ function Invoke-ToolCommand {
 function Invoke-NodeWindowsUpdate {
     param([string]$Version)
 
+    $isAdministrator = Test-IsAdministrator
+
     $architecture = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { 'arm64' } else { 'x64' }
     $installerName = "node-v$Version-$architecture.msi"
     $installerPath = Join-Path ([System.IO.Path]::GetTempPath()) $installerName
+    $installerLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "node-v$Version-$architecture-install.log"
     $releaseUri    = "https://nodejs.org/dist/v$Version"
     $installerUri  = "$releaseUri/$installerName"
 
     try {
+        Remove-Item -LiteralPath $installerPath, $installerLogPath -Force -ErrorAction SilentlyContinue
         $checksums = (Invoke-WebRequest -Uri "$releaseUri/SHASUMS256.txt" -TimeoutSec $script:ApiRequestTimeout -ErrorAction Stop).Content
         $checksumMatch = [regex]::Match($checksums, "(?m)^([a-fA-F0-9]{64})\s+$([regex]::Escape($installerName))$")
         if (-not $checksumMatch.Success) {
@@ -2089,14 +2103,32 @@ function Invoke-NodeWindowsUpdate {
             throw "SHA-256 verification failed for $installerName."
         }
 
-        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$installerPath`"", '/qn', '/norestart') -Wait -PassThru
-        $output = "Installed Node.js v$Version from $installerUri"
-        if ($process.ExitCode -in @(1641, 3010)) {
-            $output += ' (restart required)'
-            return @{ Output = $output; ExitCode = 0 }
+        $processArgs = @{
+            FilePath = 'msiexec.exe'
+            ArgumentList = @('/i', "`"$installerPath`"", '/qn', '/norestart', '/L*V', "`"$installerLogPath`"")
+            Wait = $true
+            PassThru = $true
         }
-        return @{ Output = $output; ExitCode = $process.ExitCode }
+        if (-not $isAdministrator) {
+            $processArgs.Verb = 'RunAs'
+        }
+        $process = Start-Process @processArgs
+        if ($process.ExitCode -in @(1641, 3010)) {
+            Remove-Item -LiteralPath $installerLogPath -Force -ErrorAction SilentlyContinue
+            return @{ Output = "Installed Node.js v$Version from $installerUri (restart required)"; ExitCode = 0 }
+        }
+        if ($process.ExitCode -eq 0) {
+            Remove-Item -LiteralPath $installerLogPath -Force -ErrorAction SilentlyContinue
+            return @{ Output = "Installed Node.js v$Version from $installerUri"; ExitCode = 0 }
+        }
+        return @{
+            Output = "Node.js MSI failed with exit code $($process.ExitCode). Installer log: $installerLogPath"
+            ExitCode = $process.ExitCode
+        }
     } catch {
+        if ($_.Exception.NativeErrorCode -eq 1223) {
+            return @{ Output = 'Node.js update canceled at the administrator consent prompt.'; ExitCode = 1223 }
+        }
         return @{ Output = "Node.js installer failed. $(Get-DetailedErrorMessage $_)"; ExitCode = 1 }
     } finally {
         Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
@@ -2763,6 +2795,10 @@ function Main {
     Write-Host "$ColorCyan║   Development Tools Checker & Updater   ║$ColorReset"
     Write-Host "$ColorCyan╚═════════════════════════════════════════╝$ColorReset"
     Write-Host "  Version $script:ToolCheckerVersion"
+    Write-Host ""
+
+    $isElevated = Test-IsAdministrator
+    Write-Host "  Process elevated     : $(if ($isElevated) { 'Yes' } else { 'No' })"
     Write-Host ""
 
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }

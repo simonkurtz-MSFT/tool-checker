@@ -1127,23 +1127,13 @@ function Test-NodeJS {
     if ($SkipUpdate) { return }
 
     Write-Host "  Checking for NodeJS updates..."
+    $wingetLatestVersion = $null
     if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
-        $latestVersion = Get-WingetLatestVersion -ToolName 'NodeJS' -PackageId $config.WingetId
-        if (-not $latestVersion) { return }
-        if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-            Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
-            return
+        $wingetLatestVersion = Get-WingetLatestVersion -ToolName 'NodeJS' -PackageId $config.WingetId
+        if ($wingetLatestVersion -and $config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $wingetLatestVersion)) {
+            Write-Warning "  Latest WinGet version '$wingetLatestVersion' is not a full production semantic version"
+            $wingetLatestVersion = $null
         }
-
-        $results.Tools['NodeJS'].Latest = "v$latestVersion"
-        if (Test-UpdateAvailable -InstalledVersion $currentVersion -LatestVersion $latestVersion) {
-            Write-Warning "  NodeJS has an available update in WinGet: v$currentVersion -> v$latestVersion"
-            $results.Updates += 'NodeJS'
-            $results.AvailableUpdates += New-UpdateEntry -ToolName 'NodeJS' -Command $config.UpdateCommand -Type $config.UpdateType -Details "v$currentVersion -> v$latestVersion"
-        } else {
-            Write-Success 'NodeJS is up to date with WinGet'
-        }
-        return
     }
 
     $currentParts = $currentVersion -split '\.'
@@ -1209,13 +1199,25 @@ function Test-NodeJS {
         Write-Host "  Latest Current : v$latestCurrentVersion (v$latestCurrentMajor)"
 
         if ($results.Updates -contains "NodeJS (patch)" -or $results.Updates -contains "NodeJS (minor)") {
-            Write-Host "`n  Update options:"
-            Write-Host "  - Using winget: $($config.UpdateCommand)"
-            Write-Host "  - Download: https://nodejs.org/"
-            Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-            $results.AvailableUpdates += @{
-                Name = "NodeJS"; Command = $config.UpdateCommand; Type = $config.UpdateType
-                Details = "v$currentVersion -> v$latestInMajor"
+            $wingetCanInstall = -not ($IsWindows -or $env:OS -eq 'Windows_NT') -or (
+                $wingetLatestVersion -and (Compare-SemanticVersions $wingetLatestVersion $latestInMajor) -ge 0
+            )
+            if ($wingetCanInstall) {
+                Write-Host "`n  Update options:"
+                Write-Host "  - Using winget: $($config.UpdateCommand)"
+                Write-Host "  - Download: https://nodejs.org/"
+                Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
+                $results.AvailableUpdates += @{
+                    Name = "NodeJS"; Command = $config.UpdateCommand; Type = $config.UpdateType
+                    Details = "v$currentVersion -> v$latestInMajor"
+                }
+            } else {
+                $catalogVersion = if ($wingetLatestVersion) { "v$wingetLatestVersion" } else { 'unknown' }
+                Write-Warning "  NodeJS v$latestInMajor is available upstream but not yet in WinGet (catalog: $catalogVersion); using the official installer."
+                $results.AvailableUpdates += @{
+                    Name = "NodeJS"; Command = "Official Node.js MSI v$latestInMajor (silent)"; Type = "node-direct"
+                    Version = $latestInMajor; Details = "v$currentVersion -> v$latestInMajor"
+                }
             }
         }
     } catch {
@@ -1317,6 +1319,14 @@ function Test-NCUGlobal {
                 break
             }
         }
+
+        # Dedicated npm-hosted tool checks own these packages; exclude duplicate ncu rows and actions.
+        $managedNpmPackageNames = @($toolsConfig.Values | Where-Object {
+            $_.VersionExtractor -eq 'npmDistTagLatest' -and $_.NpmPackageName
+        } | ForEach-Object { $_.NpmPackageName })
+        $results.GlobalNpmPackageUpdates = @($results.GlobalNpmPackageUpdates | Where-Object {
+            $_.Name -notin $managedNpmPackageNames
+        })
 
         foreach ($pkg in $results.GlobalNpmPackageUpdates) {
             $productionReleasesOnly = $toolsConfig["Global npm packages"].ProductionReleasesOnly
@@ -1875,6 +1885,9 @@ function Get-UpdateCommand {
     if (-not $Latest -or $Latest -eq "-" -or (Compare-SemanticVersions $Installed $Latest) -ne -1) { return "" }
     if ($ToolName -in $results.MaturityBlockedUpdates.Name) { return "" }
 
+    $availableUpdate = $results.AvailableUpdates | Where-Object { $_.Name -eq $ToolName } | Select-Object -First 1
+    if ($availableUpdate) { return $availableUpdate.Command }
+
     # .NET SDK: higher SDK in same channel already covers it
     if ($ToolName -match "^\.NET SDK" -and $results.Tools.ContainsKey($ToolName)) {
         $hi = $results.Tools[$ToolName].HighestInstalled
@@ -2053,6 +2066,43 @@ function Invoke-ToolCommand {
     }
 }
 
+function Invoke-NodeWindowsUpdate {
+    param([string]$Version)
+
+    $architecture = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { 'arm64' } else { 'x64' }
+    $installerName = "node-v$Version-$architecture.msi"
+    $installerPath = Join-Path ([System.IO.Path]::GetTempPath()) $installerName
+    $releaseUri    = "https://nodejs.org/dist/v$Version"
+    $installerUri  = "$releaseUri/$installerName"
+
+    try {
+        $checksums = (Invoke-WebRequest -Uri "$releaseUri/SHASUMS256.txt" -TimeoutSec $script:ApiRequestTimeout -ErrorAction Stop).Content
+        $checksumMatch = [regex]::Match($checksums, "(?m)^([a-fA-F0-9]{64})\s+$([regex]::Escape($installerName))$")
+        if (-not $checksumMatch.Success) {
+            throw "No published SHA-256 checksum was found for $installerName."
+        }
+
+        Invoke-WebRequest -Uri $installerUri -OutFile $installerPath -TimeoutSec $script:ApiRequestTimeout -ErrorAction Stop
+        $expectedHash = $checksumMatch.Groups[1].Value
+        $actualHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($actualHash -ne $expectedHash) {
+            throw "SHA-256 verification failed for $installerName."
+        }
+
+        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$installerPath`"", '/qn', '/norestart') -Wait -PassThru
+        $output = "Installed Node.js v$Version from $installerUri"
+        if ($process.ExitCode -in @(1641, 3010)) {
+            $output += ' (restart required)'
+            return @{ Output = $output; ExitCode = 0 }
+        }
+        return @{ Output = $output; ExitCode = $process.ExitCode }
+    } catch {
+        return @{ Output = "Node.js installer failed. $(Get-DetailedErrorMessage $_)"; ExitCode = 1 }
+    } finally {
+        Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-UvWindowsInstall {
     $output = [System.Collections.Generic.List[string]]::new()
 
@@ -2119,7 +2169,7 @@ function Invoke-ActionMenu {
         foreach ($u in $results.AvailableUpdates | Where-Object { -not $RegistryOnly -or $_.Type -eq 'registry' }) {
             $d = if ($u.Details) { " ($($u.Details))" } else { "" }
             $verb = if ($u.Type -eq 'registry') { 'Align' } else { 'Update' }
-            $actions += @{ Name = $u.Name; Label = "$verb $($u.Name)$d"; Type = $u.Type; Command = $u.Command; RegistryKey = $u.RegistryKey }
+            $actions += @{ Name = $u.Name; Label = "$verb $($u.Name)$d"; Type = $u.Type; Command = $u.Command; RegistryKey = $u.RegistryKey; Version = $u.Version }
         }
     }
 
@@ -2185,6 +2235,8 @@ function Invoke-ActionMenu {
                     Set-RegistryConfiguration -RegistryKey $a.RegistryKey -EnvironmentConfig $script:RegistryEnvironment
                 } elseif ($isUvWindowsAction) {
                     Invoke-UvWindowsInstall
+                } elseif ($a.Type -eq 'node-direct') {
+                    Invoke-NodeWindowsUpdate -Version $a.Version
                 } else {
                     Invoke-ToolCommand -Command $a.Command -Type $a.Type
                 }
@@ -2312,6 +2364,22 @@ function Invoke-ParallelUpdates {
 
     $jobs = @()
     foreach ($u in $Updates) {
+        if ($u.Type -eq 'node-direct') {
+            Write-Host "Starting: NodeJS v$($u.Version) official installer"
+            $execution = Invoke-NodeWindowsUpdate -Version $u.Version
+            if ($execution.Output) { Write-Host $execution.Output.TrimEnd() }
+            if ($execution.ExitCode -eq 0) {
+                Write-Success 'Completed successfully: NodeJS'
+            } else {
+                $message = "Failed: NodeJS official installer | Exit code: $($execution.ExitCode)"
+                Write-Error $message
+                if ('NodeJS' -notin $results.UpdateFailed) { $results.UpdateFailed += 'NodeJS' }
+                $results.Errors += $message
+            }
+            Write-Host ''
+            continue
+        }
+
         if ($u.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
             Write-Host 'Starting: uv (cleanup + winget install)'
             $execution = Invoke-UvWindowsInstall

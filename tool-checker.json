@@ -245,6 +245,26 @@
         "Linux (arm64)": "sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=arm64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y"
       }
     },
+    "GitHub Copilot CLI": {
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": false,
+      "Command": "copilot",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "GitHub Copilot CLI ([0-9]+(?:\\.[0-9]+){2}-[0-9]+)",
+      "VersionExtractor": "npmDistTagLatest",
+      "NpmPackageName": "@github/copilot",
+      "UpdateType": "npm-global",
+      "UpdateCommand": "npm install -g @github/copilot@latest --loglevel=error",
+      "ReleaseNotesUrl": "https://github.com/github/copilot-cli/releases",
+      "ApiUrl": "https://registry.npmjs.org/%40github%2Fcopilot",
+      "InstallCommands": {
+        "Windows (amd64)": "npm install -g @github/copilot@latest --loglevel=error",
+        "Windows (arm64)": "npm install -g @github/copilot@latest --loglevel=error",
+        "Linux (amd64)": "npm install -g @github/copilot@latest --loglevel=error",
+        "Linux (arm64)": "npm install -g @github/copilot@latest --loglevel=error"
+      }
+    },
     "ripgrep": {
       "enabled": true,
       "CheckType": "standard",

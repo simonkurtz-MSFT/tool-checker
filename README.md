@@ -10,7 +10,7 @@ The included configuration checks:
 - npm-check-updates (`ncu`), pnpm, Deno, and uv
 - Azure CLI, Azure CLI extensions, and Bicep
 - .NET SDKs, Python Install Manager (`py`), and Python installations
-- Git, GitHub CLI, and ripgrep
+- Git, GitHub CLI, GitHub Copilot CLI, and ripgrep
 - WSL and PowerShell
 
 Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tools or update commands are platform-specific; for example, WSL is checked only on Windows and several Windows updates use WinGet.
@@ -177,7 +177,7 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 
 ### npm packages
 
-For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`.
+For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`. Numeric revision suffixes such as GitHub Copilot CLI's `1.0.83-2` are compared numerically when prereleases are enabled.
 
 The script enforces a seven-full-day cooldown after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
 

@@ -550,6 +550,9 @@ function Get-CommandVersion {
 
 function ConvertTo-CanonicalSemanticVersion {
     param([string]$Version)
+    if ($Version -match '^(\d+(?:\.\d+)+)-(\d+)$') {
+        $Version = "$($Matches[1]).$($Matches[2])"
+    }
     if ($Version -notmatch '^\d+(?:\.\d+)+$') { return $Version }
 
     $parts = [System.Collections.Generic.List[string]]@($Version -split '\.')
@@ -604,7 +607,7 @@ function Get-LatestMatureNpmRelease {
     if (-not $ApiData -or -not $ApiData.versions -or -not $ApiData.time) { return $null }
     $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object {
         -not $ProductionReleasesOnly -or (Test-IsProductionVersion $_)
-    }) | ForEach-Object { $_ -replace '^v', '' } | Sort-Object { [version]$_ } -Descending
+    }) | ForEach-Object { $_ -replace '^v', '' } | Sort-Object { [version](ConvertTo-CanonicalSemanticVersion $_) } -Descending
 
     foreach ($version in $versions) {
         if ($MinimumVersion -and (Compare-SemanticVersions $MinimumVersion $version) -ne -1) { continue }

@@ -736,6 +736,9 @@ function Get-InstalledVersionFromOutput {
     $config    = $toolsConfig[$ToolName]
     $extractor = $config.VersionExtractor
     $outputStr = if ($Output -is [array]) { $Output -join "`n" } else { "$Output" }
+    if ([string]::IsNullOrWhiteSpace($outputStr) -or $outputStr.Trim() -eq 'Unable to retrieve version') {
+        return $null
+    }
 
     switch ($extractor) {
         "azCliJson" {
@@ -1987,6 +1990,7 @@ function Show-ResultsTable {
 
     $sorted | ForEach-Object {
         $inst = $_.Value.Installed
+        $installedUnknown = [string]::IsNullOrWhiteSpace($inst) -or $inst -in @('unknown', 'Unable to retrieve version')
         $latestUnknown = -not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Value.Latest)
         $lat = if ($latestUnknown) { "unknown" } elseif ($_.Value.Latest) { $_.Value.Latest } else { "-" }
         $currentOrNewer = -not $latestUnknown -and $lat -ne "-" -and (Compare-SemanticVersions $inst $lat) -ge 0
@@ -1998,7 +2002,7 @@ function Show-ResultsTable {
         $covered = -not $latestUnknown -and $hi -and [version]$hi -ge [version]$lat
         $clr  = if ($_.Key -in $results.UpdateFailed) { $ColorRed }
             elseif ($_.Value.CheckTimedOut) { $ColorRed }
-            elseif ($latestUnknown) { $ColorYellow }
+            elseif ($installedUnknown -or $latestUnknown) { $ColorYellow }
             elseif ($lat -eq "-" -or $currentOrNewer -or $covered) { $ColorGreen }
             elseif ($_.Key -in $results.MaturityBlockedUpdates.Name) { $ColorOrange }
                 else { $ColorYellow }
@@ -2812,15 +2816,23 @@ function Main {
     Write-Host "  Registry policy file : $resolvedEnvFile"
     Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
 
-    $registryLabelWidth = 20
+    $registryMetadataRows = @($toolsConfig.Keys |
+        Where-Object { $toolsConfig[$_].VersionExtractor -eq 'npmDistTagLatest' } |
+        Sort-Object |
+        ForEach-Object {
+            $label = if ($_ -eq 'GitHub Copilot CLI') { 'GHCP CLI metadata URL' } else { "$_ metadata URL" }
+            [PSCustomObject]@{ Label = $label; Url = $toolsConfig[$_].ApiUrl }
+        })
+    $registryLabels = @('npm registry source', 'npm registry URL') + @($registryMetadataRows.Label)
+    $registryLabelWidth = ($registryLabels | Measure-Object -Property Length -Maximum).Maximum
     Write-Host ""
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry source', $script:NpmRegistryResolution.Source)
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry URL', $script:NpmRegistryResolution.Url)
     if ($script:NpmRegistryResolution.Details) {
         Write-Warning "Registry resolution detail: $($script:NpmRegistryResolution.Details)"
     }
-    foreach ($toolName in $toolsConfig.Keys | Where-Object { $toolsConfig[$_].VersionExtractor -eq 'npmDistTagLatest' } | Sort-Object) {
-        Write-Host ("  {0,-$registryLabelWidth}: {1}" -f "$toolName metadata URL", $toolsConfig[$toolName].ApiUrl)
+    foreach ($row in $registryMetadataRows) {
+        Write-Host ("  {0,-$registryLabelWidth}: {1}" -f $row.Label, $row.Url)
     }
     Write-Host ""
 
@@ -2850,7 +2862,7 @@ function Main {
     Write-Host ""
     Write-Host ""
     Write-Host "  npm release cooldown: $script:NpmUpdateCooldownDays full days"
-    Write-Host "  $ColorYellow■ Installable update / latest unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
+    Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
     Write-Header "Summary"
     Show-ResultsTable
 

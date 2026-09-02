@@ -41,7 +41,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.2.2'
+$script:ToolCheckerVersion = '1.2.3'
 $script:NpmUpdateCooldownDays = 7
 $script:ApiRequestTimeout = $Timeout
 

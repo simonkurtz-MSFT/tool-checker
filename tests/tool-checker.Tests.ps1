@@ -389,6 +389,42 @@ Describe 'Action execution' {
         $results.Errors[0] | Should Match '^Skipped: Example CLI'
     }
 
+    It 'completes an install when its command is verified despite a nonzero package-manager exit' {
+        $results.NotInstalled = @(@{ Name = 'Example CLI' })
+        $toolsConfig['Example CLI'] = @{ Command = 'example'; RefreshMethod = 'standard' }
+        Mock Test-CommandExists { $true }
+        Mock Refresh-ToolVersion { $true }
+        $action = @{ Name = 'Example CLI'; Command = 'winget install Example.CLI'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ Output = 'already present'; ExitCode = 1 } | Should Be $true
+
+        $results.NotInstalled.Count | Should Be 0
+        Assert-MockCalled Refresh-ToolVersion 1 -ParameterFilter { $ToolName -eq 'Example CLI' }
+    }
+
+    It 'keeps an unverifiable no-update install pending and records an error' {
+        $results.NotInstalled = @(@{ Name = 'Missing CLI' })
+        $toolsConfig['Missing CLI'] = @{ Command = 'missing-cli' }
+        Mock Test-CommandExists { $false }
+        $action = @{ Name = 'Missing CLI'; Command = 'winget install Missing.CLI'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ Output = 'No applicable upgrade found'; ExitCode = 1 } | Should Be $false
+
+        $results.NotInstalled[0].Name | Should Be 'Missing CLI'
+        $results.Errors[0] | Should Match '^Install could not be verified for Missing CLI'
+        $toolsConfig.Remove('Missing CLI')
+    }
+
+    It 'classifies registry alignment success and failure' {
+        $action = @{ Name = 'npm registry'; Command = 'npm config set registry'; Type = 'registry' }
+
+        Complete-RegistryExecution -Action $action -Execution @{ Output = 'aligned'; ExitCode = 0 } | Should Be $true
+        Complete-RegistryExecution -Action $action -Execution @{ Output = 'access denied'; ExitCode = 1 } | Should Be $false
+
+        $results.Errors.Count | Should Be 1
+        $results.Errors[0] | Should Be 'Registry alignment failed for npm registry. access denied'
+    }
+
     It 'completes an ordinary force-mode update through a background job' {
         $update = @{ Name = 'Synthetic CLI'; Command = "Write-Output 'job completed'"; Type = 'direct' }
 

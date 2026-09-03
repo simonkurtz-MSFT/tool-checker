@@ -2422,6 +2422,60 @@ function Complete-UpdateExecution {
     $false
 }
 
+function Complete-InstallExecution {
+    param(
+        [Parameter(Mandatory)][object]$Action,
+        [Parameter(Mandatory)][object]$Execution
+    )
+
+    $outputText = @($Execution.Output) -join "`n"
+    $exitCode = if ($null -ne $Execution.ExitCode) { [int]$Execution.ExitCode } else { 1 }
+    if ($outputText) { Write-Host $outputText.TrimEnd() }
+
+    $config = $toolsConfig[$Action.Name]
+    $commandVerified = $config -and $config.Command -and (Test-CommandExists $config.Command)
+    if ($commandVerified -or $exitCode -eq 0) {
+        Write-Success "Install completed: $($Action.Name)"
+        if ($commandVerified) {
+            Write-Success "Verified command found: $($config.Command)"
+        } else {
+            Write-Warning "Command could not be verified yet for $($Action.Name) — you may need to restart your shell"
+        }
+        Refresh-ToolVersion -ToolName $Action.Name | Out-Null
+        $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $Action.Name })
+        return $true
+    }
+
+    if (Test-WingetNoUpdateResult -Action $Action -ExitCode $exitCode -OutputText $outputText) {
+        $message = "Install could not be verified for $($Action.Name). Command: $($Action.Command) | Exit code: $exitCode | The package manager reports no applicable package, but '$($config.Command)' is not available."
+    } else {
+        $message = "Install failed for $($Action.Name). Command: $($Action.Command) | Exit code: $exitCode"
+    }
+    Write-Error $message
+    $results.Errors += $message
+    $false
+}
+
+function Complete-RegistryExecution {
+    param(
+        [Parameter(Mandatory)][object]$Action,
+        [Parameter(Mandatory)][object]$Execution
+    )
+
+    $outputText = @($Execution.Output) -join "`n"
+    $exitCode = if ($null -ne $Execution.ExitCode) { [int]$Execution.ExitCode } else { 1 }
+    if ($outputText) { Write-Host $outputText.TrimEnd() }
+    if ($exitCode -eq 0) {
+        Write-Success "Registry aligned: $($Action.Name)"
+        return $true
+    }
+
+    $message = "Registry alignment failed for $($Action.Name). $outputText"
+    Write-Error $message
+    $results.Errors += $message
+    $false
+}
+
 function Invoke-ActionMenu {
     param([switch]$RegistryOnly)
 
@@ -2488,40 +2542,12 @@ function Invoke-ActionMenu {
                 $exitCode   = $execution.ExitCode
 
                 if ($a.Type -eq 'registry') {
-                    if ($outputText) { Write-Host $outputText.TrimEnd() }
-                    if ($exitCode -eq 0) {
-                        Write-Success "Registry aligned: $($a.Name)"
+                    if (Complete-RegistryExecution -Action $a -Execution $execution) {
                         $completedIdx += $remaining[$ri].Idx
-                    } else {
-                        $message = "Registry alignment failed for $($a.Name). $outputText"
-                        Write-Error $message
-                        $results.Errors += $message
                     }
                 } elseif ($a.Type -eq "install") {
-                    if ($outputText) { Write-Host $outputText.TrimEnd() }
-                    # For installs, command availability is the real success indicator
-                    # (winget may return non-zero even when the app is already installed)
-                    $cfg = $toolsConfig[$a.Name]
-                    if ($cfg -and $cfg.Command -and (Test-CommandExists $cfg.Command)) {
-                        Write-Success "Install completed: $($a.Name)"
-                        Write-Success "Verified command found: $($cfg.Command)"
-                        Refresh-ToolVersion -ToolName $a.Name | Out-Null
-                        $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $a.Name })
+                    if (Complete-InstallExecution -Action $a -Execution $execution) {
                         $completedIdx += $remaining[$ri].Idx
-                    } elseif ($exitCode -eq 0) {
-                        Write-Success "Install completed: $($a.Name)"
-                        Write-Warning "Command could not be verified yet for $($a.Name) — you may need to restart your shell"
-                        Refresh-ToolVersion -ToolName $a.Name | Out-Null
-                        $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $a.Name })
-                        $completedIdx += $remaining[$ri].Idx
-                    } elseif (Test-WingetNoUpdateResult -Action $a -ExitCode $exitCode -OutputText $outputText) {
-                        $message = "Install could not be verified for $($a.Name). Command: $($a.Command) | Exit code: $exitCode | The package manager reports no applicable package, but '$($cfg.Command)' is not available."
-                        Write-Error $message
-                        $results.Errors += $message
-                    } else {
-                        $message = "Install failed for $($a.Name). Command: $($a.Command) | Exit code: $exitCode"
-                        Write-Error $message
-                        $results.Errors += $message
                     }
                 } elseif (Complete-UpdateExecution -Action $a -Execution $execution -Refresh) {
                     $completedIdx += $remaining[$ri].Idx

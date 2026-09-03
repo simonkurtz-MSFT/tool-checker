@@ -213,18 +213,21 @@ function Test-ExampleSDK {
     param([string]$Progress)
 
     Write-Header "Checking Example SDK" -Progress $Progress
-  # Populate the shared $results collections here. For an available update:
-  Add-AvailableUpdate `
-    -Name 'Example SDK' `
-    -Command 'example update' `
-    -Type 'direct' `
-    -Details '1.0.0 -> 1.1.0'
+  # Resolve $installedVersion and $latestVersion, then register an update:
+  if (Register-ToolUpdate `
+      -Name 'Example SDK' `
+      -InstalledVersion $installedVersion `
+      -LatestVersion $latestVersion `
+      -Command 'example update' `
+      -Type 'direct') {
+    Write-Warning "Example SDK update available: $installedVersion -> $latestVersion"
+  }
 }
 ```
 
 Custom checker functions must accept a `Progress` string. Tool Checker validates each configured function before starting checks and automatically makes it available in worker runspaces from the `CustomFunction` value; no separate registration is required.
 
-If the custom tool can be updated, call `Add-AvailableUpdate` with `Name`, `Command`, `Type`, and optional `Details` values. Specialized actions can also supply `RegistryKey` for registry alignment or `Version` for a version-specific installer.
+If normal semantic version comparison applies, call `Register-ToolUpdate`; it adds a newer version to both the summary and actionable update collections. For specialized flows that manage summary state separately, call `Add-AvailableUpdate` with `Name`, `Command`, `Type`, and optional `Details` values. Specialized actions can also supply `RegistryKey` for registry alignment or `Version` for a version-specific installer.
 
 ## Output and behavior
 

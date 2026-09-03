@@ -707,6 +707,32 @@ function Add-AvailableUpdate {
     $results.AvailableUpdates += $entry
 }
 
+function Register-ToolUpdate {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$InstalledVersion,
+        [Parameter(Mandatory)]
+        [string]$LatestVersion,
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Command,
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Type
+    )
+
+    if (-not (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $LatestVersion)) {
+        return $false
+    }
+
+    $results.Updates += $Name
+    Add-AvailableUpdate -Name $Name -Command $Command -Type $Type -Details "$InstalledVersion -> $LatestVersion"
+    $true
+}
+
 function Get-WingetLatestVersion {
     param([string]$ToolName, [string]$PackageId)
 
@@ -1492,11 +1518,11 @@ function Test-AzureExtensions {
             if (-not $latest) { continue }
 
             $results.Tools["  az ext: $($ext.name)"].Latest = $latest.version
-            if (Test-UpdateAvailable -InstalledVersion $ext.version -LatestVersion $latest.version) {
+            $updateName = "Azure Extension: $($ext.name)"
+            $updateCommand = "az extension update --name $($ext.name) --only-show-errors"
+            if (Register-ToolUpdate -Name $updateName -InstalledVersion $ext.version -LatestVersion $latest.version -Command $updateCommand -Type 'az-extension') {
                 Write-Warning "  Extension '$($ext.name)' has update available: $($ext.version) -> $($latest.version)"
                 $updatesAvailable = $true
-                $results.Updates += "Azure Extension: $($ext.name)"
-                Add-AvailableUpdate -Name "Azure Extension: $($ext.name)" -Command "az extension update --name $($ext.name) --only-show-errors" -Type 'az-extension' -Details "$($ext.version) -> $($latest.version)"
             }
         }
         if (-not $updatesAvailable) { Write-Success "All Azure CLI extensions are up to date" }
@@ -1666,11 +1692,9 @@ function Test-PythonInstallManager {
     }
 
     $results.Tools[$toolName].Latest = $latestVersion
-    if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
+    if (Register-ToolUpdate -Name $toolName -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
         Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"
-        $results.Updates += $toolName
         Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-        Add-AvailableUpdate -Name $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
     } else {
         Write-Success "$toolName is up to date with WinGet"
     }
@@ -1833,12 +1857,10 @@ function Test-PowerShell {
             $results.Tools["PowerShell"].Latest = $latestVersion
             if ($results.Tools["PowerShell Core"]) { $results.Tools["PowerShell Core"].Latest = $latestVersion }
 
-            if (Test-UpdateAvailable -InstalledVersion $pwshVersion -LatestVersion $latestVersion) {
+            if (Register-ToolUpdate -Name 'PowerShell' -InstalledVersion $pwshVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
                 $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
                 Write-Warning "  PowerShell has available updates${sourceLabel}: $pwshVersion -> $latestVersion"
-                $results.Updates += "PowerShell"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-                Add-AvailableUpdate -Name 'PowerShell' -Command $config.UpdateCommand -Type $config.UpdateType -Details "$pwshVersion -> $latestVersion"
             } else { Write-Success "PowerShell is up to date" }
         } catch { Write-Warning "  Could not fetch latest PowerShell version: $_" }
     } else {
@@ -1913,11 +1935,9 @@ function Test-WSL {
     $latestVersion = ConvertTo-CanonicalSemanticVersion $latestVersionedRelease.VersionText
     $results.Tools["WSL"].Latest = $latestVersion
 
-    if (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $latestVersion) {
+    if (Register-ToolUpdate -Name 'WSL' -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
         $releaseType = if ($latestRelease.prerelease) { "prerelease" } else { "release" }
         Write-Warning "  WSL $releaseType available: $installedVersion -> $latestVersion"
-        $results.Updates += "WSL"
-        Add-AvailableUpdate -Name 'WSL' -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
     } else {
         Write-Success "WSL is up to date"
     }
@@ -2574,7 +2594,7 @@ function Invoke-ParallelChecks {
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
-        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Get-WingetLatestVersion',
+        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
         'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'

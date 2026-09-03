@@ -84,6 +84,31 @@ Describe 'Available update construction' {
     }
 }
 
+Describe 'Tool update registration' {
+    BeforeEach {
+        $results.Updates = @()
+        $results.AvailableUpdates = @()
+    }
+
+    It 'registers a newer version in both update collections' {
+        $registered = Register-ToolUpdate -Name 'Example CLI' -InstalledVersion '1.9.0' -LatestVersion '1.10.0' -Command 'example update' -Type 'direct'
+
+        $registered | Should Be $true
+        $results.Updates.Count | Should Be 1
+        $results.Updates[0] | Should Be 'Example CLI'
+        $results.AvailableUpdates.Count | Should Be 1
+        $results.AvailableUpdates[0].Details | Should Be '1.9.0 -> 1.10.0'
+    }
+
+    It 'does not mutate update collections when versions are equal' {
+        $registered = Register-ToolUpdate -Name 'Example CLI' -InstalledVersion '1.10.0' -LatestVersion '1.10.0' -Command 'example update' -Type 'direct'
+
+        $registered | Should Be $false
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+}
+
 Describe 'npm release selection' {
     It 'selects the newest production version when latest points to a prerelease' {
         $apiData = [PSCustomObject]@{

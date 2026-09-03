@@ -389,6 +389,24 @@ Describe 'Action execution' {
         $results.Errors[0] | Should Match '^Skipped: Example CLI'
     }
 
+    It 'completes an ordinary force-mode update through a background job' {
+        $update = @{ Name = 'Synthetic CLI'; Command = "Write-Output 'job completed'"; Type = 'direct' }
+
+        Invoke-ParallelUpdates -Updates @($update)
+
+        $results.UpdateFailed.Count | Should Be 0
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'records a nonzero background update command as failed' {
+        $update = @{ Name = 'Broken CLI'; Command = 'cmd /c exit 7'; Type = 'direct' }
+
+        Invoke-ParallelUpdates -Updates @($update)
+
+        $results.UpdateFailed[0] | Should Be 'Broken CLI'
+        $results.Errors[0] | Should Match '^Failed: Broken CLI'
+    }
+
     It 'uses shared dispatch and completion for direct force-mode updates' {
         Mock Invoke-ActionCommand { @{ Output = 'done'; ExitCode = 0 } }
         Mock Complete-UpdateExecution { $true }
@@ -398,6 +416,24 @@ Describe 'Action execution' {
 
         Assert-MockCalled Invoke-ActionCommand 1 -ParameterFilter { $Action.Name -eq 'NodeJS' }
         Assert-MockCalled Complete-UpdateExecution 1 -ParameterFilter { $Action.Name -eq 'NodeJS' -and $Execution.ExitCode -eq 0 }
+    }
+
+    It 'excludes registry actions and refreshes successful automatic updates in force mode' {
+        $results.AvailableUpdates = @(
+            @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct' },
+            @{ Name = 'npm registry'; Command = 'npm config set registry'; Type = 'registry' }
+        )
+        Mock Invoke-ParallelUpdates { }
+        Mock Refresh-ToolVersion { $true }
+        Mock Show-ResultsTable { }
+
+        Invoke-ForceUpdates
+
+        Assert-MockCalled Invoke-ParallelUpdates 1 -ParameterFilter {
+            $Updates.Count -eq 1 -and $Updates[0].Name -eq 'Example CLI'
+        }
+        Assert-MockCalled Refresh-ToolVersion 1 -ParameterFilter { $ToolName -eq 'Example CLI' }
+        Assert-MockCalled Refresh-ToolVersion 0 -ParameterFilter { $ToolName -eq 'npm registry' }
     }
 }
 
@@ -476,6 +512,52 @@ Describe 'Parallel check orchestration' {
         Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
 
         $results.Tools['Synthetic CLI'].Installed | Should Be '1.0.0'
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'stops an overlong check and merges its timeout marker' {
+        $results.Tools = @{}
+        $results.Errors = @()
+        $checks = @(
+            @{
+                Name = 'Slow CLI'
+                Block = {
+                    while ($true) { $null = 1 + 1 }
+                }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 1
+
+        $results.Tools['Slow CLI'].Installed | Should Be 'unknown'
+        $results.Tools['Slow CLI'].CheckTimedOut | Should Be $true
+        $results.Errors[0] | Should Be 'Slow CLI check timed out after 1s'
+    }
+
+    It 'merges checks in declaration order when they complete out of order' {
+        $results.Tools = @{}
+        $results.Updates = @()
+        $results.Errors = @()
+        $checks = @(
+            @{
+                Name = 'First CLI'
+                Block = {
+                    $waitHandle = [System.Threading.ManualResetEventSlim]::new($false)
+                    $null = $waitHandle.Wait(300)
+                    $results.Updates += 'First CLI'
+                }
+            },
+            @{
+                Name = 'Second CLI'
+                Block = { $results.Updates += 'Second CLI' }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 2 -TimeoutSec 5
+
+        $results.Updates.Count | Should Be 2
+        $results.Updates[0] | Should Be 'First CLI'
+        $results.Updates[1] | Should Be 'Second CLI'
         $results.Errors.Count | Should Be 0
     }
 }

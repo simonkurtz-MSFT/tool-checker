@@ -615,6 +615,32 @@ function Test-IsProductionVersion {
     -not [string]::IsNullOrWhiteSpace($Version) -and $Version.Trim() -match '^v?\d+\.\d+\.\d+(?:\.0)?$'
 }
 
+function Set-LatestToolVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$ToolNames,
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$LatestVersion,
+        [bool]$ProductionReleasesOnly = $true,
+        [string]$VersionLabel = 'version'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LatestVersion)) { return $false }
+    if ($ProductionReleasesOnly -and -not (Test-IsProductionVersion $LatestVersion)) {
+        Write-Warning "  Latest $VersionLabel '$LatestVersion' is not a full production semantic version"
+        return $false
+    }
+
+    foreach ($toolName in $ToolNames) {
+        if (-not $results.Tools.ContainsKey($toolName)) {
+            throw "Cannot set latest version for unregistered tool '$toolName'."
+        }
+        $results.Tools[$toolName].Latest = $LatestVersion
+    }
+    $true
+}
+
 function Get-LatestProductionNpmVersion {
     param([object]$ApiData)
 
@@ -881,13 +907,8 @@ function Get-StandardToolUpdates {
 
     if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
         $latestVersion = Get-WingetLatestVersion -ToolName $ToolName -PackageId $config.WingetId
-        if (-not $latestVersion) { return }
-        if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-            Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
-            return
-        }
+        if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'WinGet version')) { return }
 
-        $results.Tools[$ToolName].Latest = $latestVersion
         $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
         if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
             Write-Warning "  $ToolName has available updates in WinGet: $InstalledVersion -> $latestVersion"
@@ -906,11 +927,7 @@ function Get-StandardToolUpdates {
             if ($null -ne $latestVersion) {
                 $latestVersion = "$latestVersion".Trim().TrimEnd('.')
             }
-            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-                Write-Warning "  Latest reported version '$latestVersion' is not a full production semantic version"
-                return
-            }
-            $results.Tools[$ToolName].Latest = $latestVersion
+            if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'reported version')) { return }
             $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
             if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
                 Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
@@ -934,10 +951,6 @@ function Get-StandardToolUpdates {
 
         $latestVersion = Get-LatestVersionFromApi -ToolName $ToolName -ApiData $apiData
         if (-not $latestVersion) { Write-Warning "  Could not determine latest version"; return }
-        if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-            Write-Warning "  Latest version '$latestVersion' is not a full production semantic version"
-            return
-        }
 
         $npmRelease = $null
         $isNpmPackage = $config.VersionExtractor -eq "npmDistTagLatest"
@@ -951,7 +964,7 @@ function Get-StandardToolUpdates {
             }
             $results.Tools[$ToolName].AgeDays = if ($npmRelease) { $npmRelease.AgeDays } else { $null }
         }
-        $results.Tools[$ToolName].Latest = $latestVersion
+        if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
 
         if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
             $ageLabel = if ($npmRelease) { " ($($npmRelease.AgeDays) days old)" } elseif ($isNpmPackage) { " (age unknown)" } else { "" }
@@ -1667,13 +1680,8 @@ function Test-PythonInstallManager {
 
     Write-Host "  Checking for $toolName updates..."
     $latestVersion = Get-WingetLatestVersion -ToolName $toolName -PackageId $config.WingetId
-    if (-not $latestVersion) { return }
-    if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-        Write-Warning "  Latest WinGet version '$latestVersion' is not a full production semantic version"
-        return
-    }
+    if (-not (Set-LatestToolVersion -ToolNames $toolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'WinGet version')) { return }
 
-    $results.Tools[$toolName].Latest = $latestVersion
     if (Register-ToolUpdate -Name $toolName -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
         Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"
         Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
@@ -1831,13 +1839,9 @@ function Test-PowerShell {
                 $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
                 $releases.tag_name -replace 'v', ''
             }
-            if (-not $latestVersion) { return }
-            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestVersion)) {
-                Write-Warning "  Latest version '$latestVersion' is not a full production semantic version"
-                return
-            }
-            $results.Tools["PowerShell"].Latest = $latestVersion
-            if ($results.Tools["PowerShell Core"]) { $results.Tools["PowerShell Core"].Latest = $latestVersion }
+            $latestToolNames = @('PowerShell')
+            if ($results.Tools['PowerShell Core']) { $latestToolNames += 'PowerShell Core' }
+            if (-not (Set-LatestToolVersion -ToolNames $latestToolNames -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
 
             if (Register-ToolUpdate -Name 'PowerShell' -InstalledVersion $pwshVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
                 $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
@@ -2220,30 +2224,124 @@ function Invoke-UvWindowsInstall {
     }
 }
 
+function Get-AvailableActions {
+    param([switch]$RegistryOnly)
+
+    $actions = @()
+    foreach ($notInstalled in $results.NotInstalled | Where-Object { -not $RegistryOnly }) {
+        $command = Get-InstallCommand -NotInstalledEntry $notInstalled
+        $suffix = if ([string]::IsNullOrWhiteSpace($command)) { ' (no install command for this platform)' } else { '' }
+        $actions += @{
+            Name = $notInstalled.Name
+            Label = "Install $($notInstalled.Name)$suffix"
+            Type = 'install'
+            Command = $command
+        }
+    }
+
+    if (-not $SkipUpdate) {
+        foreach ($update in $results.AvailableUpdates | Where-Object { -not $RegistryOnly -or $_.Type -eq 'registry' }) {
+            $details = if ($update.Details) { " ($($update.Details))" } else { '' }
+            $verb = if ($update.Type -eq 'registry') { 'Align' } else { 'Update' }
+            $actions += @{
+                Name = $update.Name
+                Label = "$verb $($update.Name)$details"
+                Type = $update.Type
+                Command = $update.Command
+                RegistryKey = $update.RegistryKey
+                Version = $update.Version
+            }
+        }
+    }
+
+    $actions
+}
+
+function Invoke-ActionCommand {
+    param([Parameter(Mandatory)][object]$Action)
+
+    if ($Action.Type -eq 'registry') {
+        return Set-RegistryConfiguration -RegistryKey $Action.RegistryKey -EnvironmentConfig $script:RegistryEnvironment
+    }
+    if ($Action.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+        return Invoke-UvWindowsInstall
+    }
+    if ($Action.Type -eq 'node-direct') {
+        return Invoke-NodeWindowsUpdate -Version $Action.Version
+    }
+    Invoke-ToolCommand -Command $Action.Command -Type $Action.Type
+}
+
+function Test-WingetNoUpdateResult {
+    param(
+        [Parameter(Mandatory)][object]$Action,
+        [int]$ExitCode,
+        [string]$OutputText = ''
+    )
+
+    $wingetNoUpdateCodes = @(-1978335212, -1978335189, -1978335215)
+    $isWingetCommand = $Action.Type -like 'winget*' -or $Action.Command -match '(^|\s)winget(\s|$)'
+    $isWingetCommand -and (
+        ($ExitCode -in $wingetNoUpdateCodes) -or
+        $OutputText -match 'No applicable upgrade found' -or
+        $OutputText -match 'No newer package version(s)? found' -or
+        $OutputText -match 'No available upgrade found' -or
+        $OutputText -match 'No installed package found matching'
+    )
+}
+
+function Complete-UpdateExecution {
+    param(
+        [Parameter(Mandatory)][object]$Action,
+        [Parameter(Mandatory)][object]$Execution,
+        [switch]$Refresh
+    )
+
+    $exitCode = if ($null -ne $Execution.ExitCode) { [int]$Execution.ExitCode } else { 1 }
+    $outputText = @($Execution.Output) -join "`n"
+    if ($outputText) { Write-Host $outputText.TrimEnd() }
+
+    if ($exitCode -eq 0) {
+        Write-Success "Update completed: $($Action.Name)"
+        $results.UpdateFailed = @($results.UpdateFailed | Where-Object { $_ -ne $Action.Name })
+        if ($Refresh) {
+            $refreshed = Refresh-ToolVersion -ToolName $Action.Name
+            if ($refreshed -and $results.Tools.ContainsKey($Action.Name)) {
+                Write-Host "  Verified version: $($results.Tools[$Action.Name].Installed)"
+            } elseif ($Action.Name -eq 'ncu global packages') {
+                Write-Host '  Verified global npm package versions refreshed'
+            }
+        }
+        return $true
+    }
+
+    if (Test-WingetNoUpdateResult -Action $Action -ExitCode $exitCode -OutputText $outputText) {
+        $message = "Skipped: $($Action.Name) - winget has no newer package yet | Command: $($Action.Command) | Exit code: $exitCode"
+        Write-Warning $message
+    } elseif ($outputText -match 'EALLOWREMOTE') {
+        $message = "Failed: $($Action.Name) - npm rejected this package as a remote dependency; reinstall it from the configured registry before retrying | Command: $($Action.Command)"
+        Write-Error $message
+    } elseif ($Action.Command -match '^\s*uv\s+self\s+update\b' -and $outputText -match 'being used by another process|Access is denied|os error 32|failed to replace|failed to rename') {
+        $message = "Failed: $($Action.Name) - uv.exe is in use | Command: $($Action.Command) | Exit code: $exitCode"
+        Write-Error $message
+    } elseif ($Action.Command -match '^\s*uv\s+self\s+update\b') {
+        $message = "Failed: $($Action.Name) - 'uv self update' failed | Command: $($Action.Command) | Exit code: $exitCode"
+        Write-Error $message
+    } else {
+        $message = "Failed: $($Action.Name) | Command: $($Action.Command) | Exit code: $exitCode"
+        Write-Error $message
+    }
+
+    if ($Action.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $Action.Name }
+    $results.Errors += $message
+    $false
+}
+
 function Invoke-ActionMenu {
     param([switch]$RegistryOnly)
 
-    $hasInstalls = $results.NotInstalled.Count -gt 0
-    $hasUpdates  = $results.AvailableUpdates.Count -gt 0 -and -not $SkipUpdate
-
-    if (-not $hasInstalls -and -not $hasUpdates) { return }
-
-    # Build a unified flat list: installs first, then updates
-    $actions = @()   # each entry: @{ Name; Label; Type; Command }
-
-    foreach ($ni in $results.NotInstalled | Where-Object { -not $RegistryOnly }) {
-        $cmd = Get-InstallCommand -NotInstalledEntry $ni
-        $suffix = if ([string]::IsNullOrWhiteSpace($cmd)) { " (no install command for this platform)" } else { "" }
-        $actions += @{ Name = $ni.Name; Label = "Install $($ni.Name)$suffix"; Type = "install"; Command = $cmd }
-    }
-
-    if ($hasUpdates) {
-        foreach ($u in $results.AvailableUpdates | Where-Object { -not $RegistryOnly -or $_.Type -eq 'registry' }) {
-            $d = if ($u.Details) { " ($($u.Details))" } else { "" }
-            $verb = if ($u.Type -eq 'registry') { 'Align' } else { 'Update' }
-            $actions += @{ Name = $u.Name; Label = "$verb $($u.Name)$d"; Type = $u.Type; Command = $u.Command; RegistryKey = $u.RegistryKey; Version = $u.Version }
-        }
-    }
+    $actions = @(Get-AvailableActions -RegistryOnly:$RegistryOnly)
+    if ($actions.Count -eq 0) { return }
 
     $completedIdx = @()
     while ($true) {
@@ -2300,41 +2398,12 @@ function Invoke-ActionMenu {
                 Write-Host "Executing: $($a.Command)"
             }
             try {
-                # WinGet emits terminal progress controls that become noisy text
-                # when captured through the PowerShell pipeline. Run it as a
-                # native process with file redirection, then read its final output.
-                $execution = if ($a.Type -eq 'registry') {
-                    Set-RegistryConfiguration -RegistryKey $a.RegistryKey -EnvironmentConfig $script:RegistryEnvironment
-                } elseif ($isUvWindowsAction) {
-                    Invoke-UvWindowsInstall
-                } elseif ($a.Type -eq 'node-direct') {
-                    Invoke-NodeWindowsUpdate -Version $a.Version
-                } else {
-                    Invoke-ToolCommand -Command $a.Command -Type $a.Type
-                }
+                $execution = Invoke-ActionCommand -Action $a
                 $outputText = $execution.Output
                 $exitCode   = $execution.ExitCode
-                if ($outputText) { Write-Host $outputText.TrimEnd() }
-
-                # --- Soft-failure classification -------------------------------
-
-                # winget often trails upstream release notes by hours/days.
-                # When that happens winget returns a non-zero exit code but its
-                # output clearly says there is no newer package. Treat that as a
-                # graceful skip rather than an error. We also check known winget
-                # "no applicable update" exit codes (0x8A150014 and friends),
-                # since --silent often suppresses the message entirely.
-                $wingetNoUpdateCodes = @(-1978335212, -1978335189, -1978335215)
-                $isWingetCmd     = $a.Type -like 'winget*' -or $a.Command -match '(^|\s)winget(\s|$)'
-                $wingetNoUpgrade = $isWingetCmd -and (
-                    ($exitCode -in $wingetNoUpdateCodes) -or
-                    $outputText -match 'No applicable upgrade found' -or
-                    $outputText -match 'No newer package version(s)? found' -or
-                    $outputText -match 'No available upgrade found' -or
-                    $outputText -match 'No installed package found matching'
-                )
 
                 if ($a.Type -eq 'registry') {
+                    if ($outputText) { Write-Host $outputText.TrimEnd() }
                     if ($exitCode -eq 0) {
                         Write-Success "Registry aligned: $($a.Name)"
                         $completedIdx += $remaining[$ri].Idx
@@ -2344,6 +2413,7 @@ function Invoke-ActionMenu {
                         $results.Errors += $message
                     }
                 } elseif ($a.Type -eq "install") {
+                    if ($outputText) { Write-Host $outputText.TrimEnd() }
                     # For installs, command availability is the real success indicator
                     # (winget may return non-zero even when the app is already installed)
                     $cfg = $toolsConfig[$a.Name]
@@ -2359,7 +2429,7 @@ function Invoke-ActionMenu {
                         Refresh-ToolVersion -ToolName $a.Name | Out-Null
                         $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $a.Name })
                         $completedIdx += $remaining[$ri].Idx
-                    } elseif ($wingetNoUpgrade) {
+                    } elseif (Test-WingetNoUpdateResult -Action $a -ExitCode $exitCode -OutputText $outputText) {
                         $message = "Install could not be verified for $($a.Name). Command: $($a.Command) | Exit code: $exitCode | The package manager reports no applicable package, but '$($cfg.Command)' is not available."
                         Write-Error $message
                         $results.Errors += $message
@@ -2368,32 +2438,8 @@ function Invoke-ActionMenu {
                         Write-Error $message
                         $results.Errors += $message
                     }
-                } elseif ($exitCode -eq 0) {
-                    Write-Success "Update completed: $($a.Name)"
-                    $results.UpdateFailed = @($results.UpdateFailed | Where-Object { $_ -ne $a.Name })
-                    $refreshed = Refresh-ToolVersion -ToolName $a.Name
-                    if ($refreshed -and $results.Tools.ContainsKey($a.Name)) {
-                        Write-Host "  Verified version: $($results.Tools[$a.Name].Installed)"
-                    } elseif ($a.Name -eq "ncu global packages") {
-                        Write-Host "  Verified global npm package versions refreshed"
-                    }
+                } elseif (Complete-UpdateExecution -Action $a -Execution $execution -Refresh) {
                     $completedIdx += $remaining[$ri].Idx
-                } elseif ($wingetNoUpgrade) {
-                    Write-Warning "winget does not yet have a newer package for $($a.Name)."
-                    Write-Host "  The release notes show a newer version, but winget typically"
-                    Write-Host "  trails upstream publishing by hours or days. Try again later."
-                    Write-Host "  Release notes: $(Get-ReleaseNotesUrl -ToolName $a.Name)"
-                    if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
-                } else {
-                    $reason = if ($outputText -match 'EALLOWREMOTE') {
-                        'npm rejected this package as a remote dependency; reinstall it from the configured registry before retrying'
-                    } else {
-                        "Exit code: $exitCode"
-                    }
-                    $message = "Update failed for $($a.Name). Command: $($a.Command) | $reason"
-                    Write-Error $message
-                    if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
-                    $results.Errors += $message
                 }
             } catch {
                 $message = "$($a.Type) failed for $($a.Name). Command: $($a.Command) | $(Get-DetailedErrorMessage $_)"
@@ -2436,34 +2482,11 @@ function Invoke-ParallelUpdates {
 
     $jobs = @()
     foreach ($u in $Updates) {
-        if ($u.Type -eq 'node-direct') {
-            Write-Host "Starting: NodeJS v$($u.Version) official installer"
-            $execution = Invoke-NodeWindowsUpdate -Version $u.Version
-            if ($execution.Output) { Write-Host $execution.Output.TrimEnd() }
-            if ($execution.ExitCode -eq 0) {
-                Write-Success 'Completed successfully: NodeJS'
-            } else {
-                $message = "Failed: NodeJS official installer | Exit code: $($execution.ExitCode)"
-                Write-Error $message
-                if ('NodeJS' -notin $results.UpdateFailed) { $results.UpdateFailed += 'NodeJS' }
-                $results.Errors += $message
-            }
-            Write-Host ''
-            continue
-        }
-
-        if ($u.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            Write-Host 'Starting: uv (cleanup + winget install)'
-            $execution = Invoke-UvWindowsInstall
-            if ($execution.Output) { Write-Host $execution.Output.TrimEnd() }
-            if ($execution.ExitCode -eq 0) {
-                Write-Success 'Completed successfully: uv'
-            } else {
-                $message = "Failed: uv cleanup and winget install | Exit code: $($execution.ExitCode)"
-                Write-Error $message
-                if ('uv' -notin $results.UpdateFailed) { $results.UpdateFailed += 'uv' }
-                $results.Errors += $message
-            }
+        $requiresDirectExecution = $u.Type -eq 'node-direct' -or ($u.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT'))
+        if ($requiresDirectExecution) {
+            Write-Host "Starting: $($u.Name)"
+            $execution = Invoke-ActionCommand -Action $u
+            Complete-UpdateExecution -Action $u -Execution $execution | Out-Null
             Write-Host ''
             continue
         }
@@ -2498,53 +2521,7 @@ function Invoke-ParallelUpdates {
             $result = @($execution.Output)
             if ($execution.Error) { $result += $execution.Error }
             $outputText = if ($result.Count -gt 0) { ($result | Out-String) } else { "" }
-            $cmd        = $j.Update.Command
-            $isWinget   = $j.Update.Type -like 'winget*' -or $cmd -match '(^|\s)winget(\s|$)'
-            $wingetNoUpdateCodes = @(-1978335212, -1978335189, -1978335215)
-            $wingetSoft = $isWinget -and (
-                ($exitCode -in $wingetNoUpdateCodes) -or
-                $outputText -match 'No applicable upgrade found' -or
-                $outputText -match 'No newer package version(s)? found' -or
-                $outputText -match 'No available upgrade found'
-            )
-            $isUvSelfUpdate     = $cmd -match '^\s*uv\s+self\s+update\b'
-            $uvSelfUpdateFailed = $isUvSelfUpdate -and $exitCode -ne 0
-            $uvInUse = $uvSelfUpdateFailed -and (
-                $outputText -match 'being used by another process' -or
-                $outputText -match 'Access is denied' -or
-                $outputText -match 'os error 32' -or
-                $outputText -match 'failed to replace|failed to rename'
-            )
-
-            if ($exitCode -eq 0) {
-                Write-Success "Completed successfully: $($j.Update.Name)"
-            } elseif ($wingetSoft) {
-                $message = "Skipped: $($j.Update.Name) — winget has no newer package yet | Command: $cmd | Exit code: $exitCode"
-                Write-Warning $message
-                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-                $results.Errors += $message
-            } elseif ($outputText -match 'EALLOWREMOTE') {
-                $message = "Failed: $($j.Update.Name) — npm rejected this package as a remote dependency; reinstall it from the configured registry before retrying | Command: $cmd"
-                Write-Error $message
-                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-                $results.Errors += $message
-            } elseif ($uvInUse) {
-                $message = "Failed: $($j.Update.Name) — uv.exe is in use | Command: $cmd | Exit code: $exitCode"
-                Write-Error $message
-                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-                $results.Errors += $message
-            } elseif ($uvSelfUpdateFailed) {
-                $message = "Failed: $($j.Update.Name) — 'uv self update' failed | Command: $cmd | Exit code: $exitCode"
-                Write-Error $message
-                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-                $results.Errors += $message
-            } else {
-                $message = "Failed: $($j.Update.Name) | Command: $cmd | Exit code: $exitCode"
-                Write-Error $message
-                if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-                $results.Errors += $message
-            }
-            if ($result) { $result | ForEach-Object { Write-Host "  $_" } }
+            Complete-UpdateExecution -Action $j.Update -Execution @{ Output = $outputText; ExitCode = $exitCode } | Out-Null
         } else {
             $message = "Failed: $($j.Update.Name) | Job state: $state | Command: $($j.Update.Command)"
             Write-Error $message
@@ -2575,7 +2552,7 @@ function Invoke-ParallelChecks {
         'Write-Header','Write-Success','Write-Warning','Write-Error',
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
-        'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
+        'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',

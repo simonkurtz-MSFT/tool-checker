@@ -59,6 +59,44 @@ Describe 'Version comparison' {
     }
 }
 
+Describe 'Latest version acceptance' {
+    BeforeEach {
+        $results.Tools = @{
+            'Example CLI' = @{ Installed = '1.0.0'; Latest = '' }
+            'Example CLI Core' = @{ Installed = '1.0.0'; Latest = '' }
+        }
+    }
+
+    It 'assigns an accepted production version to every requested tool row' {
+        $accepted = Set-LatestToolVersion -ToolNames @('Example CLI', 'Example CLI Core') -LatestVersion '1.1.0'
+
+        $accepted | Should Be $true
+        $results.Tools['Example CLI'].Latest | Should Be '1.1.0'
+        $results.Tools['Example CLI Core'].Latest | Should Be '1.1.0'
+    }
+
+    It 'rejects a missing candidate without changing tool state' {
+        $accepted = Set-LatestToolVersion -ToolNames 'Example CLI' -LatestVersion $null
+
+        $accepted | Should Be $false
+        $results.Tools['Example CLI'].Latest | Should Be ''
+    }
+
+    It 'rejects a prerelease without changing tool state' {
+        $accepted = Set-LatestToolVersion -ToolNames 'Example CLI' -LatestVersion '1.1.0-preview.1'
+
+        $accepted | Should Be $false
+        $results.Tools['Example CLI'].Latest | Should Be ''
+    }
+
+    It 'accepts a prerelease when production-only filtering is disabled' {
+        $accepted = Set-LatestToolVersion -ToolNames 'Example CLI' -LatestVersion '1.1.0-preview.1' -ProductionReleasesOnly $false
+
+        $accepted | Should Be $true
+        $results.Tools['Example CLI'].Latest | Should Be '1.1.0-preview.1'
+    }
+}
+
 Describe 'Available update construction' {
     BeforeEach {
         $results.AvailableUpdates = @()
@@ -161,6 +199,94 @@ Describe 'Standard tool update flow' {
         $results.Tools['Azure Bicep CLI'].Latest | Should Be '0.46.1'
         $results.Updates[0] | Should Be 'Azure Bicep CLI'
         $results.AvailableUpdates[0].Command | Should Be $toolsConfig['Azure Bicep CLI'].UpdateCommand
+    }
+}
+
+Describe 'Action planning' {
+    BeforeEach {
+        $script:SkipUpdate = $false
+        $results.NotInstalled = @(
+            [PSCustomObject]@{
+                Name = 'Missing CLI'
+                InstallCommands = [ordered]@{ $script:PlatformKey = 'install missing-cli' }
+            }
+        )
+        $results.AvailableUpdates = @(
+            @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct'; Details = '1.0.0 -> 1.1.0' },
+            @{ Name = 'npm registry'; Command = ''; Type = 'registry'; Details = 'old -> new'; RegistryKey = 'npm' }
+        )
+    }
+
+    It 'builds install and update actions in display order' {
+        $actions = @(Get-AvailableActions)
+
+        $actions.Count | Should Be 3
+        $actions[0].Label | Should Be 'Install Missing CLI'
+        $actions[0].Command | Should Be 'install missing-cli'
+        $actions[1].Label | Should Be 'Update Example CLI (1.0.0 -> 1.1.0)'
+        $actions[2].Label | Should Be 'Align npm registry (old -> new)'
+    }
+
+    It 'returns only registry actions for approval-gated alignment' {
+        $actions = @(Get-AvailableActions -RegistryOnly)
+
+        $actions.Count | Should Be 1
+        $actions[0].Type | Should Be 'registry'
+        $actions[0].RegistryKey | Should Be 'npm'
+    }
+}
+
+Describe 'Action execution' {
+    BeforeEach {
+        $results.UpdateFailed = @()
+        $results.Errors = @()
+    }
+
+    It 'dispatches ordinary actions through the tool command runner' {
+        Mock Invoke-ToolCommand { @{ Output = 'done'; ExitCode = 0 } }
+        $action = @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct' }
+
+        $execution = Invoke-ActionCommand -Action $action
+
+        $execution.ExitCode | Should Be 0
+        Assert-MockCalled Invoke-ToolCommand 1 -ParameterFilter { $Command -eq 'example update' -and $Type -eq 'direct' }
+    }
+
+    It 'dispatches direct Node updates through the verified installer' {
+        Mock Invoke-NodeWindowsUpdate { @{ Output = 'done'; ExitCode = 0 } }
+        $action = @{ Name = 'NodeJS'; Command = 'Node.js MSI'; Type = 'node-direct'; Version = '26.8.1' }
+
+        $execution = Invoke-ActionCommand -Action $action
+
+        $execution.ExitCode | Should Be 0
+        Assert-MockCalled Invoke-NodeWindowsUpdate 1 -ParameterFilter { $Version -eq '26.8.1' }
+    }
+
+    It 'completes a successful update without recording a failure' {
+        $action = @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct' }
+
+        Complete-UpdateExecution -Action $action -Execution @{ Output = 'done'; ExitCode = 0 } | Should Be $true
+        $results.UpdateFailed.Count | Should Be 0
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'classifies a WinGet no-update response as a retryable failure' {
+        $action = @{ Name = 'Example CLI'; Command = 'winget upgrade Example.CLI'; Type = 'winget' }
+
+        Complete-UpdateExecution -Action $action -Execution @{ Output = 'No applicable upgrade found'; ExitCode = 1 } | Should Be $false
+        $results.UpdateFailed[0] | Should Be 'Example CLI'
+        $results.Errors[0] | Should Match '^Skipped: Example CLI'
+    }
+
+    It 'uses shared dispatch and completion for direct force-mode updates' {
+        Mock Invoke-ActionCommand { @{ Output = 'done'; ExitCode = 0 } }
+        Mock Complete-UpdateExecution { $true }
+        $update = @{ Name = 'NodeJS'; Command = 'Node.js MSI'; Type = 'node-direct'; Version = '26.8.1' }
+
+        Invoke-ParallelUpdates -Updates @($update)
+
+        Assert-MockCalled Invoke-ActionCommand 1 -ParameterFilter { $Action.Name -eq 'NodeJS' }
+        Assert-MockCalled Complete-UpdateExecution 1 -ParameterFilter { $Action.Name -eq 'NodeJS' -and $Execution.ExitCode -eq 0 }
     }
 }
 

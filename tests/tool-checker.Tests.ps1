@@ -74,6 +74,26 @@ Describe 'Tool configuration' {
     }
 }
 
+Describe 'Result state' {
+    It 'creates complete independent result containers' {
+        $first = New-ToolCheckResults
+        $second = New-ToolCheckResults
+        $expectedKeys = @(
+            'AvailableUpdates', 'DotNetSDKs', 'Errors', 'GlobalNpmPackageUpdates',
+            'GlobalNpmUpdateCommand', 'MaturityBlockedUpdates', 'NotInstalled',
+            'RegistryChecks', 'Tools', 'UpdateFailed', 'Updates'
+        ) | Sort-Object
+
+        @($first.Keys | Sort-Object) -join ',' | Should Be ($expectedKeys -join ',')
+        $first.Tools['Example CLI'] = @{ Installed = '1.0.0' }
+        $first.Errors += 'example error'
+
+        $second.Tools.Count | Should Be 0
+        $second.Errors.Count | Should Be 0
+        $second.GlobalNpmUpdateCommand | Should Be 'ncu -g -u --loglevel=error'
+    }
+}
+
 Describe 'Version comparison' {
     It 'orders multi-digit semantic version components numerically' {
         Test-UpdateAvailable -InstalledVersion '1.9.0' -LatestVersion '1.10.0' | Should Be $true
@@ -282,6 +302,33 @@ Describe 'Global npm output parsing' {
 }
 
 Describe '.NET SDK release planning' {
+    It 'parses SDK list output and annotates every row from its channel' {
+        $records = ConvertFrom-DotNetSDKList -OutputLines @(
+            '8.0.100 [C:\Program Files\dotnet\sdk]',
+            '8.0.301 [C:\Program Files\dotnet\sdk]',
+            'not an SDK row'
+        )
+        $inventory = Get-DotNetSDKInventory -SdkRecords $records -LatestSdkByChannel @{
+            '8.0' = @{ LatestSdk = '8.0.410'; SupportPhase = 'active' }
+        }
+
+        $records.Count | Should Be 2
+        $records[0].Path | Should Be 'C:\Program Files\dotnet\sdk'
+        $inventory.ByMajor['8'].Count | Should Be 2
+        $inventory.DotNetSDKs['8.0.100'].Latest | Should Be '8.0.410'
+        $inventory.DotNetSDKs['8.0.100'].HighestInstalled | Should Be '8.0.301'
+        $inventory.Tools['.NET SDK 8.0.301'].Latest | Should Be '8.0.410'
+    }
+
+    It 'prefers an orchestrator-provided latest version for a major' {
+        $records = ConvertFrom-DotNetSDKList -OutputLines @('9.0.100 [C:\dotnet\sdk]')
+        $inventory = Get-DotNetSDKInventory -SdkRecords $records `
+            -LatestSdkByChannel @{ '9.0' = @{ LatestSdk = '9.0.200' } } `
+            -LatestSdkByMajor @{ '9' = '9.0.203' }
+
+        $inventory.DotNetSDKs['9.0.100'].Latest | Should Be '9.0.203'
+    }
+
     It 'groups installed SDKs and returns newer supported production majors' {
         $index = [PSCustomObject]@{ 'releases-index' = @(
             [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.101'; 'support-phase' = 'active' },
@@ -310,6 +357,46 @@ Describe '.NET SDK release planning' {
 
         $plan.LatestSdkByChannel.ContainsKey('11.0') | Should Be $true
         $plan.NewerMajors.Count | Should Be 0
+    }
+}
+
+Describe 'Python launcher planning' {
+    It 'parses current and legacy installed-list formats' {
+        $versions = ConvertFrom-PythonLauncherList -OutputLines @(
+            '3.13[-64] * Python 3.13.7',
+            '-V:3.12-64 * C:\Python312\python.exe',
+            'launcher heading'
+        )
+
+        $versions.Count | Should Be 2
+        $versions[0].Channel | Should Be '3.13'
+        $versions[0].Version | Should Be '3.13.7'
+        $versions[0].IsDefault | Should Be $true
+        $versions[1].Version | Should Be '3.12-64'
+    }
+
+    It 'normalizes legacy online rows and selects same-channel updates' {
+        $installed = ConvertFrom-PythonLauncherList -OutputLines @('-V:3.12 * C:\Python312\python.exe')
+        $available = ConvertFrom-PythonLauncherList -OutputLines @('-V:3.12-2', '-V:3.12-1') -Online
+        $plan = Get-PythonLauncherUpdatePlan -InstalledVersions $installed -AvailableVersions $available
+
+        $available[0].Version | Should Be '3.12.2'
+        $plan.Updates.Count | Should Be 1
+        $plan.Updates[0].Latest | Should Be '3.12.2'
+    }
+
+    It 'selects the newest available channel above the installed channels' {
+        $installed = ConvertFrom-PythonLauncherList -OutputLines @('3.12[-64] Python 3.12.8')
+        $available = ConvertFrom-PythonLauncherList -OutputLines @(
+            '3.12[-64] Python 3.12.9',
+            '3.13[-64] Python 3.13.2',
+            '3.14[-64] Python 3.14.0'
+        ) -Online
+        $plan = Get-PythonLauncherUpdatePlan -InstalledVersions $installed -AvailableVersions $available
+
+        $plan.Updates[0].Latest | Should Be '3.12.9'
+        $plan.NewerChannel | Should Be '3.14'
+        $plan.LatestByChannel['3.14'] | Should Be '3.14.0'
     }
 }
 

@@ -71,20 +71,24 @@ $script:PlatformKey = & {
     "$os ($arch)"
 }
 
-# Accumulates everything the script discovers
-$results = @{
-    Tools                   = @{}        # Name -> @{ Installed; Latest; [HighestInstalled] }
-    DotNetSDKs              = @{}        # version -> @{ Installed; Latest; Path; HighestInstalled }
-    NotInstalled            = @()        # @{ Name; InstallCommands }
-    Updates                 = @()        # free-text update labels
-    Errors                  = @()        # error messages
-    UpdateFailed            = @()        # tool names where update was attempted but failed
-    AvailableUpdates        = @()        # @{ Name; Command; Type; Details }
-    MaturityBlockedUpdates  = @()        # @{ Name; AgeDays; RequiredAgeDays }
-    GlobalNpmPackageUpdates = @()        # @{ Name; Current; Latest }
-    GlobalNpmUpdateCommand  = "ncu -g -u --loglevel=error"
-    RegistryChecks          = @()        # @{ Key; Name; Current; Expected; Status; Details }
+function New-ToolCheckResults {
+    @{
+        Tools                   = @{}
+        DotNetSDKs              = @{}
+        NotInstalled            = @()
+        Updates                 = @()
+        Errors                  = @()
+        UpdateFailed            = @()
+        AvailableUpdates        = @()
+        MaturityBlockedUpdates  = @()
+        GlobalNpmPackageUpdates = @()
+        GlobalNpmUpdateCommand  = 'ncu -g -u --loglevel=error'
+        RegistryChecks          = @()
+    }
 }
+
+# Accumulates everything the script discovers
+$results = New-ToolCheckResults
 
 # --- Load tool-checker.json ------------------------------------------------
 
@@ -1121,22 +1125,14 @@ function Refresh-DotNetVersion {
     if (-not (Test-CommandExists "dotnet")) { return }
     $sdkList = dotnet --list-sdks 2>$null
     if (-not $sdkList) { return }
+    $sdkRecords = ConvertFrom-DotNetSDKList -OutputLines $sdkList
+    if ($sdkRecords.Count -eq 0) { return }
 
     # Rebuild installed-SDK inventory from scratch so stale versions disappear
     # and newly-installed patch releases show up.
     $staleKeys = @($results.Tools.Keys | Where-Object { $_ -like ".NET SDK*" })
     foreach ($k in $staleKeys) { $results.Tools.Remove($k) | Out-Null }
     $results.DotNetSDKs.Clear()
-
-    foreach ($line in $sdkList) {
-        $parts = $line -split '\s+\[', 2
-        if ($parts.Count -eq 2) {
-            $ver  = $parts[0].Trim()
-            $path = $parts[1] -replace '\]$', ''
-            $results.DotNetSDKs[$ver]        = @{ Installed = $ver; Latest = ""; Path = $path }
-            $results.Tools[".NET SDK $ver"]  = @{ Installed = $ver; Latest = "" }
-        }
-    }
 
     # Re-fetch latest-per-channel so Latest / HighestInstalled are accurate
     # in the summary table after an upgrade (fixes blank Latest column when
@@ -1146,33 +1142,17 @@ function Refresh-DotNetVersion {
     if ($cfg -and $cfg.ApiUrl) {
         try {
             $releasesIndex = Invoke-RestMethod -Uri $cfg.ApiUrl -TimeoutSec $script:ApiRequestTimeout
-            foreach ($ch in $releasesIndex.'releases-index') {
-                $latestSdkByChannel[$ch.'channel-version'] = $ch.'latest-sdk'
-            }
+            $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($sdkRecords.Version) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $cfg.ProductionReleasesOnly
+            $latestSdkByChannel = $releasePlan.LatestSdkByChannel
         } catch {
             # Network hiccup on refresh is non-fatal; leave Latest blank.
         }
     }
 
-    # Group by major; recompute HighestInstalled and Latest for every entry
-    $byMajor = @{}
-    foreach ($ver in $results.DotNetSDKs.Keys) {
-        $maj = ($ver -split '\.')[0]
-        if (-not $byMajor[$maj]) { $byMajor[$maj] = @() }
-        $byMajor[$maj] += $ver
-    }
-    foreach ($maj in $byMajor.Keys) {
-        $sorted  = $byMajor[$maj] | Sort-Object { [version]$_ }
-        $highest = $sorted | Select-Object -Last 1
-        $chVer   = ($highest -split '\.')[0..1] -join '.'
-        $latest  = if ($latestSdkByChannel.ContainsKey($chVer)) { $latestSdkByChannel[$chVer] } else { "" }
-        foreach ($v in $sorted) {
-            $results.DotNetSDKs[$v].Latest           = $latest
-            $results.DotNetSDKs[$v].HighestInstalled = $highest
-            $results.Tools[".NET SDK $v"].Latest           = $latest
-            $results.Tools[".NET SDK $v"].HighestInstalled = $highest
-        }
-    }
+    $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel
+    foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+    foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
+    $byMajor = $inventory.ByMajor
 
     # Prune .NET items from Updates / AvailableUpdates that are now satisfied
     # (either the patch landed or an equal/higher SDK in the same channel is
@@ -1593,6 +1573,57 @@ function Test-AzureExtensions {
 
 # --- .NET SDK: multiple installed SDKs, channel grouping -------------------
 
+function ConvertFrom-DotNetSDKList {
+    param([Parameter(Mandatory)][array]$OutputLines)
+
+    @($OutputLines | ForEach-Object {
+        if ($_ -match '^\s*(?<Version>\S+)\s+\[(?<Path>.*)\]\s*$') {
+            [PSCustomObject]@{ Version = $Matches.Version; Path = $Matches.Path }
+        }
+    })
+}
+
+function Get-DotNetSDKInventory {
+    param(
+        [Parameter(Mandatory)][array]$SdkRecords,
+        [hashtable]$LatestSdkByChannel = @{},
+        [hashtable]$LatestSdkByMajor = @{}
+    )
+
+    $byMajor = @{}
+    foreach ($record in $SdkRecords) {
+        $major = ($record.Version -split '\.')[0]
+        if (-not $byMajor[$major]) { $byMajor[$major] = @() }
+        $byMajor[$major] += $record.Version
+    }
+
+    $dotNetSDKs = @{}
+    $tools = @{}
+    foreach ($major in $byMajor.Keys) {
+        $sorted = @($byMajor[$major] | Sort-Object { [version]$_ })
+        $highest = $sorted | Select-Object -Last 1
+        $channel = ($highest -split '\.')[0..1] -join '.'
+        $channelRelease = $latestSdkByChannel[$channel]
+        $latest = if ($LatestSdkByMajor.ContainsKey($major)) {
+            $LatestSdkByMajor[$major]
+        } elseif ($channelRelease -is [string]) {
+            $channelRelease
+        } elseif ($channelRelease) {
+            $channelRelease.LatestSdk
+        } else {
+            ''
+        }
+
+        foreach ($version in $sorted) {
+            $record = $SdkRecords | Where-Object Version -eq $version | Select-Object -First 1
+            $dotNetSDKs[$version] = @{ Installed = $version; Latest = $latest; Path = $record.Path; HighestInstalled = $highest }
+            $tools[".NET SDK $version"] = @{ Installed = $version; Latest = $latest; HighestInstalled = $highest }
+        }
+    }
+
+    [PSCustomObject]@{ DotNetSDKs = $dotNetSDKs; Tools = $tools; ByMajor = $byMajor }
+}
+
 function Get-DotNetSDKReleasePlan {
     param(
         [Parameter(Mandatory)][array]$InstalledVersions,
@@ -1650,26 +1681,23 @@ function Test-DotNetSDKs {
     try {
         $sdkList = dotnet --list-sdks 2>$null
         if (-not $sdkList -or $sdkList.Count -eq 0) { Write-Warning "No .NET SDKs found"; return }
+        $sdkRecords = ConvertFrom-DotNetSDKList -OutputLines $sdkList
+        if ($sdkRecords.Count -eq 0) { Write-Warning "No .NET SDKs found"; return }
 
         Write-Success "Installed .NET SDKs:"
-        foreach ($line in $sdkList) {
-            $parts = $line -split '\s+\[', 2
-            if ($parts.Count -eq 2) {
-                $ver  = $parts[0].Trim()
-                $path = $parts[1] -replace '\]$', ''
-                Write-Host "  - $ver"
-                $results.DotNetSDKs[$ver]       = @{ Installed = $ver; Latest = ""; Path = $path }
-                $results.Tools[".NET SDK $ver"] = @{ Installed = $ver; Latest = "" }
-            }
-        }
+        foreach ($record in $sdkRecords) { Write-Host "  - $($record.Version)" }
+        $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords
+        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+        foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
 
         if ($SkipUpdate) { return }
 
         Write-Host "  Checking for .NET SDK updates..."
         $releasesIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
-        $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($results.DotNetSDKs.Keys) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $config.ProductionReleasesOnly
+        $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($sdkRecords.Version) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $config.ProductionReleasesOnly
         $latestSdkByChannel = $releasePlan.LatestSdkByChannel
         $byMajor = $releasePlan.ByMajor
+        $latestSdkByMajor = @{}
 
         Write-Host "`n  Version Summary:"
         $maxLen = ($byMajor.Keys | ForEach-Object { ".NET $_".Length } | Measure-Object -Maximum).Maximum
@@ -1687,16 +1715,17 @@ function Test-DotNetSDKs {
                 }
                 if (-not $latestSdk) { continue }
                 if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestSdk)) { continue }
-                foreach ($v in $sorted) {
-                    $results.DotNetSDKs[$v].Latest = $latestSdk; $results.DotNetSDKs[$v].HighestInstalled = $highest
-                    $results.Tools[".NET SDK $v"].Latest = $latestSdk; $results.Tools[".NET SDK $v"].HighestInstalled = $highest
-                }
+                $latestSdkByMajor[$maj] = $latestSdk
                 if ([version]$latestSdk -gt [version]$highest) {
                     Write-Warning "    .NET $highest -> $latestSdk (update available)"
                     $results.Updates += ".NET SDK: $highest -> $latestSdk"
                 }
             }
         }
+
+        $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel -LatestSdkByMajor $latestSdkByMajor
+        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+        foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
 
         # Newer major versions
         $maxInstalledMajor = $releasePlan.MaxInstalledMajor
@@ -1787,21 +1816,14 @@ function Test-Python {
         try {
             $installed = py list 2>&1
             if ($installed) {
+                $installedVersions = ConvertFrom-PythonLauncherList -OutputLines $installed
                 Write-Host "  Installed Python versions:"
-                foreach ($line in $installed) {
-                    $s = $line.ToString()
-                    if ($s -match '^\s*(\d+\.\d+)\[?-?\d*\]?\s+(\*)?\s*Python\s+(\d+\.\d+\.\d+)') {
-                        $maj = $Matches[1]; $def = if ($Matches[2]) { " (default)" } else { "" }; $full = $Matches[3]
-                        Write-Host "    - Python $full$def"
-                        $results.Tools["Python $maj"] = @{ Installed = $full; Latest = "" }
-                    } elseif ($s -match '^\s*-V:(\d+\.\d+)(-\d+)?\s*(\*)?') {
-                        $v = $Matches[1]; $p = if ($Matches[2]) { $Matches[2] } else { "" }
-                        $def = if ($Matches[3]) { " (default)" } else { "" }
-                        Write-Host "    - Python $v$p$def"
-                        $results.Tools["Python $v"] = @{ Installed = "$v$p"; Latest = "" }
-                    }
+                foreach ($version in $installedVersions) {
+                    $defaultLabel = if ($version.IsDefault) { ' (default)' } else { '' }
+                    Write-Host "    - Python $($version.Version)$defaultLabel"
+                    $results.Tools["Python $($version.Channel)"] = @{ Installed = $version.Version; Latest = "" }
                 }
-                if (-not $SkipUpdate) { Get-PythonUpdateViaPy }
+                if (-not $SkipUpdate) { Get-PythonUpdateViaPy -InstalledVersions $installedVersions }
             }
         } catch { Write-Warning "Unable to list Python versions via py: $_" }
     } elseif (Test-CommandExists "python") {
@@ -1821,45 +1843,106 @@ function Test-Python {
     }
 }
 
+function ConvertFrom-PythonLauncherList {
+    param(
+        [Parameter(Mandatory)][array]$OutputLines,
+        [switch]$Online
+    )
+
+    @($OutputLines | ForEach-Object {
+        $line = $_.ToString()
+        if ($line -match '^\s*(?<Channel>\d+\.\d+)\[?-?\d*\]?\s+(?<Default>\*)?\s*Python\s+(?<Version>\d+\.\d+\.\d+)') {
+            [PSCustomObject]@{
+                Channel = $Matches.Channel
+                Version = $Matches.Version
+                IsDefault = [bool]$Matches.Default
+            }
+        } elseif ($line -match '^\s*-V:(?<Channel>\d+\.\d+)(?<Suffix>-\d+)?\s*(?<Default>\*)?') {
+            $version = if ($Online) {
+                $patch = if ($Matches.Suffix) { $Matches.Suffix -replace '-', '.' } else { '.0' }
+                "$($Matches.Channel)$patch"
+            } else {
+                "$($Matches.Channel)$($Matches.Suffix)"
+            }
+            [PSCustomObject]@{
+                Channel = $Matches.Channel
+                Version = $version
+                IsDefault = [bool]$Matches.Default
+            }
+        }
+    })
+}
+
+function Get-PythonLauncherUpdatePlan {
+    param(
+        [Parameter(Mandatory)][array]$InstalledVersions,
+        [Parameter(Mandatory)][array]$AvailableVersions
+    )
+
+    $installedByChannel = @{}
+    foreach ($version in $InstalledVersions) {
+        $installedByChannel[$version.Channel] = $version.Version
+    }
+    $latestByChannel = @{}
+    foreach ($version in $AvailableVersions) {
+        if (-not $latestByChannel.ContainsKey($version.Channel) -or [version]$version.Version -gt [version]$latestByChannel[$version.Channel]) {
+            $latestByChannel[$version.Channel] = $version.Version
+        }
+    }
+
+    $updates = @()
+    foreach ($channel in $installedByChannel.Keys) {
+        $installed = $installedByChannel[$channel] -replace '-', '.'
+        if ($installed -notmatch '^\d+\.\d+\.\d+$') { $installed = "$installed.0" }
+        if ($latestByChannel.ContainsKey($channel) -and [version]$latestByChannel[$channel] -gt [version]$installed) {
+            $updates += [PSCustomObject]@{
+                Channel = $channel
+                Installed = $installedByChannel[$channel]
+                Latest = $latestByChannel[$channel]
+            }
+        }
+    }
+
+    $highestInstalledChannel = @($installedByChannel.Keys | Sort-Object { [version]$_ } | Select-Object -Last 1)
+    $newerChannel = if ($highestInstalledChannel.Count -gt 0) {
+        $latestByChannel.Keys |
+            Where-Object { [version]$_ -gt [version]$highestInstalledChannel[0] } |
+            Sort-Object { [version]$_ } -Descending |
+            Select-Object -First 1
+    } else {
+        $null
+    }
+
+    [PSCustomObject]@{
+        InstalledByChannel = $installedByChannel
+        LatestByChannel = $latestByChannel
+        Updates = $updates
+        NewerChannel = $newerChannel
+    }
+}
+
 function Get-PythonUpdateViaPy {
+    param([Parameter(Mandatory)][array]$InstalledVersions)
     Write-Host "  Checking for Python updates via py --list-online..."
     try {
         $online = py list --online 2>&1
         if (-not $online) { return }
-
-        $installedMajors = @{}
-        foreach ($key in $results.Tools.Keys) {
-            if ($key -match '^Python (\d+\.\d+)$') { $installedMajors[$Matches[1]] = $results.Tools[$key].Installed }
-        }
-
-        $available = @{}
-        foreach ($line in $online) {
-            $s = $line.ToString()
-            if ($s -match '^\s*(\d+\.\d+)\[?-?\d*\]?\s+.*Python\s+(\d+\.\d+\.\d+)') {
-                $maj = $Matches[1]; $full = $Matches[2]
-                if (-not $available.ContainsKey($maj) -or [version]$full -gt [version]$available[$maj]) { $available[$maj] = $full }
-            } elseif ($s -match '^\s*-V:(\d+\.\d+)(-\d+)?') {
-                $maj = $Matches[1]; $p = if ($Matches[2]) { $Matches[2] -replace '-','.' } else { ".0" }
-                $full = "$maj$p"
-                if (-not $available.ContainsKey($maj) -or [version]$full -gt [version]$available[$maj]) { $available[$maj] = $full }
-            }
-        }
+        $availableVersions = ConvertFrom-PythonLauncherList -OutputLines $online -Online
+        $plan = Get-PythonLauncherUpdatePlan -InstalledVersions $InstalledVersions -AvailableVersions $availableVersions
 
         $found = $false
-        foreach ($maj in $installedMajors.Keys) {
-            $inst = ($installedMajors[$maj] -replace '-','.'); if ($inst -notmatch '^\d+\.\d+\.\d+$') { $inst = "$inst.0" }
-            if ($available.ContainsKey($maj)) {
-                $latest = $available[$maj]; $results.Tools["Python $maj"].Latest = $latest
-                if ([version]$latest -gt [version]$inst) {
-                    Write-Warning "  Python $maj has update available: $($installedMajors[$maj]) -> $latest"
-                    $results.Updates += "Python $maj"; $found = $true
-                    if (!$SkipUpdate) {
-                        Add-AvailableUpdate -Name "Python $maj" -Command "py install $maj --update --quiet" -Type 'py' -Details "$($installedMajors[$maj]) -> $latest"
-                    }
-                }
-            }
+        foreach ($channel in $plan.InstalledByChannel.Keys) {
+            if ($plan.LatestByChannel.ContainsKey($channel)) { $results.Tools["Python $channel"].Latest = $plan.LatestByChannel[$channel] }
+        }
+        foreach ($update in $plan.Updates) {
+            Write-Warning "  Python $($update.Channel) has update available: $($update.Installed) -> $($update.Latest)"
+            $results.Updates += "Python $($update.Channel)"; $found = $true
+            Add-AvailableUpdate -Name "Python $($update.Channel)" -Command "py install $($update.Channel) --update --quiet" -Type 'py' -Details "$($update.Installed) -> $($update.Latest)"
         }
         if (-not $found) { Write-Success "All Python versions are up to date" }
+        if ($plan.NewerChannel) {
+            Write-Warning "  Newer Python major version available: $($plan.NewerChannel) (latest: $($plan.LatestByChannel[$plan.NewerChannel]))"
+        }
     } catch { Write-Warning "  Could not check Python updates: $_" }
 }
 
@@ -2660,14 +2743,14 @@ function Get-ParallelCheckFunctionBlock {
     )
 
     $functionNames = @(
-        'Write-Header','Write-Success','Write-Warning','Write-Error',
+        'New-ToolCheckResults','Write-Header','Write-Success','Write-Warning','Write-Error',
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
-        'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease','Get-NodeReleasePlan','Get-DotNetSDKReleasePlan',
+        'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease','Get-NodeReleasePlan','ConvertFrom-DotNetSDKList','Get-DotNetSDKInventory','Get-DotNetSDKReleasePlan',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','ConvertFrom-NcuGlobalOutput','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
-        'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
+        'ConvertFrom-PythonLauncherList','Get-PythonLauncherUpdatePlan','Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
     )
     $functionNames += @($ToolsConfiguration.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
 
@@ -2683,20 +2766,12 @@ function New-ParallelCheckTimeoutResult {
         [Parameter(Mandatory)][int]$TimeoutSec
     )
 
-    @{
-        Index = $Index
-        Output = @()
-        Tools = @{ $Name = @{ Installed = 'unknown'; Latest = ''; CheckTimedOut = $true } }
-        DotNetSDKs = @{}
-        NotInstalled = @()
-        Updates = @()
-        Errors = @("$Name check timed out after ${TimeoutSec}s")
-        AvailableUpdates = @()
-        UpdateFailed = @()
-        MaturityBlockedUpdates = @()
-        GlobalNpmPackageUpdates = @()
-        GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
-    }
+    $timeoutResult = New-ToolCheckResults
+    $timeoutResult.Index = $Index
+    $timeoutResult.Output = @()
+    $timeoutResult.Tools[$Name] = @{ Installed = 'unknown'; Latest = ''; CheckTimedOut = $true }
+    $timeoutResult.Errors = @("$Name check timed out after ${TimeoutSec}s")
+    $timeoutResult
 }
 
 function Merge-ParallelCheckResult {
@@ -2724,18 +2799,6 @@ function Get-ParallelCheckWorkerScript {
             $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue)
 
         $Global:__rs_outputLines = [System.Collections.Generic.List[string]]::new()
-        $Global:results = @{
-            Tools                   = @{}
-            DotNetSDKs              = @{}
-            NotInstalled            = @()
-            Updates                 = @()
-            Errors                  = @()
-            UpdateFailed            = @()
-            AvailableUpdates        = @()
-            MaturityBlockedUpdates  = @()
-            GlobalNpmPackageUpdates = @()
-            GlobalNpmUpdateCommand  = 'ncu -g -u --loglevel=error'
-        }
         $Global:toolsConfig = $toolsConfig
         $Global:SkipUpdate = $SkipUpdate
         $Global:PlatformKey = $PlatformKey
@@ -2767,6 +2830,8 @@ $ColorBlue = $Global:ColorBlue
 '@
         $combinedBlock = $writeHostOverride + "`n`n" + $fnBlock
         . ([scriptblock]::Create($combinedBlock))
+        $Global:results = New-ToolCheckResults
+        $results = $Global:results
 
         try { Invoke-Expression ($checkStr -replace '\$args\[0\]', "'$progress'") }
         catch { $Global:__rs_outputLines.Add("  `e[31m✗ Check error: $_`e[0m") }

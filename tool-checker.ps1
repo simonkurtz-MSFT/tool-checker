@@ -44,6 +44,7 @@ param(
 $script:ToolCheckerVersion = '1.2.3'
 $script:NpmUpdateCooldownDays = 7
 $script:ApiRequestTimeout = $Timeout
+$script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 
 if ($Version) {
     Write-Output $script:ToolCheckerVersion
@@ -150,6 +151,39 @@ foreach ($toolName in $sortedToolNames) {
         $toolEntry['Enabled'] = $true
     }
     $toolsConfig[$toolName] = $toolEntry
+}
+
+function Get-ToolConfiguration {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ToolName,
+        [string[]]$RequiredProperties = @()
+    )
+
+    if (-not $toolsConfig.Contains($ToolName)) {
+        throw "Tool configuration not found: $ToolName"
+    }
+
+    $config = $toolsConfig[$ToolName]
+    foreach ($propertyName in $RequiredProperties) {
+        if (-not $config.ContainsKey($propertyName) -or [string]::IsNullOrWhiteSpace("$($config[$propertyName])")) {
+            throw "Tool '$ToolName' requires configuration property '$propertyName'."
+        }
+    }
+    $config
+}
+
+function Assert-CustomToolConfigurations {
+    foreach ($toolName in $toolsConfig.Keys) {
+        $config = $toolsConfig[$toolName]
+        if ($config.CheckType -ne 'custom') { continue }
+
+        $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties @('CustomFunction')
+        $functionName = "$($config.CustomFunction)"
+        if (-not (Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue)) {
+            throw "Custom checker '$functionName' configured for '$toolName' was not found."
+        }
+    }
 }
 
 # ─────────────────────────────────────────────
@@ -535,7 +569,9 @@ function Set-NpmRegistryApiUrls {
     }
 }
 
-Set-NpmRegistryApiUrls
+if (-not $script:IsDotSourced) {
+    Set-NpmRegistryApiUrls
+}
 
 function Get-CommandVersion {
     param([string]$Command, [string]$VersionFlag = "--version")
@@ -1128,7 +1164,7 @@ function Refresh-NcuGlobalPackagesStatus {
 
 function Test-NodeJS {
     param([string]$Progress)
-    $config = $toolsConfig["NodeJS"]
+    $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking NodeJS" -Progress $Progress
 
     if (-not (Test-CommandExists $config.Command)) {
@@ -1290,6 +1326,7 @@ function Get-NpmVersionReleaseInfo {
 
 function Test-NCUGlobal {
     param([string]$Progress)
+    $config = Get-ToolConfiguration -ToolName 'Global npm packages'
     Write-Header "Checking ncu -g (global npm packages updates)" -Progress $Progress
 
     if (-not (Test-CommandExists "ncu")) {
@@ -1345,7 +1382,7 @@ function Test-NCUGlobal {
         })
 
         foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-            $productionReleasesOnly = $toolsConfig["Global npm packages"].ProductionReleasesOnly
+            $productionReleasesOnly = $config.ProductionReleasesOnly
             $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
             if ($productionReleasesOnly -and -not (Test-IsProductionVersion $pkg.Latest)) {
                 $pkg.Latest = Get-LatestProductionNpmVersion -ApiData $metadata
@@ -1410,6 +1447,7 @@ function Test-NCUGlobal {
 
 function Test-AzureExtensions {
     param([string]$Progress)
+    $config = Get-ToolConfiguration -ToolName 'Azure CLI Extensions' -RequiredProperties @('UpdateType')
     Write-Header "Checking Azure CLI Extensions" -Progress $Progress
 
     if (-not (Test-CommandExists "az")) {
@@ -1449,7 +1487,7 @@ function Test-AzureExtensions {
             if (-not $latest) { continue }
 
             $results.Tools["  az ext: $($ext.name)"].Latest = $latest.version
-            if ($latest.version -gt $ext.version) {
+            if (Test-UpdateAvailable -InstalledVersion $ext.version -LatestVersion $latest.version) {
                 Write-Warning "  Extension '$($ext.name)' has update available: $($ext.version) -> $($latest.version)"
                 $updatesAvailable = $true
                 $results.Updates += "Azure Extension: $($ext.name)"
@@ -1471,7 +1509,7 @@ function Test-AzureExtensions {
 
 function Test-DotNetSDKs {
     param([string]$Progress)
-    $config = $toolsConfig[".NET SDK"]
+    $config = Get-ToolConfiguration -ToolName '.NET SDK' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand')
     Write-Header "Checking .NET SDKs" -Progress $Progress
 
     if (-not (Test-CommandExists $config.Command)) {
@@ -1600,7 +1638,7 @@ function Test-DotNetSDKs {
 function Test-PythonInstallManager {
     param([string]$Progress)
     $toolName = "Python Install Manager (py)"
-    $config = $toolsConfig[$toolName]
+    $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties @('PackageName', 'WingetId', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking $toolName" -Progress $Progress
 
     if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
@@ -1646,7 +1684,7 @@ function Test-PythonInstallManager {
 
 function Test-Python {
     param([string]$Progress)
-    $config = $toolsConfig["Python"]
+    $config = Get-ToolConfiguration -ToolName 'Python' -RequiredProperties @('UpdateCommand', 'UpdateType')
     Write-Header "Checking Python" -Progress $Progress
 
     if (Test-CommandExists "py") {
@@ -1770,7 +1808,7 @@ function Get-PythonUpdateConventional {
 
 function Test-PowerShell {
     param([string]$Progress)
-    $config = $toolsConfig["PowerShell"]
+    $config = Get-ToolConfiguration -ToolName 'PowerShell' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking PowerShell" -Progress $Progress
 
     $currentVersion = $PSVersionTable.PSVersion
@@ -1819,7 +1857,7 @@ function Test-PowerShell {
 
 function Test-WSL {
     param([string]$Progress)
-    $config = $toolsConfig["WSL"]
+    $config = Get-ToolConfiguration -ToolName 'WSL' -RequiredProperties @('Command', 'VersionCommand', 'VersionParseRegex', 'ApiUrl', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking WSL" -Progress $Progress
 
     if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
@@ -2540,15 +2578,15 @@ function Invoke-ParallelChecks {
     $scriptContent = Get-Content $PSCommandPath -Raw
     $functionNames = @(
         'Write-Header','Write-Success','Write-Warning','Write-Error',
-        'Test-CommandExists','Get-DetailedErrorMessage','Get-CommandVersion',
+        'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
-        'Test-NodeJS','Test-NCUGlobal','Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
-        'Test-AzureExtensions','Test-DotNetSDKs','Test-PythonInstallManager','Test-Python',
-        'Get-PythonUpdateViaPy','Get-PythonUpdateConventional','Test-WSL','Test-PowerShell'
+        'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
+        'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
     )
+    $functionNames += @($toolsConfig.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
     # Parse function blocks from source using the PS AST
     $ast   = [System.Management.Automation.Language.Parser]::ParseInput($scriptContent, [ref]$null, [ref]$null)
     $fnDefs = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
@@ -2797,6 +2835,8 @@ $ColorBlue   = $Global:ColorBlue
 # ─────────────────────────────────────────────
 
 function Main {
+    Assert-CustomToolConfigurations
+
     Write-Host ""
     Write-Host "$ColorCyan╔═════════════════════════════════════════╗$ColorReset"
     Write-Host "$ColorCyan║   Development Tools Checker & Updater   ║$ColorReset"
@@ -2901,7 +2941,9 @@ function Main {
 }
 
 # Entry point
-Main
-if ($results.Errors.Count -gt 0 -or $results.UpdateFailed.Count -gt 0) {
-    exit 1
+if (-not $script:IsDotSourced) {
+    Main
+    if ($results.Errors.Count -gt 0 -or $results.UpdateFailed.Count -gt 0) {
+        exit 1
+    }
 }

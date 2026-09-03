@@ -79,6 +79,14 @@ Examples:
 
 Tool Checker executes the commands shown in the summary or action menu. Review [`tool-checker.json`](tool-checker.json) before using interactive actions or `-Force`, especially on a shared or managed machine.
 
+### Tests
+
+The characterization tests require Pester and run without invoking tool checks or update actions:
+
+```powershell
+Invoke-Pester ./tests
+```
+
 ### Registry policy
 
 Copy [`.env.example`](.env.example) to `.env`, then uncomment only the registries the checker should enforce. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.

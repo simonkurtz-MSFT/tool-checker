@@ -51,7 +51,7 @@ Checks run concurrently, followed by a summary showing installed and latest vers
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-SkipUpdate`        | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
 | `-Force`             | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools.                      |
-| `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 30 seconds.                                                                        |
+| `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds.                                                                        |
 | `-EnvFile <path>`    | Read registry policy from a specific dotenv file instead of `.env` beside the script.                                                             |
 | `-Version`           | Print the Tool Checker version and exit.                                                                                                          |
 
@@ -213,11 +213,18 @@ function Test-ExampleSDK {
     param([string]$Progress)
 
     Write-Header "Checking Example SDK" -Progress $Progress
-    # Populate the shared $results collections here.
+  # Populate the shared $results collections here. For an available update:
+  Add-AvailableUpdate `
+    -Name 'Example SDK' `
+    -Command 'example update' `
+    -Type 'direct' `
+    -Details '1.0.0 -> 1.1.0'
 }
 ```
 
-Custom checker functions must accept a `Progress` string and must be included in the function list inside `Invoke-ParallelChecks` so they are available in worker runspaces. If the custom tool can be updated, add entries to `$results.AvailableUpdates` with `Name`, `Command`, `Type`, and `Details` values.
+Custom checker functions must accept a `Progress` string. Tool Checker validates each configured function before starting checks and automatically makes it available in worker runspaces from the `CustomFunction` value; no separate registration is required.
+
+If the custom tool can be updated, call `Add-AvailableUpdate` with `Name`, `Command`, `Type`, and optional `Details` values. Specialized actions can also supply `RegistryKey` for registry alignment or `Version` for a version-specific installer.
 
 ## Output and behavior
 

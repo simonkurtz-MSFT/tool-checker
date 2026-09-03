@@ -15,7 +15,7 @@
     Execute all available updates without prompting.
 
 .PARAMETER Timeout
-    Maximum seconds to wait for each tool check before killing it. Default: 30.
+    Maximum seconds to wait for each tool check before killing it. Default: 60.
 
 .PARAMETER Version
     Print the tool checker version and exit.
@@ -2564,7 +2564,7 @@ function Invoke-ParallelUpdates {
 # ─────────────────────────────────────────────
 
 function Invoke-ParallelChecks {
-    param([array]$Checks, [int]$Total, [int]$TimeoutSec = 30)
+    param([array]$Checks, [int]$Total, [int]$TimeoutSec = 60)
 
     # Extract function definitions from the script file itself, since script-scoped
     # functions aren't visible via Get-ChildItem Function:

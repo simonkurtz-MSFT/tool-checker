@@ -24,19 +24,52 @@ Describe 'Tool configuration' {
     }
 
     It 'resolves every configured custom checker function' {
-        { Assert-CustomToolConfigurations } | Should Not Throw
+        { Assert-ToolConfigurations } | Should Not Throw
     }
 
     It 'rejects a configured custom checker function that does not exist' {
         $toolsConfig['Broken Custom Tool'] = @{
+            Enabled = $true
             CheckType = 'custom'
             CustomFunction = 'Test-MissingCustomTool'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
         }
         try {
-            { Assert-CustomToolConfigurations } |
+            { Assert-ToolConfigurations } |
                 Should Throw "Custom checker 'Test-MissingCustomTool' configured for 'Broken Custom Tool' was not found."
         } finally {
             $toolsConfig.Remove('Broken Custom Tool')
+        }
+    }
+
+    It 'rejects an unsupported check type during startup validation' {
+        $toolsConfig['Broken Tool'] = @{
+            Enabled = $true
+            CheckType = 'manual'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Tool 'Broken Tool' has unsupported CheckType 'manual'."
+        } finally {
+            $toolsConfig.Remove('Broken Tool')
+        }
+    }
+
+    It 'rejects a standard tool without a version command form' {
+        $toolsConfig['Broken Standard Tool'] = @{
+            Enabled = $true
+            CheckType = 'standard'
+            Command = 'broken'
+            ApiUrl = 'https://example.invalid/releases'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Standard tool 'Broken Standard Tool' requires either 'VersionFlag' or 'VersionCommand'."
+        } finally {
+            $toolsConfig.Remove('Broken Standard Tool')
         }
     }
 }
@@ -202,6 +235,84 @@ Describe 'Standard tool update flow' {
     }
 }
 
+Describe 'Node release planning' {
+    It 'filters prereleases and classifies the latest patch in the installed major' {
+        $distributionIndex = @(
+            [PSCustomObject]@{ version = 'v27.0.0-rc.1'; lts = $false },
+            [PSCustomObject]@{ version = 'v26.2.0'; lts = $false },
+            [PSCustomObject]@{ version = 'v24.12.1'; lts = 'Krypton' },
+            [PSCustomObject]@{ version = 'v22.5.1'; lts = 'Jod' }
+        )
+
+        $plan = Get-NodeReleasePlan -DistributionIndex $distributionIndex -CurrentVersion '22.5.0'
+
+        $plan.LatestCurrentVersion | Should Be '26.2.0'
+        $plan.LatestLTSVersion | Should Be '24.12.1'
+        $plan.LatestInMajor | Should Be '22.5.1'
+        $plan.UpdateKind | Should Be 'patch'
+    }
+
+    It 'classifies a newer minor in the installed major' {
+        $distributionIndex = @(
+            [PSCustomObject]@{ version = 'v22.6.0'; lts = 'Jod' },
+            [PSCustomObject]@{ version = 'v22.5.9'; lts = 'Jod' }
+        )
+
+        $plan = Get-NodeReleasePlan -DistributionIndex $distributionIndex -CurrentVersion '22.5.0'
+
+        $plan.UpdateKind | Should Be 'minor'
+    }
+}
+
+Describe 'Global npm output parsing' {
+    It 'parses scoped update rows and normalizes the bulk install command' {
+        $output = @(
+            '@scope/example  1.2.0  →  1.3.0',
+            'plain-package  2.0.0  →  2.1.0',
+            'npm -g install @scope/example@1.3.0 plain-package@2.1.0'
+        )
+
+        $parsed = ConvertFrom-NcuGlobalOutput -OutputLines $output
+
+        $parsed.Packages.Count | Should Be 2
+        $parsed.Packages[0].Name | Should Be '@scope/example'
+        $parsed.Packages[1].Latest | Should Be '2.1.0'
+        $parsed.InstallCommand | Should Be 'npm -g install @scope/example@1.3.0 plain-package@2.1.0 --loglevel=error'
+    }
+}
+
+Describe '.NET SDK release planning' {
+    It 'groups installed SDKs and returns newer supported production majors' {
+        $index = [PSCustomObject]@{ 'releases-index' = @(
+            [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.101'; 'support-phase' = 'active' },
+            [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-preview.2'; 'support-phase' = 'preview' },
+            [PSCustomObject]@{ 'channel-version' = '9.0'; 'latest-sdk' = '9.0.203'; 'support-phase' = 'active' },
+            [PSCustomObject]@{ 'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'; 'support-phase' = 'active' },
+            [PSCustomObject]@{ 'channel-version' = '7.0'; 'latest-sdk' = '7.0.410'; 'support-phase' = 'eol' }
+        ) }
+
+        $plan = Get-DotNetSDKReleasePlan -InstalledVersions @('8.0.100', '8.0.301', '9.0.100') -ReleasesIndex $index
+
+        $plan.ByMajor['8'].Count | Should Be 2
+        $plan.LatestSdkByChannel['9.0'].LatestSdk | Should Be '9.0.203'
+        $plan.LatestSdkByChannel.ContainsKey('11.0') | Should Be $false
+        $plan.NewerMajors.Count | Should Be 1
+        $plan.NewerMajors[0] | Should Be 10
+    }
+
+    It 'allows an installed preview channel when prereleases are enabled' {
+        $index = [PSCustomObject]@{ 'releases-index' = @(
+            [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-preview.2'; 'support-phase' = 'preview' },
+            [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.101'; 'support-phase' = 'active' }
+        ) }
+
+        $plan = Get-DotNetSDKReleasePlan -InstalledVersions @('11.0.100-preview.1') -ReleasesIndex $index -ProductionReleasesOnly $false
+
+        $plan.LatestSdkByChannel.ContainsKey('11.0') | Should Be $true
+        $plan.NewerMajors.Count | Should Be 0
+    }
+}
+
 Describe 'Action planning' {
     BeforeEach {
         $script:SkipUpdate = $false
@@ -287,6 +398,85 @@ Describe 'Action execution' {
 
         Assert-MockCalled Invoke-ActionCommand 1 -ParameterFilter { $Action.Name -eq 'NodeJS' }
         Assert-MockCalled Complete-UpdateExecution 1 -ParameterFilter { $Action.Name -eq 'NodeJS' -and $Execution.ExitCode -eq 0 }
+    }
+}
+
+Describe 'Parallel check orchestration' {
+    It 'rehydrates configured checker dependencies without including the main entry point' {
+        $scriptContent = Get-Content $scriptPath -Raw
+
+        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent $scriptContent -ToolsConfiguration $toolsConfig
+
+        $functionBlock | Should Match 'function Test-NodeJS'
+        $functionBlock | Should Match 'function Set-LatestToolVersion'
+        $functionBlock | Should Not Match 'function Main'
+    }
+
+    It 'creates a mergeable timeout result with an unknown tool marker' {
+        $timeoutResult = New-ParallelCheckTimeoutResult -Index 2 -Name 'Slow CLI' -TimeoutSec 5
+
+        $timeoutResult.Index | Should Be 2
+        $timeoutResult.Tools['Slow CLI'].Installed | Should Be 'unknown'
+        $timeoutResult.Tools['Slow CLI'].CheckTimedOut | Should Be $true
+        $timeoutResult.Errors[0] | Should Be 'Slow CLI check timed out after 5s'
+    }
+
+    It 'merges a completed check result into shared state' {
+        $results.Tools = @{}
+        $results.DotNetSDKs = @{}
+        $results.NotInstalled = @()
+        $results.Updates = @()
+        $results.Errors = @()
+        $results.UpdateFailed = @()
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+        $results.GlobalNpmPackageUpdates = @()
+        $results.GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
+        $checkResult = @{
+            Output = @()
+            Tools = @{ 'Example CLI' = @{ Installed = '1.0.0'; Latest = '1.1.0' } }
+            DotNetSDKs = @{ '10.0.100' = @{ Major = '10' } }
+            NotInstalled = @('Missing CLI')
+            Updates = @('Example CLI')
+            Errors = @()
+            UpdateFailed = @()
+            AvailableUpdates = @(@{ Name = 'Example CLI' })
+            MaturityBlockedUpdates = @()
+            GlobalNpmPackageUpdates = @()
+            GlobalNpmUpdateCommand = 'npm update command'
+        }
+
+        Merge-ParallelCheckResult -CheckResult $checkResult
+
+        $results.Tools['Example CLI'].Installed | Should Be '1.0.0'
+        $results.DotNetSDKs.ContainsKey('10.0.100') | Should Be $true
+        $results.Updates[0] | Should Be 'Example CLI'
+        $results.AvailableUpdates[0].Name | Should Be 'Example CLI'
+        $results.GlobalNpmUpdateCommand | Should Be 'npm update command'
+    }
+
+    It 'runs and merges a network-free check through the runspace pool' {
+        $results.Tools = @{}
+        $results.DotNetSDKs = @{}
+        $results.NotInstalled = @()
+        $results.Updates = @()
+        $results.Errors = @()
+        $results.UpdateFailed = @()
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+        $results.GlobalNpmPackageUpdates = @()
+        $results.GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
+        $checks = @(
+            @{
+                Name = 'Synthetic CLI'
+                Block = { $results.Tools['Synthetic CLI'] = @{ Installed = '1.0.0'; Latest = '' } }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+        $results.Tools['Synthetic CLI'].Installed | Should Be '1.0.0'
+        $results.Errors.Count | Should Be 0
     }
 }
 

@@ -173,12 +173,41 @@ function Get-ToolConfiguration {
     $config
 }
 
-function Assert-CustomToolConfigurations {
+function Assert-ToolConfigurations {
+    $customRequiredProperties = @{
+        'NodeJS' = @('Command', 'ApiUrl')
+        'Global npm packages' = @()
+        'Azure CLI Extensions' = @('Command')
+        '.NET SDK' = @('Command', 'ApiUrl')
+        'Python Install Manager (py)' = @('Command', 'PackageName', 'WingetId')
+        'Python' = @('Command', 'ApiUrl')
+        'PowerShell' = @('Command', 'ApiUrl')
+        'WSL' = @('Command', 'VersionCommand', 'VersionParseRegex', 'ApiUrl')
+    }
+
     foreach ($toolName in $toolsConfig.Keys) {
         $config = $toolsConfig[$toolName]
+        if (-not $config.Enabled) { continue }
+        if ($config.CheckType -notin @('standard', 'custom')) {
+            throw "Tool '$toolName' has unsupported CheckType '$($config.CheckType)'."
+        }
+
+        $requiredProperties = @('UpdateType', 'UpdateCommand')
+        if ($config.CheckType -eq 'standard') {
+            $requiredProperties += @('Command', 'ApiUrl')
+            if ([string]::IsNullOrWhiteSpace("$($config.VersionFlag)") -and [string]::IsNullOrWhiteSpace("$($config.VersionCommand)")) {
+                throw "Standard tool '$toolName' requires either 'VersionFlag' or 'VersionCommand'."
+            }
+        } else {
+            $requiredProperties += @('CustomFunction')
+            if ($customRequiredProperties.ContainsKey($toolName)) {
+                $requiredProperties += $customRequiredProperties[$toolName]
+            }
+        }
+
+        $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties $requiredProperties
         if ($config.CheckType -ne 'custom') { continue }
 
-        $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties @('CustomFunction')
         $functionName = "$($config.CustomFunction)"
         if (-not (Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue)) {
             throw "Custom checker '$functionName' configured for '$toolName' was not found."
@@ -1199,6 +1228,54 @@ function Refresh-NcuGlobalPackagesStatus {
 
 # --- NodeJS: multi-stream LTS/current/patch logic --------------------------
 
+function Get-NodeReleasePlan {
+    param(
+        [Parameter(Mandatory)][array]$DistributionIndex,
+        [Parameter(Mandatory)][string]$CurrentVersion,
+        [bool]$ProductionReleasesOnly = $true
+    )
+
+    $allowedReleases = if ($ProductionReleasesOnly) {
+        @($DistributionIndex | Where-Object { Test-IsProductionVersion $_.version })
+    } else {
+        @($DistributionIndex)
+    }
+    if ($allowedReleases.Count -eq 0) { return $null }
+
+    $currentParts = $CurrentVersion -split '\.'
+    $currentMajor = [int]$currentParts[0]
+    $currentMinor = if ($currentParts.Count -gt 1) { [int]$currentParts[1] } else { 0 }
+    $currentPatch = if ($currentParts.Count -gt 2) { [int]$currentParts[2] } else { 0 }
+    $latestLTS = $allowedReleases | Where-Object { $_.lts } | Select-Object -First 1
+    $latestCurrent = $allowedReleases | Select-Object -First 1
+    $latestInCurrentMajor = $allowedReleases | Where-Object {
+        [int](($_.version -replace '^v', '') -split '\.')[0] -eq $currentMajor
+    } | Select-Object -First 1
+
+    $latestCurrentVersion = $latestCurrent.version -replace '^v', ''
+    $latestLTSVersion = if ($latestLTS) { $latestLTS.version -replace '^v', '' } else { $null }
+    $latestInMajor = if ($latestInCurrentMajor) { $latestInCurrentMajor.version -replace '^v', '' } else { $null }
+    $updateKind = $null
+    if ($latestInMajor -and $latestInMajor -ne $CurrentVersion) {
+        $latestParts = $latestInMajor -split '\.'
+        $latestMinor = if ($latestParts.Count -gt 1) { [int]$latestParts[1] } else { 0 }
+        $latestPatch = if ($latestParts.Count -gt 2) { [int]$latestParts[2] } else { 0 }
+        if ($latestMinor -gt $currentMinor) { $updateKind = 'minor' }
+        elseif ($latestPatch -gt $currentPatch) { $updateKind = 'patch' }
+    }
+
+    [PSCustomObject]@{
+        CurrentMajor = $currentMajor
+        LatestInMajor = $latestInMajor
+        LatestCurrentVersion = $latestCurrentVersion
+        LatestCurrentMajor = [int]($latestCurrentVersion -split '\.')[0]
+        LatestLTS = $latestLTS
+        LatestLTSVersion = $latestLTSVersion
+        LatestLTSMajor = if ($latestLTSVersion) { [int]($latestLTSVersion -split '\.')[0] } else { $null }
+        UpdateKind = $updateKind
+    }
+}
+
 function Test-NodeJS {
     param([string]$Progress)
     $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand', 'UpdateType')
@@ -1225,48 +1302,26 @@ function Test-NodeJS {
         }
     }
 
-    $currentParts = $currentVersion -split '\.'
-    $currentMajor = [int]$currentParts[0]
-    $currentMinor = if ($currentParts.Count -gt 1) { [int]$currentParts[1] } else { 0 }
-    $currentPatch = if ($currentParts.Count -gt 2) { [int]$currentParts[2] } else { 0 }
-
     try {
         Write-Host "  Querying nodejs.org distribution API..."
         $distIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
         if (-not $distIndex) { return }
 
-        $allowedDistIndex     = if ($config.ProductionReleasesOnly) {
-            $distIndex | Where-Object { Test-IsProductionVersion $_.version }
-        } else {
-            $distIndex
-        }
-        $latestLTS            = $allowedDistIndex | Where-Object { $_.lts } | Select-Object -First 1
-        $latestLTSVersion     = $latestLTS.version -replace 'v', ''
-        $latestLTSMajor       = [int]($latestLTSVersion -split '\.')[0]
-        $latestCurrent        = $allowedDistIndex | Select-Object -First 1
-        $latestCurrentVersion = $latestCurrent.version -replace 'v', ''
-        $latestCurrentMajor   = [int]($latestCurrentVersion -split '\.')[0]
+        $releasePlan = Get-NodeReleasePlan -DistributionIndex $distIndex -CurrentVersion $currentVersion -ProductionReleasesOnly $config.ProductionReleasesOnly
+        if (-not $releasePlan) { return }
+        $currentMajor = $releasePlan.CurrentMajor
+        $latestInMajor = $releasePlan.LatestInMajor
+        $latestLTS = $releasePlan.LatestLTS
+        $latestLTSVersion = $releasePlan.LatestLTSVersion
+        $latestLTSMajor = $releasePlan.LatestLTSMajor
+        $latestCurrentVersion = $releasePlan.LatestCurrentVersion
+        $latestCurrentMajor = $releasePlan.LatestCurrentMajor
 
-        $latestInCurrentMajor = $allowedDistIndex | Where-Object {
-            [int](($_.version -replace 'v','') -split '\.')[0] -eq $currentMajor
-        } | Select-Object -First 1
-
-        if ($latestInCurrentMajor) {
-            $latestInMajor = $latestInCurrentMajor.version -replace 'v', ''
-            $results.Tools["NodeJS"].Latest = "v$latestCurrentVersion"
-
-            $latestParts = $latestInMajor -split '\.'
-            $latestMinor = if ($latestParts.Count -gt 1) { [int]$latestParts[1] } else { 0 }
-            $latestPatch = if ($latestParts.Count -gt 2) { [int]$latestParts[2] } else { 0 }
-
-            if ($latestInMajor -ne $currentVersion) {
-                if ($latestMinor -gt $currentMinor) {
-                    Write-Warning "  Minor update available in v${currentMajor}: v$currentVersion -> v$latestInMajor"
-                    $results.Updates += "NodeJS (minor)"
-                } elseif ($latestPatch -gt $currentPatch) {
-                    Write-Warning "  Patch update available in v${currentMajor}: v$currentVersion -> v$latestInMajor"
-                    $results.Updates += "NodeJS (patch)"
-                }
+        if ($latestInMajor) {
+            $results.Tools['NodeJS'].Latest = "v$latestCurrentVersion"
+            if ($releasePlan.UpdateKind) {
+                Write-Warning "  $($releasePlan.UpdateKind.Substring(0, 1).ToUpper())$($releasePlan.UpdateKind.Substring(1)) update available in v${currentMajor}: v$currentVersion -> v$latestInMajor"
+                $results.Updates += "NodeJS ($($releasePlan.UpdateKind))"
             } else {
                 Write-Success "NodeJS v$currentMajor is up to date (latest patch)"
             }
@@ -1324,6 +1379,26 @@ function Parse-NpmInstallCommand {
     $packages
 }
 
+function ConvertFrom-NcuGlobalOutput {
+    param([Parameter(Mandatory)][array]$OutputLines)
+
+    $packages = @()
+    $installCommand = $null
+    foreach ($line in $OutputLines) {
+        $text = $line.ToString().Trim()
+        if ($text -match '^(@?[a-zA-Z0-9._/-]+)\s+([0-9a-zA-Z._-]+)\s+→\s+([0-9a-zA-Z._-]+)\s*$') {
+            $packages += @{ Name = $Matches[1]; Current = $Matches[2]; Latest = $Matches[3] }
+        } elseif (-not $installCommand -and $text -match '^npm\s+-g\s+install\s+') {
+            $installCommand = if ($text -match '--loglevel=') { $text } else { "$text --loglevel=error" }
+        }
+    }
+
+    [PSCustomObject]@{
+        Packages = $packages
+        InstallCommand = $installCommand
+    }
+}
+
 function Get-GlobalNpmInstalledVersion {
     param([string]$PackageName)
     try {
@@ -1378,29 +1453,18 @@ function Test-NCUGlobal {
             return
         }
 
-        # Parse update lines: packageName currentVer → latestVer
-        foreach ($line in $output) {
-            $s = $line.ToString().Trim()
-            if ($s -match '^(@?[a-zA-Z0-9._/-]+)\s+([0-9a-zA-Z._-]+)\s+→\s+([0-9a-zA-Z._-]+)\s*$') {
-                $results.GlobalNpmPackageUpdates += @{ Name = $Matches[1]; Current = $Matches[2]; Latest = $Matches[3] }
-            }
-        }
-
-        # Capture bulk install command from ncu output
-        foreach ($line in $output) {
-            $s = $line.ToString().Trim()
-            if ($s -match '^npm\s+-g\s+install\s+') {
-                $results.GlobalNpmUpdateCommand = if ($s -match '--loglevel=') { $s } else { "$s --loglevel=error" }
-                $extracted = Parse-NpmInstallCommand $results.GlobalNpmUpdateCommand
-                if ($extracted.Count -gt 0 -and $results.GlobalNpmPackageUpdates.Count -eq 0) {
-                    foreach ($pkg in $extracted) {
-                        $iv = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
-                        $results.GlobalNpmPackageUpdates += @{
-                            Name = $pkg.Name; Current = $(if ($iv) { $iv } else { "?" }); Latest = $pkg.Version
-                        }
+        $parsedOutput = ConvertFrom-NcuGlobalOutput -OutputLines @($output)
+        $results.GlobalNpmPackageUpdates = @($parsedOutput.Packages)
+        if ($parsedOutput.InstallCommand) {
+            $results.GlobalNpmUpdateCommand = $parsedOutput.InstallCommand
+            $extracted = Parse-NpmInstallCommand $results.GlobalNpmUpdateCommand
+            if ($extracted.Count -gt 0 -and $results.GlobalNpmPackageUpdates.Count -eq 0) {
+                foreach ($pkg in $extracted) {
+                    $iv = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
+                    $results.GlobalNpmPackageUpdates += @{
+                        Name = $pkg.Name; Current = $(if ($iv) { $iv } else { "?" }); Latest = $pkg.Version
                     }
                 }
-                break
             }
         }
 
@@ -1529,6 +1593,51 @@ function Test-AzureExtensions {
 
 # --- .NET SDK: multiple installed SDKs, channel grouping -------------------
 
+function Get-DotNetSDKReleasePlan {
+    param(
+        [Parameter(Mandatory)][array]$InstalledVersions,
+        [Parameter(Mandatory)]$ReleasesIndex,
+        [bool]$ProductionReleasesOnly = $true
+    )
+
+    $latestSdkByChannel = @{}
+    foreach ($channel in $ReleasesIndex.'releases-index') {
+        if ($ProductionReleasesOnly -and $channel.'support-phase' -eq 'preview') { continue }
+        if ($ProductionReleasesOnly -and -not (Test-IsProductionVersion $channel.'latest-sdk')) { continue }
+        $latestSdkByChannel[$channel.'channel-version'] = @{
+            LatestSdk = $channel.'latest-sdk'
+            SupportPhase = $channel.'support-phase'
+        }
+    }
+
+    $byMajor = @{}
+    foreach ($version in $InstalledVersions) {
+        $major = ($version -split '\.')[0]
+        if (-not $byMajor[$major]) { $byMajor[$major] = @() }
+        $byMajor[$major] += $version
+    }
+    $installedMajors = @($byMajor.Keys | ForEach-Object { [int]$_ })
+    $maxInstalledMajor = ($installedMajors | Measure-Object -Maximum).Maximum
+    $availableMajors = @()
+    foreach ($channel in $ReleasesIndex.'releases-index') {
+        $major = [int]($channel.'channel-version' -split '\.')[0]
+        $releaseAllowed = -not $ProductionReleasesOnly -or (
+            $channel.'support-phase' -ne 'preview' -and (Test-IsProductionVersion $channel.'latest-sdk')
+        )
+        if ($releaseAllowed -and $channel.'support-phase' -ne 'eol' -and ($channel.'support-phase' -ne 'preview' -or $major -in $installedMajors)) {
+            if ($major -notin $availableMajors) { $availableMajors += $major }
+        }
+    }
+
+    [PSCustomObject]@{
+        LatestSdkByChannel = $latestSdkByChannel
+        ByMajor = $byMajor
+        InstalledMajors = $installedMajors
+        MaxInstalledMajor = $maxInstalledMajor
+        NewerMajors = @($availableMajors | Where-Object { $_ -gt $maxInstalledMajor } | Sort-Object -Descending)
+    }
+}
+
 function Test-DotNetSDKs {
     param([string]$Progress)
     $config = Get-ToolConfiguration -ToolName '.NET SDK' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand')
@@ -1558,22 +1667,9 @@ function Test-DotNetSDKs {
 
         Write-Host "  Checking for .NET SDK updates..."
         $releasesIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
-
-        # Build channel -> latest-sdk lookup
-        $latestSdkByChannel = @{}
-        foreach ($ch in $releasesIndex.'releases-index') {
-            if ($config.ProductionReleasesOnly -and $ch.'support-phase' -eq 'preview') { continue }
-            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $ch.'latest-sdk')) { continue }
-            $latestSdkByChannel[$ch.'channel-version'] = @{ LatestSdk = $ch.'latest-sdk'; SupportPhase = $ch.'support-phase' }
-        }
-
-        # Group installed by major
-        $byMajor = @{}
-        foreach ($ver in $results.DotNetSDKs.Keys) {
-            $maj = ($ver -split '\.')[0]
-            if (-not $byMajor[$maj]) { $byMajor[$maj] = @() }
-            $byMajor[$maj] += $ver
-        }
+        $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($results.DotNetSDKs.Keys) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $config.ProductionReleasesOnly
+        $latestSdkByChannel = $releasePlan.LatestSdkByChannel
+        $byMajor = $releasePlan.ByMajor
 
         Write-Host "`n  Version Summary:"
         $maxLen = ($byMajor.Keys | ForEach-Object { ".NET $_".Length } | Measure-Object -Maximum).Maximum
@@ -1603,20 +1699,9 @@ function Test-DotNetSDKs {
         }
 
         # Newer major versions
-        $installedMajors    = $byMajor.Keys | ForEach-Object { [int]$_ }
-        $maxInstalledMajor  = ($installedMajors | Measure-Object -Maximum).Maximum
-        $availableMajors    = @()
-        foreach ($ch in $releasesIndex.'releases-index') {
-            $mv = [int]($ch.'channel-version' -split '\.')[0]
-            $releaseAllowed = -not $config.ProductionReleasesOnly -or (
-                $ch.'support-phase' -ne 'preview' -and (Test-IsProductionVersion $ch.'latest-sdk')
-            )
-            if ($releaseAllowed -and $ch.'support-phase' -ne 'eol' -and ($ch.'support-phase' -ne 'preview' -or $mv -in $installedMajors)) {
-                if ($mv -notin $availableMajors) { $availableMajors += $mv }
-            }
-        }
+        $maxInstalledMajor = $releasePlan.MaxInstalledMajor
         $newerMajorVersions = @{}
-        $newerMajors = @($availableMajors | Where-Object { $_ -gt $maxInstalledMajor } | Sort-Object -Descending)
+        $newerMajors = @($releasePlan.NewerMajors)
         if ($IsWindows -or $env:OS -eq 'Windows_NT') {
             $newerMajors = @($newerMajors | Where-Object {
                 $wingetVersion = Get-WingetLatestVersion -ToolName ".NET SDK $_" -PackageId "Microsoft.DotNet.SDK.$_"
@@ -2542,27 +2627,148 @@ function Invoke-ParallelUpdates {
 #    hashtable; results are merged in order.
 # ─────────────────────────────────────────────
 
+function Get-ParallelCheckFunctionBlock {
+    param(
+        [Parameter(Mandatory)][string]$ScriptContent,
+        [Parameter(Mandatory)][hashtable]$ToolsConfiguration
+    )
+
+    $functionNames = @(
+        'Write-Header','Write-Success','Write-Warning','Write-Error',
+        'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
+        'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
+        'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease','Get-NodeReleasePlan','Get-DotNetSDKReleasePlan',
+        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
+        'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
+        'Parse-NpmInstallCommand','ConvertFrom-NcuGlobalOutput','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
+        'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
+    )
+    $functionNames += @($ToolsConfiguration.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
+
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($ScriptContent, [ref]$null, [ref]$null)
+    $functionDefinitions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
+    ($functionDefinitions | Where-Object { $_.Name -in $functionNames } | ForEach-Object { $_.Extent.Text }) -join "`n`n"
+}
+
+function New-ParallelCheckTimeoutResult {
+    param(
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][int]$TimeoutSec
+    )
+
+    @{
+        Index = $Index
+        Output = @()
+        Tools = @{ $Name = @{ Installed = 'unknown'; Latest = ''; CheckTimedOut = $true } }
+        DotNetSDKs = @{}
+        NotInstalled = @()
+        Updates = @()
+        Errors = @("$Name check timed out after ${TimeoutSec}s")
+        AvailableUpdates = @()
+        UpdateFailed = @()
+        MaturityBlockedUpdates = @()
+        GlobalNpmPackageUpdates = @()
+        GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
+    }
+}
+
+function Merge-ParallelCheckResult {
+    param([Parameter(Mandatory)][object]$CheckResult)
+
+    foreach ($line in $CheckResult.Output) { Write-Host $line }
+    foreach ($entry in $CheckResult.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
+    foreach ($entry in $CheckResult.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+    $results.NotInstalled            += $CheckResult.NotInstalled
+    $results.Updates                 += $CheckResult.Updates
+    $results.Errors                  += $CheckResult.Errors
+    $results.UpdateFailed            += $CheckResult.UpdateFailed
+    $results.AvailableUpdates        += $CheckResult.AvailableUpdates
+    $results.MaturityBlockedUpdates  += $CheckResult.MaturityBlockedUpdates
+    $results.GlobalNpmPackageUpdates += $CheckResult.GlobalNpmPackageUpdates
+    if ($CheckResult.GlobalNpmUpdateCommand -and $CheckResult.GlobalNpmUpdateCommand -ne 'ncu -g -u --loglevel=error') {
+        $results.GlobalNpmUpdateCommand = $CheckResult.GlobalNpmUpdateCommand
+    }
+}
+
+function Get-ParallelCheckWorkerScript {
+    {
+        param($fnBlock, $checkStr, $progress, $idx,
+            $toolsConfig, $SkipUpdate, $PlatformKey, $NpmUpdateCooldownDays, $ApiRequestTimeout,
+            $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue)
+
+        $Global:__rs_outputLines = [System.Collections.Generic.List[string]]::new()
+        $Global:results = @{
+            Tools                   = @{}
+            DotNetSDKs              = @{}
+            NotInstalled            = @()
+            Updates                 = @()
+            Errors                  = @()
+            UpdateFailed            = @()
+            AvailableUpdates        = @()
+            MaturityBlockedUpdates  = @()
+            GlobalNpmPackageUpdates = @()
+            GlobalNpmUpdateCommand  = 'ncu -g -u --loglevel=error'
+        }
+        $Global:toolsConfig = $toolsConfig
+        $Global:SkipUpdate = $SkipUpdate
+        $Global:PlatformKey = $PlatformKey
+        $Global:NpmUpdateCooldownDays = $NpmUpdateCooldownDays
+        $Global:ApiRequestTimeout = $ApiRequestTimeout
+        $Global:ColorReset = $ColorReset
+        $Global:ColorGreen = $ColorGreen
+        $Global:ColorYellow = $ColorYellow
+        $Global:ColorRed = $ColorRed
+        $Global:ColorCyan = $ColorCyan
+        $Global:ColorBlue = $ColorBlue
+
+        $writeHostOverride = @'
+function Write-Host {
+    $Global:__rs_outputLines.Add(($args -join ' '))
+}
+$script:PlatformKey = $Global:PlatformKey
+$script:NpmUpdateCooldownDays = $Global:NpmUpdateCooldownDays
+$script:ApiRequestTimeout = $Global:ApiRequestTimeout
+$results = $Global:results
+$toolsConfig = $Global:toolsConfig
+$SkipUpdate = $Global:SkipUpdate
+$ColorReset = $Global:ColorReset
+$ColorGreen = $Global:ColorGreen
+$ColorYellow = $Global:ColorYellow
+$ColorRed = $Global:ColorRed
+$ColorCyan = $Global:ColorCyan
+$ColorBlue = $Global:ColorBlue
+'@
+        $combinedBlock = $writeHostOverride + "`n`n" + $fnBlock
+        . ([scriptblock]::Create($combinedBlock))
+
+        try { Invoke-Expression ($checkStr -replace '\$args\[0\]', "'$progress'") }
+        catch { $Global:__rs_outputLines.Add("  `e[31m✗ Check error: $_`e[0m") }
+
+        @{
+            Index                   = $idx
+            Output                  = $Global:__rs_outputLines.ToArray()
+            Tools                   = $Global:results.Tools
+            DotNetSDKs              = $Global:results.DotNetSDKs
+            NotInstalled            = $Global:results.NotInstalled
+            Updates                 = $Global:results.Updates
+            Errors                  = $Global:results.Errors
+            AvailableUpdates        = $Global:results.AvailableUpdates
+            MaturityBlockedUpdates  = $Global:results.MaturityBlockedUpdates
+            UpdateFailed            = $Global:results.UpdateFailed
+            GlobalNpmPackageUpdates = $Global:results.GlobalNpmPackageUpdates
+            GlobalNpmUpdateCommand  = $Global:results.GlobalNpmUpdateCommand
+        }
+    }
+}
+
 function Invoke-ParallelChecks {
     param([array]$Checks, [int]$Total, [int]$TimeoutSec = 60)
 
     # Extract function definitions from the script file itself, since script-scoped
     # functions aren't visible via Get-ChildItem Function:
     $scriptContent = Get-Content $PSCommandPath -Raw
-    $functionNames = @(
-        'Write-Header','Write-Success','Write-Warning','Write-Error',
-        'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
-        'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
-        'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
-        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
-        'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
-        'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
-        'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
-    )
-    $functionNames += @($toolsConfig.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
-    # Parse function blocks from source using the PS AST
-    $ast   = [System.Management.Automation.Language.Parser]::ParseInput($scriptContent, [ref]$null, [ref]$null)
-    $fnDefs = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
-    $fnBlock = ($fnDefs | Where-Object { $_.Name -in $functionNames } | ForEach-Object { $_.Extent.Text }) -join "`n`n"
+    $fnBlock = Get-ParallelCheckFunctionBlock -ScriptContent $scriptContent -ToolsConfiguration $toolsConfig
 
     # Thread-safe bag to collect per-check results keyed by index
     $resultBag = [System.Collections.Concurrent.ConcurrentDictionary[int, object]]::new()
@@ -2621,81 +2827,7 @@ function Invoke-ParallelChecks {
         $ps = [System.Management.Automation.PowerShell]::Create()
         $ps.RunspacePool = $pool
 
-        [void]$ps.AddScript({
-            param($fnBlock, $checkStr, $progress, $idx,
-                $toolsConfig, $SkipUpdate, $PlatformKey, $NpmUpdateCooldownDays, $ApiRequestTimeout,
-                  $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue)
-
-            # Set up global state so all re-hydrated functions can access it
-            $Global:__rs_outputLines = [System.Collections.Generic.List[string]]::new()
-            $Global:results = @{
-                Tools                   = @{}
-                DotNetSDKs              = @{}
-                NotInstalled            = @()
-                Updates                 = @()
-                Errors                  = @()
-                UpdateFailed            = @()
-                AvailableUpdates        = @()
-                MaturityBlockedUpdates  = @()
-                GlobalNpmPackageUpdates = @()
-                GlobalNpmUpdateCommand  = "ncu -g -u --loglevel=error"
-            }
-            $Global:toolsConfig  = $toolsConfig
-            $Global:SkipUpdate   = $SkipUpdate
-            $Global:PlatformKey  = $PlatformKey
-            $Global:NpmUpdateCooldownDays = $NpmUpdateCooldownDays
-            $Global:ApiRequestTimeout = $ApiRequestTimeout
-            $Global:ColorReset   = $ColorReset
-            $Global:ColorGreen   = $ColorGreen
-            $Global:ColorYellow  = $ColorYellow
-            $Global:ColorRed     = $ColorRed
-            $Global:ColorCyan    = $ColorCyan
-            $Global:ColorBlue    = $ColorBlue
-
-            # Build a combined block: Write-Host override first, then all tool functions.
-            # Using string concatenation (not a here-string) to avoid expanding $fnBlock.
-            # All references to shared state use $Global: so dot-sourced functions find them.
-            $writeHostOverride = @'
-function Write-Host {
-    $Global:__rs_outputLines.Add(($args -join ' '))
-}
-# Alias shared state to the names the tool functions expect (as global vars)
-$script:PlatformKey = $Global:PlatformKey
-$script:NpmUpdateCooldownDays = $Global:NpmUpdateCooldownDays
-$script:ApiRequestTimeout = $Global:ApiRequestTimeout
-$results    = $Global:results
-$toolsConfig = $Global:toolsConfig
-$SkipUpdate  = $Global:SkipUpdate
-$ColorReset  = $Global:ColorReset
-$ColorGreen  = $Global:ColorGreen
-$ColorYellow = $Global:ColorYellow
-$ColorRed    = $Global:ColorRed
-$ColorCyan   = $Global:ColorCyan
-$ColorBlue   = $Global:ColorBlue
-'@
-            $combinedBlock = $writeHostOverride + "`n`n" + $fnBlock
-            . ([scriptblock]::Create($combinedBlock))
-
-            # Run the check — use Invoke-Expression so function lookup resolves
-            # in THIS runspace's scope (where all functions were dot-sourced above)
-            try { Invoke-Expression ($checkStr -replace '\$args\[0\]', "'$progress'") }
-            catch { $Global:__rs_outputLines.Add("  `e[31m✗ Check error: $_`e[0m") }
-
-            @{
-                Index                   = $idx
-                Output                  = $Global:__rs_outputLines.ToArray()
-                Tools                   = $Global:results.Tools
-                DotNetSDKs              = $Global:results.DotNetSDKs
-                NotInstalled            = $Global:results.NotInstalled
-                Updates                 = $Global:results.Updates
-                Errors                  = $Global:results.Errors
-                AvailableUpdates        = $Global:results.AvailableUpdates
-                MaturityBlockedUpdates  = $Global:results.MaturityBlockedUpdates
-                UpdateFailed            = $Global:results.UpdateFailed
-                GlobalNpmPackageUpdates = $Global:results.GlobalNpmPackageUpdates
-                GlobalNpmUpdateCommand  = $Global:results.GlobalNpmUpdateCommand
-            }
-        })
+        [void]$ps.AddScript((Get-ParallelCheckWorkerScript))
         [void]$ps.AddArgument($fnBlock)
         [void]$ps.AddArgument($checkStr)
         [void]$ps.AddArgument($progress)
@@ -2750,16 +2882,7 @@ $ColorBlue   = $Global:ColorBlue
                 $progress = "{0,$padWidth}/{1}" -f ($job.Index + 1), $Total
                 $threadStatusLines[$job.Index] = "  $ColorRed✗ [$progress] Timed out: $($job.Name) (${TimeoutSec}s)$ColorReset"
                 if ($supportsStatusUpdates) { & $renderThreadStatuses } else { Write-Host $threadStatusLines[$job.Index] }
-                $collectedResults[$job.Index] = @{
-                    Index = $job.Index
-                    Output = @()
-                    Tools = @{ $job.Name = @{ Installed = "unknown"; Latest = ""; CheckTimedOut = $true } }
-                    DotNetSDKs = @{}; NotInstalled = @()
-                    Updates = @(); Errors = @("$($job.Name) check timed out after ${TimeoutSec}s")
-                    AvailableUpdates = @(); UpdateFailed = @()
-                    MaturityBlockedUpdates = @()
-                    GlobalNpmPackageUpdates = @(); GlobalNpmUpdateCommand = "ncu -g -u --loglevel=error"
-                }
+                $collectedResults[$job.Index] = New-ParallelCheckTimeoutResult -Index $job.Index -Name $job.Name -TimeoutSec $TimeoutSec
                 } else {
                     $still += $job
                 }
@@ -2781,24 +2904,7 @@ $ColorBlue   = $Global:ColorBlue
     # Print output and merge results in original order
     for ($i = 0; $i -lt $Checks.Count; $i++) {
         if (-not $collectedResults.ContainsKey($i)) { continue }
-        $r = $collectedResults[$i]
-
-        # Print buffered output
-        foreach ($line in $r.Output) { Write-Host $line }
-
-        # Merge into shared $results
-        foreach ($kv in $r.Tools.GetEnumerator())      { $results.Tools[$kv.Key] = $kv.Value }
-        foreach ($kv in $r.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$kv.Key] = $kv.Value }
-        $results.NotInstalled            += $r.NotInstalled
-        $results.Updates                 += $r.Updates
-        $results.Errors                  += $r.Errors
-        $results.UpdateFailed            += $r.UpdateFailed
-        $results.AvailableUpdates        += $r.AvailableUpdates
-        $results.MaturityBlockedUpdates  += $r.MaturityBlockedUpdates
-        $results.GlobalNpmPackageUpdates += $r.GlobalNpmPackageUpdates
-        if ($r.GlobalNpmUpdateCommand -and $r.GlobalNpmUpdateCommand -ne "ncu -g -u --loglevel=error") {
-            $results.GlobalNpmUpdateCommand = $r.GlobalNpmUpdateCommand
-        }
+        Merge-ParallelCheckResult -CheckResult $collectedResults[$i]
     }
 }
 
@@ -2807,7 +2913,7 @@ $ColorBlue   = $Global:ColorBlue
 # ─────────────────────────────────────────────
 
 function Main {
-    Assert-CustomToolConfigurations
+    Assert-ToolConfigurations
 
     Write-Host ""
     Write-Host "$ColorCyan╔═════════════════════════════════════════╗$ColorReset"

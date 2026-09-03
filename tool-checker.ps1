@@ -888,16 +888,10 @@ function Get-StandardToolUpdates {
         }
 
         $results.Tools[$ToolName].Latest = $latestVersion
-        if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
+        $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
+        if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
             Write-Warning "  $ToolName has available updates in WinGet: $InstalledVersion -> $latestVersion"
-            $results.Updates += $ToolName
             $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-            $updateCommand = if ($ToolName -eq 'uv') {
-                'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
-            } else {
-                $config.UpdateCommand
-            }
-            Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
         } else {
             Write-Success "$ToolName is up to date with WinGet"
         }
@@ -917,16 +911,10 @@ function Get-StandardToolUpdates {
                 return
             }
             $results.Tools[$ToolName].Latest = $latestVersion
-            if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion) {
+            $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
+            if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
                 Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
-                $results.Updates += $ToolName
                 $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-                $updateCommand = if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-                    'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
-                } else {
-                    $config.UpdateCommand
-                }
-                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
             } else {
                 Write-Success "$ToolName is up to date"
             }
@@ -980,13 +968,7 @@ function Get-StandardToolUpdates {
                 }
             } elseif (-not $SkipUpdate) {
                 $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-                $updateCommand = if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-                    'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
-                } elseif ($isNpmPackage) {
-                    $config.UpdateCommand.Replace("$($config.NpmPackageName)@latest", "$($config.NpmPackageName)@$latestVersion")
-                } else {
-                    $config.UpdateCommand
-                }
+                $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
                 Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
             }
         } else {
@@ -2595,7 +2577,7 @@ function Invoke-ParallelChecks {
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
-        'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
+        'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
         'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
     )

@@ -109,6 +109,61 @@ Describe 'Tool update registration' {
     }
 }
 
+Describe 'Update command resolution' {
+    BeforeEach {
+        $results.Tools = @{}
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+    }
+
+    It 'returns the configured command for a standard tool' {
+        $results.Tools['Deno'] = @{ Installed = '2.0.0'; Latest = '2.1.0' }
+
+        Get-UpdateCommand -ToolName 'Deno' -Installed '2.0.0' -Latest '2.1.0' |
+            Should Be $toolsConfig['Deno'].UpdateCommand
+    }
+
+    It 'pins an npm update to the checked version' {
+        $results.Tools['ncu'] = @{ Installed = '20.0.0'; Latest = '21.0.0'; AgeDays = $script:NpmUpdateCooldownDays }
+
+        Get-UpdateCommand -ToolName 'ncu' -Installed '20.0.0' -Latest '21.0.0' |
+            Should Be 'npm install -g npm-check-updates@21.0.0 --loglevel=error'
+    }
+
+    It 'uses the platform-specific uv update command' {
+        $results.Tools['uv'] = @{ Installed = '0.8.0'; Latest = '0.9.0' }
+        $expected = if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+        } else {
+            $toolsConfig['uv'].UpdateCommand
+        }
+
+        Get-UpdateCommand -ToolName 'uv' -Installed '0.8.0' -Latest '0.9.0' | Should Be $expected
+    }
+}
+
+Describe 'Standard tool update flow' {
+    BeforeEach {
+        $results.Tools = @{
+            'Azure Bicep CLI' = @{ Installed = '0.45.0'; Latest = '' }
+        }
+        $results.Updates = @()
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+    }
+
+    It 'registers a self-reported update with its configured command' {
+        Get-StandardToolUpdates `
+            -ToolName 'Azure Bicep CLI' `
+            -InstalledVersion '0.45.0' `
+            -RawOutput 'A new Bicep release is available: v0.46.1' | Out-Null
+
+        $results.Tools['Azure Bicep CLI'].Latest | Should Be '0.46.1'
+        $results.Updates[0] | Should Be 'Azure Bicep CLI'
+        $results.AvailableUpdates[0].Command | Should Be $toolsConfig['Azure Bicep CLI'].UpdateCommand
+    }
+}
+
 Describe 'npm release selection' {
     It 'selects the newest production version when latest points to a prerelease' {
         $apiData = [PSCustomObject]@{

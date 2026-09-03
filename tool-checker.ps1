@@ -36,7 +36,7 @@ param(
     [Alias('CheckOnly')]
     [switch]$SkipUpdate,
     [switch]$Force,
-    [int]$Timeout = 30,
+    [int]$Timeout = 60,
     [string]$EnvFile = (Join-Path $PSScriptRoot '.env'),
     [switch]$Version
 )

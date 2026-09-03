@@ -59,6 +59,31 @@ Describe 'Version comparison' {
     }
 }
 
+Describe 'Available update construction' {
+    BeforeEach {
+        $results.AvailableUpdates = @()
+    }
+
+    It 'adds the common update fields without emitting output' {
+        $output = Add-AvailableUpdate -Name 'Example CLI' -Command 'example update' -Type 'direct' -Details '1.0.0 -> 1.1.0'
+
+        $output | Should BeNullOrEmpty
+        $results.AvailableUpdates.Count | Should Be 1
+        $results.AvailableUpdates[0].Name | Should Be 'Example CLI'
+        $results.AvailableUpdates[0].Command | Should Be 'example update'
+        $results.AvailableUpdates[0].Type | Should Be 'direct'
+        $results.AvailableUpdates[0].Details | Should Be '1.0.0 -> 1.1.0'
+    }
+
+    It 'preserves registry and direct-installer metadata' {
+        Add-AvailableUpdate -Name 'npm registry' -Command '' -Type 'registry' -RegistryKey 'npm'
+        Add-AvailableUpdate -Name 'NodeJS' -Command 'Node.js MSI' -Type 'node-direct' -Version '26.8.1'
+
+        $results.AvailableUpdates[0].RegistryKey | Should Be 'npm'
+        $results.AvailableUpdates[1].Version | Should Be '26.8.1'
+    }
+}
+
 Describe 'npm release selection' {
     It 'selects the newest production version when latest points to a prerelease' {
         $apiData = [PSCustomObject]@{

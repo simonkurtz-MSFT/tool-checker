@@ -410,13 +410,7 @@ function Add-RegistryCheck {
     if ($status -eq 'Misaligned' -and -not $SkipUpdate) {
         $actionDetails = "$(Protect-RegistryUrl $Current) -> $(Protect-RegistryUrl $Expected)"
         if ($Details) { $actionDetails = "$Details; $actionDetails" }
-        $results.AvailableUpdates += @{
-            Name = "$Name registry"
-            Command = ''
-            Type = 'registry'
-            Details = $actionDetails
-            RegistryKey = $Key
-        }
+        Add-AvailableUpdate -Name "$Name registry" -Command '' -Type 'registry' -Details $actionDetails -RegistryKey $Key
     }
 }
 
@@ -686,9 +680,31 @@ function Add-NotInstalledTool {
     $results.NotInstalled += [PSCustomObject]@{ Name = $ToolName; InstallCommands = $cmds }
 }
 
-function New-UpdateEntry {
-    param([string]$ToolName, [string]$Command, [string]$Type, [string]$Details = "")
-    @{ Name = $ToolName; Command = $Command; Type = $Type; Details = $Details }
+function Add-AvailableUpdate {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Command,
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Type,
+        [string]$Details = '',
+        [string]$RegistryKey,
+        [string]$Version
+    )
+
+    $entry = [ordered]@{
+        Name = $Name
+        Command = $Command
+        Type = $Type
+        Details = $Details
+    }
+    if ($PSBoundParameters.ContainsKey('RegistryKey')) { $entry.RegistryKey = $RegistryKey }
+    if ($PSBoundParameters.ContainsKey('Version')) { $entry.Version = $Version }
+    $results.AvailableUpdates += $entry
 }
 
 function Get-WingetLatestVersion {
@@ -855,7 +871,7 @@ function Get-StandardToolUpdates {
             } else {
                 $config.UpdateCommand
             }
-            $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+            Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
         } else {
             Write-Success "$ToolName is up to date with WinGet"
         }
@@ -884,7 +900,7 @@ function Get-StandardToolUpdates {
                 } else {
                     $config.UpdateCommand
                 }
-                $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
             } else {
                 Write-Success "$ToolName is up to date"
             }
@@ -945,7 +961,7 @@ function Get-StandardToolUpdates {
                 } else {
                     $config.UpdateCommand
                 }
-                $results.AvailableUpdates += New-UpdateEntry -ToolName $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
             }
         } else {
             Write-Success "$ToolName is up to date"
@@ -1259,17 +1275,11 @@ function Test-NodeJS {
                 Write-Host "  - Using winget: $($config.UpdateCommand)"
                 Write-Host "  - Download: https://nodejs.org/"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-                $results.AvailableUpdates += @{
-                    Name = "NodeJS"; Command = $config.UpdateCommand; Type = $config.UpdateType
-                    Details = "v$currentVersion -> v$latestInMajor"
-                }
+                Add-AvailableUpdate -Name 'NodeJS' -Command $config.UpdateCommand -Type $config.UpdateType -Details "v$currentVersion -> v$latestInMajor"
             } else {
                 $catalogVersion = if ($wingetLatestVersion) { "v$wingetLatestVersion" } else { 'unknown' }
                 Write-Warning "  NodeJS v$latestInMajor is available upstream but not yet in WinGet (catalog: $catalogVersion); using the official installer."
-                $results.AvailableUpdates += @{
-                    Name = "NodeJS"; Command = "Official Node.js MSI v$latestInMajor (silent; UAC elevation)"; Type = "node-direct"
-                    Version = $latestInMajor; Details = "v$currentVersion -> v$latestInMajor"
-                }
+                Add-AvailableUpdate -Name 'NodeJS' -Command "Official Node.js MSI v$latestInMajor (silent; UAC elevation)" -Type 'node-direct' -Version $latestInMajor -Details "v$currentVersion -> v$latestInMajor"
             }
         }
     } catch {
@@ -1428,12 +1438,7 @@ function Test-NCUGlobal {
                 $results.GlobalNpmUpdateCommand = "npm install -g $($specs -join ' ') --loglevel=error"
                 if (!$SkipUpdate) {
                     foreach ($pkg in $installablePackages) {
-                        $results.AvailableUpdates += @{
-                            Name = "npm: $($pkg.Name)"
-                            Command = "npm install -g $($pkg.Name)@$($pkg.Latest) --loglevel=error"
-                            Type = "npm-global-package"
-                            Details = "$($pkg.Current) -> $($pkg.Latest)"
-                        }
+                        Add-AvailableUpdate -Name "npm: $($pkg.Name)" -Command "npm install -g $($pkg.Name)@$($pkg.Latest) --loglevel=error" -Type 'npm-global-package' -Details "$($pkg.Current) -> $($pkg.Latest)"
                     }
                 }
             }
@@ -1491,11 +1496,7 @@ function Test-AzureExtensions {
                 Write-Warning "  Extension '$($ext.name)' has update available: $($ext.version) -> $($latest.version)"
                 $updatesAvailable = $true
                 $results.Updates += "Azure Extension: $($ext.name)"
-                $results.AvailableUpdates += @{
-                    Name = "Azure Extension: $($ext.name)"
-                    Command = "az extension update --name $($ext.name) --only-show-errors"
-                    Type = "az-extension"; Details = "$($ext.version) -> $($latest.version)"
-                }
+                Add-AvailableUpdate -Name "Azure Extension: $($ext.name)" -Command "az extension update --name $($ext.name) --only-show-errors" -Type 'az-extension' -Details "$($ext.version) -> $($latest.version)"
             }
         }
         if (-not $updatesAvailable) { Write-Success "All Azure CLI extensions are up to date" }
@@ -1612,17 +1613,12 @@ function Test-DotNetSDKs {
                 $highest = $byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1
                 $latest  = $results.DotNetSDKs[$highest].Latest
                 if ($latest -and $latest -ne "-" -and [version]$latest -gt [version]$highest) {
-                    $results.AvailableUpdates += @{
-                        Name = ".NET SDK $highest"; Command = "winget upgrade Microsoft.DotNet.SDK.$maj --silent"
-                        Type = "winget"; Details = "$highest -> $latest"
-                    }
+                    Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade Microsoft.DotNet.SDK.$maj --silent" -Type 'winget' -Details "$highest -> $latest"
                 }
             }
             foreach ($m in $newerMajors) {
-                $results.AvailableUpdates += @{
-                    Name = ".NET SDK $m (new major version)"; Command = "winget install Microsoft.DotNet.SDK.$m --silent"
-                    Type = "winget-new"; Details = $(if ($newerMajorVersions[$m]) { "Latest in WinGet: $($newerMajorVersions[$m])" } else { "New major version" })
-                }
+                $details = if ($newerMajorVersions[$m]) { "Latest in WinGet: $($newerMajorVersions[$m])" } else { 'New major version' }
+                Add-AvailableUpdate -Name ".NET SDK $m (new major version)" -Command "winget install Microsoft.DotNet.SDK.$m --silent" -Type 'winget-new' -Details $details
             }
         } else {
             Write-Success "All .NET SDKs are up to date with their latest patches"
@@ -1674,7 +1670,7 @@ function Test-PythonInstallManager {
         Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"
         $results.Updates += $toolName
         Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-        $results.AvailableUpdates += New-UpdateEntry -ToolName $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
+        Add-AvailableUpdate -Name $toolName -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
     } else {
         Write-Success "$toolName is up to date with WinGet"
     }
@@ -1759,7 +1755,7 @@ function Get-PythonUpdateViaPy {
                     Write-Warning "  Python $maj has update available: $($installedMajors[$maj]) -> $latest"
                     $results.Updates += "Python $maj"; $found = $true
                     if (!$SkipUpdate) {
-                        $results.AvailableUpdates += @{ Name = "Python $maj"; Command = "py install $maj --update --quiet"; Type = "py"; Details = "$($installedMajors[$maj]) -> $latest" }
+                        Add-AvailableUpdate -Name "Python $maj" -Command "py install $maj --update --quiet" -Type 'py' -Details "$($installedMajors[$maj]) -> $latest"
                     }
                 }
             }
@@ -1793,7 +1789,7 @@ function Get-PythonUpdateConventional {
                 Write-Warning "  Python $major has update available${sourceLabel}: $InstalledVersion -> $latest"
                 $results.Updates += "Python $major"
                 if (!$SkipUpdate) {
-                    $results.AvailableUpdates += @{ Name = "Python $major"; Command = ($config.UpdateCommand -replace '\{version\}',$major); Type = $config.UpdateType; Details = "$InstalledVersion -> $latest" }
+                    Add-AvailableUpdate -Name "Python $major" -Command ($config.UpdateCommand -replace '\{version\}',$major) -Type $config.UpdateType -Details "$InstalledVersion -> $latest"
                 }
             } else { Write-Success "Python $major is up to date" }
         }
@@ -1842,10 +1838,7 @@ function Test-PowerShell {
                 Write-Warning "  PowerShell has available updates${sourceLabel}: $pwshVersion -> $latestVersion"
                 $results.Updates += "PowerShell"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-                $results.AvailableUpdates += @{
-                    Name = "PowerShell"; Command = $config.UpdateCommand; Type = $config.UpdateType
-                    Details = "$pwshVersion -> $latestVersion"
-                }
+                Add-AvailableUpdate -Name 'PowerShell' -Command $config.UpdateCommand -Type $config.UpdateType -Details "$pwshVersion -> $latestVersion"
             } else { Write-Success "PowerShell is up to date" }
         } catch { Write-Warning "  Could not fetch latest PowerShell version: $_" }
     } else {
@@ -1924,7 +1917,7 @@ function Test-WSL {
         $releaseType = if ($latestRelease.prerelease) { "prerelease" } else { "release" }
         Write-Warning "  WSL $releaseType available: $installedVersion -> $latestVersion"
         $results.Updates += "WSL"
-        $results.AvailableUpdates += New-UpdateEntry -ToolName "WSL" -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
+        Add-AvailableUpdate -Name 'WSL' -Command $config.UpdateCommand -Type $config.UpdateType -Details "$installedVersion -> $latestVersion"
     } else {
         Write-Success "WSL is up to date"
     }
@@ -2581,7 +2574,7 @@ function Invoke-ParallelChecks {
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
-        'Invoke-SafeApiRequest','Add-NotInstalledTool','New-UpdateEntry','Get-WingetLatestVersion',
+        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
         'Get-PythonUpdateViaPy','Get-PythonUpdateConventional'

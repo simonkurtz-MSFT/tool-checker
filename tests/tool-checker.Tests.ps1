@@ -83,6 +83,57 @@ Describe 'Tool configuration' {
     }
 }
 
+Describe 'Tool catalog selection' {
+    It 'selects the complete catalog when no IDs are requested' {
+        $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
+
+        $selection.CatalogToolIds.Count | Should Be 18
+        $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
+    }
+
+    It 'filters requested catalog IDs and retains display sort order' {
+        $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools -RequestedToolIds @('deno', 'azure-cli-extensions')
+
+        $selection.SelectedEntries.Count | Should Be 2
+        $selection.SelectedEntries[0].Id | Should Be 'azure-cli-extensions'
+        $selection.SelectedEntries[0].Name | Should Be 'Azure CLI Extensions'
+        $selection.SelectedEntries[1].Id | Should Be 'deno'
+    }
+
+    It 'rejects a requested ID that is absent from the catalog' {
+        { Get-ToolCatalogSelection -Tools $toolsJson.tools -RequestedToolIds @('deno', 'missing-tool') } |
+            Should Throw 'TOOL_CHECKER_TOOLS contains unknown catalog ID(s): missing-tool'
+    }
+
+    It 'rejects a catalog ID that is not a lowercase semantic identifier' {
+        $invalidCatalog = [PSCustomObject]@{
+            'Invalid Tool' = [PSCustomObject]@{ Name = 'Invalid Tool' }
+        }
+
+        { Get-ToolCatalogSelection -Tools $invalidCatalog } |
+            Should Throw "Tool catalog ID 'Invalid Tool' must use lowercase letters, numbers, and hyphens."
+    }
+
+    It 'rejects a catalog entry without a display name' {
+        $missingNameCatalog = [PSCustomObject]@{
+            'valid-tool' = [PSCustomObject]@{}
+        }
+
+        { Get-ToolCatalogSelection -Tools $missingNameCatalog } |
+            Should Throw "Tool catalog entry 'valid-tool' requires a display Name."
+    }
+
+    It 'rejects duplicate display names even when neither entry is selected' {
+        $duplicateNameCatalog = [PSCustomObject]@{
+            'first-tool' = [PSCustomObject]@{ Name = 'Same Tool' }
+            'second-tool' = [PSCustomObject]@{ Name = 'Same Tool' }
+        }
+
+        { Get-ToolCatalogSelection -Tools $duplicateNameCatalog -RequestedToolIds @('first-tool') } |
+            Should Throw "Tool catalog display Name 'Same Tool' must be unique."
+    }
+}
+
 Describe 'Result state' {
     It 'creates complete independent result containers' {
         $first = New-ToolCheckResults

@@ -121,6 +121,40 @@ function Get-ToolSortKey {
     "$ToolName|0|0"
 }
 
+function Get-ToolCatalogSelection {
+    param(
+        [Parameter(Mandatory)][object]$Tools,
+        [string[]]$RequestedToolIds = @()
+    )
+
+    $catalogToolIds = @()
+    $catalogToolNames = @()
+    $catalogEntries = @($Tools.PSObject.Properties | ForEach-Object {
+        if ($_.Name -notmatch '^[a-z][a-z0-9-]*$') {
+            throw "Tool catalog ID '$($_.Name)' must use lowercase letters, numbers, and hyphens."
+        }
+        if ([string]::IsNullOrWhiteSpace("$($_.Value.Name)")) {
+            throw "Tool catalog entry '$($_.Name)' requires a display Name."
+        }
+        if ($_.Value.Name -in $catalogToolNames) {
+            throw "Tool catalog display Name '$($_.Value.Name)' must be unique."
+        }
+        $catalogToolIds += $_.Name
+        $catalogToolNames += $_.Value.Name
+        [PSCustomObject]@{ Id = $_.Name; Name = $_.Value.Name; Configuration = $_.Value }
+    } | Sort-Object { Get-ToolSortKey $_.Name })
+
+    $unknownToolIds = @($RequestedToolIds | Where-Object { $_ -notin $catalogToolIds })
+    if ($unknownToolIds) {
+        throw "TOOL_CHECKER_TOOLS contains unknown catalog ID(s): $($unknownToolIds -join ', ')"
+    }
+
+    [PSCustomObject]@{
+        CatalogToolIds = $catalogToolIds
+        SelectedEntries = @($catalogEntries | Where-Object { -not $RequestedToolIds -or $_.Id -in $RequestedToolIds })
+    }
+}
+
 function Read-DotEnvFile {
     param([string]$Path)
 
@@ -165,35 +199,19 @@ if ($script:RegistryEnvironment.Contains('TOOL_CHECKER_TOOLS') -and $script:Regi
         Where-Object { $_ } |
         Select-Object -Unique)
 }
-$catalogToolIds = @()
 $script:NpmRegistryResolution = @{
     Source = 'tool-checker.json'
     Url = $null
     Details = $null
 }
 
-$catalogEntries = @($toolsJson.tools.PSObject.Properties | ForEach-Object {
-    if ($_.Name -notmatch '^[a-z][a-z0-9-]*$') {
-        throw "Tool catalog ID '$($_.Name)' must use lowercase letters, numbers, and hyphens."
-    }
-    if ([string]::IsNullOrWhiteSpace("$($_.Value.Name)")) {
-        throw "Tool catalog entry '$($_.Name)' requires a display Name."
-    }
-    $catalogToolIds += $_.Name
-    [PSCustomObject]@{ Id = $_.Name; Name = $_.Value.Name; Configuration = $_.Value }
-} | Sort-Object { Get-ToolSortKey $_.Name })
-
-$unknownToolIds = @($requestedToolIds | Where-Object { $_ -notin $catalogToolIds })
-if ($unknownToolIds) {
-    throw "TOOL_CHECKER_TOOLS contains unknown catalog ID(s): $($unknownToolIds -join ', ')"
-}
+$catalogSelection = Get-ToolCatalogSelection -Tools $toolsJson.tools -RequestedToolIds $requestedToolIds
+$catalogToolIds = $catalogSelection.CatalogToolIds
+$catalogEntries = $catalogSelection.SelectedEntries
 
 foreach ($catalogEntry in $catalogEntries) {
     if ($requestedToolIds -and $catalogEntry.Id -notin $requestedToolIds) { continue }
     $toolName = "$($catalogEntry.Name)"
-    if ($toolsConfig.Contains($toolName)) {
-        throw "Tool catalog display Name '$toolName' must be unique."
-    }
     $jsonTool = $catalogEntry.Configuration
     $toolEntry = @{}
     foreach ($prop in $jsonTool.PSObject.Properties) {

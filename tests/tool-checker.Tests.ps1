@@ -273,6 +273,27 @@ Describe 'Tool update registration' {
     }
 }
 
+Describe 'Update legend' {
+    BeforeEach {
+        $results.Updates = @()
+        Mock Write-Host { }
+    }
+
+    It 'is hidden when no updates are available' {
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 0
+    }
+
+    It 'is shown when an update is available' {
+        $results.Updates = @('Example CLI')
+
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 2
+    }
+}
+
 Describe 'Update command resolution' {
     BeforeEach {
         $results.Tools = @{}

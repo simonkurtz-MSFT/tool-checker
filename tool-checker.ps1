@@ -311,7 +311,7 @@ function Get-ApplicationBannerLines {
     param([Parameter(Mandatory)][string]$Version)
 
     $padding = '   '
-    $title = "Development Tools Checker & Updater V$Version"
+    $title = "Tool Checker V$Version"
     $border = '═' * ($title.Length + (2 * $padding.Length))
     @(
         "╔$border╗"
@@ -2213,6 +2213,13 @@ function Get-ReleaseNotesUrl {
     ""
 }
 
+function Show-UpdateLegend {
+    if ($results.Updates.Count -eq 0) { return }
+
+    Write-Host "  npm release cooldown: $script:NpmUpdateCooldownDays full days"
+    Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
+}
+
 function Show-ResultsTable {
     # Column widths
     $maxName = ($results.Tools.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
@@ -3077,15 +3084,12 @@ function Main {
 
     $isElevated = Test-IsAdministrator
     Write-Host "  Process elevated     : $(if ($isElevated) { 'Yes' } else { 'No' })"
-    Write-Host ""
 
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }
     if ($Force)      { Write-Warning "Running with automatic update (no prompts)" }
 
     Write-Host "  Registry policy file : $resolvedEnvFile"
     Write-Host "  Selected tool count  : $($toolsConfig.Count)/$($catalogToolIds.Count)"
-    $catalogSelection = if ($requestedToolIds) { $requestedToolIds -join ', ' } else { 'all configured tools' }
-    Write-Host "  Selected tools       : $catalogSelection"
     Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
 
     $registryMetadataRows = @($toolsConfig.Keys |
@@ -3133,8 +3137,7 @@ function Main {
     # Summary
     Write-Host ""
     Write-Host ""
-    Write-Host "  npm release cooldown: $script:NpmUpdateCooldownDays full days"
-    Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
+    Show-UpdateLegend
     Write-Header "Summary"
     Show-ResultsTable
 

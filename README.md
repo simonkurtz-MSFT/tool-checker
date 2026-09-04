@@ -173,8 +173,8 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 
 | Field                    | Required              | Purpose                                                                                                                |
 | ------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Catalog ID               | Yes                   | The top-level `tools` property name: a unique semantic ID used in `TOOL_CHECKER_TOOLS`.                               |
-| `Name`                   | Yes                   | Human-readable unique display name used in output and custom checker lookups.                                         |
+| Catalog ID               | Yes                   | The top-level `tools` property name: a unique semantic ID used in `TOOL_CHECKER_TOOLS`.                                |
+| `Name`                   | Yes                   | Human-readable unique display name used in output and custom checker lookups.                                          |
 | `enabled`                | No                    | Set to `false` to skip this checker. Defaults to `true` when omitted.                                                  |
 | `CheckType`              | Yes                   | Set to `standard` or `custom`.                                                                                         |
 | `Command`                | Yes                   | Executable name used to detect whether the tool is installed.                                                          |

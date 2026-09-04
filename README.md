@@ -31,7 +31,7 @@ The following screenshots show Tool Checker `1.2.0` validating registry policy a
 - Internet access to query release APIs and package registries
 - The package managers used by your configured install and update commands, such as WinGet, npm, or `apt`
 - `tool-checker.ps1` and `tool-checker.json` in the same directory
-- An optional `.env` registry policy based on [`.env.example`](.env.example)
+- An optional `.env` tool-selection and registry policy based on [`.env.example`](.env.example)
 
 The script does not require installation or additional PowerShell modules.
 
@@ -52,7 +52,7 @@ Checks run concurrently, followed by a summary showing installed and latest vers
 | `-SkipUpdate`        | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
 | `-Force`             | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools.                      |
 | `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds.                                                                        |
-| `-EnvFile <path>`    | Read registry policy from a specific dotenv file instead of `.env` beside the script.                                                             |
+| `-EnvFile <path>`    | Read tool selection and registry policy from a specific dotenv file instead of `.env` beside the script.                                          |
 | `-Version`           | Print the Tool Checker version and exit.                                                                                                          |
 
 Examples:
@@ -70,7 +70,7 @@ Examples:
 # Allow slower checks up to 60 seconds each
 ./tool-checker.ps1 -Timeout 60
 
-# Use a registry policy stored outside the repository
+# Use a tool-selection and registry policy stored outside the repository
 ./tool-checker.ps1 -EnvFile C:\secure\tool-checker.env
 
 # Print the script version
@@ -87,9 +87,26 @@ The characterization tests require Pester and run without invoking tool checks o
 Invoke-Pester ./tests
 ```
 
-### Registry policy
+### Tool selection and registry policy
 
-Copy [`.env.example`](.env.example) to `.env`, then uncomment only the registries the checker should enforce. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
+Copy [`.env.example`](.env.example) to `.env`, then optionally set `TOOL_CHECKER_TOOLS` to a comma-separated list of catalog IDs. When it is omitted, Tool Checker checks every configured tool. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
+
+`TOOL_CHECKER_TOOLS` accepts only the IDs defined in [`tool-checker.json`](tool-checker.json). Unknown IDs stop the run before tool checks start. The current catalog IDs are:
+
+```text
+nodejs, npm-check-updates, npm-global-packages, pnpm, deno, uv
+azure-cli, azure-cli-extensions, azure-bicep-cli
+dotnet-sdk, python-install-manager, python
+git, github-cli, github-copilot-cli, ripgrep, wsl, powershell
+```
+
+For example, this policy checks only the Azure tooling and .NET SDK:
+
+```dotenv
+TOOL_CHECKER_TOOLS=azure-cli,azure-cli-extensions,azure-bicep-cli,dotnet-sdk
+```
+
+Registry variables remain optional and are evaluated independently of catalog selection:
 
 - `NPM_CONFIG_REGISTRY`: checks the npm user registry; repairs it with `npm config set registry <url> --location=user`.
 - `PNPM_CONFIG_REGISTRY`: checks the pnpm global registry; repairs it with `pnpm config set registry <url> --location=global`. The location form avoids pnpm's unrelated global executable-directory validation.
@@ -112,7 +129,7 @@ Registry alignment is intentionally approval-gated. In a normal run, each misali
 
 ## Configuration
 
-Tools are defined under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Tool Checker sorts entries when loading the file and uses that order for both processing and display. Names are sorted alphabetically, with Azure CLI extensions grouped under Azure CLI and versioned .NET SDK and Python entries sorted by version descending.
+Tools are catalog entries under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Each property name is a unique, stable semantic ID made of lowercase letters, numbers, and hyphens; each entry's required `Name` field supplies the human-readable display name used by the script. Tool Checker sorts display names when loading selected entries and uses that order for both processing and display. Names are sorted alphabetically, with Azure CLI extensions grouped under Azure CLI and versioned .NET SDK and Python entries sorted by version descending.
 
 There are two kinds of checks:
 
@@ -126,7 +143,8 @@ Add an entry like this:
 ```json
 {
   "tools": {
-    "Example CLI": {
+    "example-cli": {
+      "Name": "Example CLI",
       "enabled": true,
       "CheckType": "standard",
       "ProductionReleasesOnly": true,
@@ -155,6 +173,8 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 
 | Field                    | Required              | Purpose                                                                                                                |
 | ------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Catalog ID               | Yes                   | The top-level `tools` property name: a unique semantic ID used in `TOOL_CHECKER_TOOLS`.                               |
+| `Name`                   | Yes                   | Human-readable unique display name used in output and custom checker lookups.                                         |
 | `enabled`                | No                    | Set to `false` to skip this checker. Defaults to `true` when omitted.                                                  |
 | `CheckType`              | Yes                   | Set to `standard` or `custom`.                                                                                         |
 | `Command`                | Yes                   | Executable name used to detect whether the tool is installed.                                                          |
@@ -196,7 +216,8 @@ Use a custom entry only when the standard framework cannot model the check:
 ```json
 {
   "tools": {
-    "Example SDK": {
+    "example-sdk": {
+      "Name": "Example SDK",
       "enabled": true,
       "CheckType": "custom",
       "CustomFunction": "Test-ExampleSDK",

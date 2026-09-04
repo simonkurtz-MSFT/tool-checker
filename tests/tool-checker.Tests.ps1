@@ -1,7 +1,16 @@
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-. $scriptPath
+$testEnvFile = Join-Path ([System.IO.Path]::GetTempPath()) "tool-checker-tests-$([guid]::NewGuid()).env"
+. $scriptPath -EnvFile $testEnvFile
 
 Describe 'Tool configuration' {
+    It 'loads stable, unique catalog IDs for display-named tools' {
+        $catalogIds = @($toolsConfig.Values | ForEach-Object { $_.Id })
+
+        $toolsConfig['Azure CLI Extensions'].Id | Should Be 'azure-cli-extensions'
+        $catalogIds.Count | Should Be ($catalogIds | Select-Object -Unique).Count
+        $catalogIds | ForEach-Object { $_ | Should Match '^[a-z][a-z0-9-]*$' }
+    }
+
     It 'applies defaults for optional custom-check properties' {
         $toolsConfig['Azure CLI Extensions'].Enabled | Should Be $true
         $toolsConfig['Azure CLI Extensions'].ProductionReleasesOnly | Should Be $true
@@ -91,6 +100,19 @@ Describe 'Result state' {
         $second.Tools.Count | Should Be 0
         $second.Errors.Count | Should Be 0
         $second.GlobalNpmUpdateCommand | Should Be 'ncu -g -u --loglevel=error'
+    }
+}
+
+Describe 'Application banner' {
+    It 'keeps border and title widths aligned for varying version lengths' {
+        foreach ($version in @('1.2.4', '10.123.4567-preview.89')) {
+            $lines = @(Get-ApplicationBannerLines -Version $version)
+
+            $lines.Count | Should Be 3
+            $lines[1] | Should Match "Updater V$version"
+            $lines[0].Length | Should Be $lines[1].Length
+            $lines[1].Length | Should Be $lines[2].Length
+        }
     }
 }
 
@@ -563,10 +585,13 @@ Describe 'Action execution' {
 Describe 'Parallel check orchestration' {
     It 'rehydrates configured checker dependencies without including the main entry point' {
         $scriptContent = Get-Content $scriptPath -Raw
+        $customChecker = $toolsConfig.Values |
+            Where-Object { $_.CheckType -eq 'custom' } |
+            Select-Object -First 1 -ExpandProperty CustomFunction
 
         $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent $scriptContent -ToolsConfiguration $toolsConfig
 
-        $functionBlock | Should Match 'function Test-NodeJS'
+        $functionBlock | Should Match "function $customChecker"
         $functionBlock | Should Match 'function Set-LatestToolVersion'
         $functionBlock | Should Not Match 'function Main'
     }

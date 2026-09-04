@@ -121,6 +121,33 @@ function Get-ToolSortKey {
     "$ToolName|0|0"
 }
 
+function Read-DotEnvFile {
+    param([string]$Path)
+
+    $values = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $values }
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed.StartsWith('export ')) { $trimmed = $trimmed.Substring(7).TrimStart() }
+        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') { continue }
+
+        $key = $Matches[1]
+        $value = $Matches[2].Trim()
+        if ($value.Length -ge 2 -and (
+            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            ($value.StartsWith("'") -and $value.EndsWith("'"))
+        )) {
+            $value = $value.Substring(1, $value.Length - 2)
+        } else {
+            $value = ($value -replace '\s+#.*$', '').Trim()
+        }
+        $values[$key] = $value
+    }
+    $values
+}
+
 $configPath = Join-Path $PSScriptRoot "tool-checker.json"
 if (-not (Test-Path $configPath)) {
     Write-Host "`e[31m✗ tool-checker.json not found at: $configPath`e[0m"
@@ -129,15 +156,45 @@ if (-not (Test-Path $configPath)) {
 
 $toolsConfig = [ordered]@{}
 $toolsJson   = Get-Content $configPath -Raw | ConvertFrom-Json
+$resolvedEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
+$script:RegistryEnvironment = Read-DotEnvFile -Path $resolvedEnvFile
+$requestedToolIds = @()
+if ($script:RegistryEnvironment.Contains('TOOL_CHECKER_TOOLS') -and $script:RegistryEnvironment.TOOL_CHECKER_TOOLS) {
+    $requestedToolIds = @($script:RegistryEnvironment.TOOL_CHECKER_TOOLS -split ',' |
+        ForEach-Object { $_.Trim().ToLowerInvariant() } |
+        Where-Object { $_ } |
+        Select-Object -Unique)
+}
+$catalogToolIds = @()
 $script:NpmRegistryResolution = @{
     Source = 'tool-checker.json'
     Url = $null
     Details = $null
 }
 
-$sortedToolNames = @($toolsJson.tools.PSObject.Properties.Name | Sort-Object { Get-ToolSortKey $_ })
-foreach ($toolName in $sortedToolNames) {
-    $jsonTool  = $toolsJson.tools.$toolName
+$catalogEntries = @($toolsJson.tools.PSObject.Properties | ForEach-Object {
+    if ($_.Name -notmatch '^[a-z][a-z0-9-]*$') {
+        throw "Tool catalog ID '$($_.Name)' must use lowercase letters, numbers, and hyphens."
+    }
+    if ([string]::IsNullOrWhiteSpace("$($_.Value.Name)")) {
+        throw "Tool catalog entry '$($_.Name)' requires a display Name."
+    }
+    $catalogToolIds += $_.Name
+    [PSCustomObject]@{ Id = $_.Name; Name = $_.Value.Name; Configuration = $_.Value }
+} | Sort-Object { Get-ToolSortKey $_.Name })
+
+$unknownToolIds = @($requestedToolIds | Where-Object { $_ -notin $catalogToolIds })
+if ($unknownToolIds) {
+    throw "TOOL_CHECKER_TOOLS contains unknown catalog ID(s): $($unknownToolIds -join ', ')"
+}
+
+foreach ($catalogEntry in $catalogEntries) {
+    if ($requestedToolIds -and $catalogEntry.Id -notin $requestedToolIds) { continue }
+    $toolName = "$($catalogEntry.Name)"
+    if ($toolsConfig.Contains($toolName)) {
+        throw "Tool catalog display Name '$toolName' must be unique."
+    }
+    $jsonTool = $catalogEntry.Configuration
     $toolEntry = @{}
     foreach ($prop in $jsonTool.PSObject.Properties) {
         if ($prop.Name -eq "InstallCommands") {
@@ -148,6 +205,7 @@ foreach ($toolName in $sortedToolNames) {
             $toolEntry[$prop.Name] = $prop.Value
         }
     }
+    $toolEntry['Id'] = $catalogEntry.Id
     if (-not $toolEntry.ContainsKey('ProductionReleasesOnly')) {
         $toolEntry['ProductionReleasesOnly'] = $true
     }
@@ -231,6 +289,19 @@ function Write-Success { param([string]$Text) Write-Host "  $ColorGreen✓ $Text
 function Write-Warning { param([string]$Text) Write-Host "  $ColorYellow⚠ $Text$ColorReset" }
 function Write-Error   { param([string]$Text) Write-Host "  $ColorRed✗ $Text$ColorReset" }
 
+function Get-ApplicationBannerLines {
+    param([Parameter(Mandatory)][string]$Version)
+
+    $padding = '   '
+    $title = "Development Tools Checker & Updater V$Version"
+    $border = '═' * ($title.Length + (2 * $padding.Length))
+    @(
+        "╔$border╗"
+        "║$padding$title$padding║"
+        "╚$border╝"
+    )
+}
+
 function Test-CommandExists {
     param([string]$Command)
     $null = Get-Command $Command -ErrorAction SilentlyContinue
@@ -263,33 +334,6 @@ function Get-DetailedErrorMessage {
         $parts.Add($ErrorRecord.InvocationInfo.PositionMessage.Trim())
     }
     $parts -join ' | '
-}
-
-function Read-DotEnvFile {
-    param([string]$Path)
-
-    $values = [ordered]@{}
-    if (-not (Test-Path -LiteralPath $Path)) { return $values }
-
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
-        if ($trimmed.StartsWith('export ')) { $trimmed = $trimmed.Substring(7).TrimStart() }
-        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') { continue }
-
-        $key = $Matches[1]
-        $value = $Matches[2].Trim()
-        if ($value.Length -ge 2 -and (
-            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
-            ($value.StartsWith("'") -and $value.EndsWith("'"))
-        )) {
-            $value = $value.Substring(1, $value.Length - 2)
-        } else {
-            $value = ($value -replace '\s+#.*$', '').Trim()
-        }
-        $values[$key] = $value
-    }
-    $values
 }
 
 function ConvertTo-NormalizedRegistryUrl {
@@ -453,7 +497,8 @@ function Test-RegistryConfiguration {
     Write-Header 'Registry Configuration'
     Write-Host ""
 
-    if ($EnvironmentConfig.Count -eq 0) {
+    $registryPolicyKeys = @('NPM_CONFIG_REGISTRY', 'PNPM_CONFIG_REGISTRY', 'PIP_INDEX_URL', 'UV_DEFAULT_INDEX', 'NUGET_SOURCE_URL')
+    if (-not @($registryPolicyKeys | Where-Object { $EnvironmentConfig.Contains($_) })) {
         Write-Host "  No registry policy loaded from $EnvFile"
         Write-Host '  Copy .env.example to .env and uncomment the registries you want to enforce.'
         return
@@ -3007,10 +3052,9 @@ function Main {
     Assert-ToolConfigurations
 
     Write-Host ""
-    Write-Host "$ColorCyan╔═════════════════════════════════════════╗$ColorReset"
-    Write-Host "$ColorCyan║   Development Tools Checker & Updater   ║$ColorReset"
-    Write-Host "$ColorCyan╚═════════════════════════════════════════╝$ColorReset"
-    Write-Host "  Version $script:ToolCheckerVersion"
+    foreach ($line in Get-ApplicationBannerLines -Version $script:ToolCheckerVersion) {
+        Write-Host "$ColorCyan$line$ColorReset"
+    }
     Write-Host ""
 
     $isElevated = Test-IsAdministrator
@@ -3020,9 +3064,10 @@ function Main {
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }
     if ($Force)      { Write-Warning "Running with automatic update (no prompts)" }
 
-    $resolvedEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
-    $script:RegistryEnvironment = Read-DotEnvFile -Path $resolvedEnvFile
     Write-Host "  Registry policy file : $resolvedEnvFile"
+    Write-Host "  Selected tool count  : $($toolsConfig.Count)/$($catalogToolIds.Count)"
+    $catalogSelection = if ($requestedToolIds) { $requestedToolIds -join ', ' } else { 'all configured tools' }
+    Write-Host "  Selected tools       : $catalogSelection"
     Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
 
     $registryMetadataRows = @($toolsConfig.Keys |

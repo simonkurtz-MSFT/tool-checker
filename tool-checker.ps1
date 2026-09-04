@@ -983,6 +983,9 @@ function Get-LatestVersionFromApi {
         "azCliJson" {
             if ($ApiData.info -and $ApiData.info.version) { $ApiData.info.version } else { $null }
         }
+        "azdGitHubTag" {
+            if ($ApiData.tag_name -match '^azure-dev-cli_(.+)$') { $Matches[1] } else { $null }
+        }
         # --- Add new API-version-extractor cases here ---
         default {
             # GitHub releases / generic fallback

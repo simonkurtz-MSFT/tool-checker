@@ -131,6 +131,27 @@
         "Linux (arm64)": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
       }
     },
+    "azure-dev-cli": {
+      "Name": "Azure Developer CLI",
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "azd",
+      "VersionFlag": "version",
+      "VersionParseRegex": "azd version\\s+([0-9]+(?:\\.[0-9]+){1,3})",
+      "VersionExtractor": "azdGitHubTag",
+      "WingetId": "Microsoft.Azd",
+      "UpdateType": "winget",
+      "UpdateCommand": "winget upgrade --id Microsoft.Azd -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
+      "ReleaseNotesUrl": "https://github.com/Azure/azure-dev/releases",
+      "ApiUrl": "https://api.github.com/repos/Azure/azure-dev/releases/latest",
+      "InstallCommands": {
+        "Windows (amd64)": "winget install --id Microsoft.Azd -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
+        "Windows (arm64)": "winget install --id Microsoft.Azd -e --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements",
+        "Linux (amd64)": "curl -fsSL https://aka.ms/install-azd.sh | bash",
+        "Linux (arm64)": "curl -fsSL https://aka.ms/install-azd.sh | bash"
+      }
+    },
     "azure-cli-extensions": {
       "Name": "Azure CLI Extensions",
       "enabled": true,

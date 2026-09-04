@@ -8,7 +8,7 @@ The included configuration checks:
 
 - Node.js and global npm packages
 - npm-check-updates (`ncu`), pnpm, Deno, and uv
-- Azure CLI, Azure CLI extensions, and Bicep
+- Azure CLI, Azure Developer CLI, Azure CLI extensions, and Bicep
 - .NET SDKs, Python Install Manager (`py`), and Python installations
 - Git, GitHub CLI, GitHub Copilot CLI, and ripgrep
 - WSL and PowerShell
@@ -95,7 +95,7 @@ Copy [`.env.example`](.env.example) to `.env`, then optionally set `TOOL_CHECKER
 
 ```text
 nodejs, npm-check-updates, npm-global-packages, pnpm, deno, uv
-azure-cli, azure-cli-extensions, azure-bicep-cli
+azure-cli, azure-dev-cli, azure-cli-extensions, azure-bicep-cli
 dotnet-sdk, python-install-manager, python
 git, github-cli, github-copilot-cli, ripgrep, wsl, powershell
 ```
@@ -103,7 +103,7 @@ git, github-cli, github-copilot-cli, ripgrep, wsl, powershell
 For example, this policy checks only the Azure tooling and .NET SDK:
 
 ```dotenv
-TOOL_CHECKER_TOOLS=azure-cli,azure-cli-extensions,azure-bicep-cli,dotnet-sdk
+TOOL_CHECKER_TOOLS=azure-cli,azure-dev-cli,azure-cli-extensions,azure-bicep-cli,dotnet-sdk
 ```
 
 Registry variables remain optional and are evaluated independently of catalog selection:

@@ -7,6 +7,7 @@ Describe 'Tool configuration' {
         $catalogIds = @($toolsConfig.Values | ForEach-Object { $_.Id })
 
         $toolsConfig['Azure CLI Extensions'].Id | Should Be 'azure-cli-extensions'
+        $toolsConfig['Azure Developer CLI'].Id | Should Be 'azure-dev-cli'
         $catalogIds.Count | Should Be ($catalogIds | Select-Object -Unique).Count
         $catalogIds | ForEach-Object { $_ | Should Match '^[a-z][a-z0-9-]*$' }
     }
@@ -87,7 +88,7 @@ Describe 'Tool catalog selection' {
     It 'selects the complete catalog when no IDs are requested' {
         $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
 
-        $selection.CatalogToolIds.Count | Should Be 18
+        $selection.CatalogToolIds.Count | Should Be 19
         $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
     }
 
@@ -221,6 +222,15 @@ Describe 'Latest version acceptance' {
 
         $accepted | Should Be $true
         $results.Tools['Example CLI'].Latest | Should Be '1.1.0-preview.1'
+    }
+}
+
+Describe 'API version extraction' {
+    It 'normalizes Azure Developer CLI GitHub release tags' {
+        $apiData = [PSCustomObject]@{ tag_name = 'azure-dev-cli_1.33.0' }
+
+        Get-LatestVersionFromApi -ApiData $apiData -ToolName 'Azure Developer CLI' |
+            Should Be '1.33.0'
     }
 }
 

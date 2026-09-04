@@ -310,13 +310,14 @@ function Write-Error   { param([string]$Text) Write-Host "  $ColorRed✗ $Text$C
 function Get-ApplicationBannerLines {
     param([Parameter(Mandatory)][string]$Version)
 
+    $indent = '  '
     $padding = '   '
     $title = "Tool Checker V$Version"
     $border = '═' * ($title.Length + (2 * $padding.Length))
     @(
-        "╔$border╗"
-        "║$padding$title$padding║"
-        "╚$border╝"
+        "$indent╔$border╗"
+        "$indent║$padding$title$padding║"
+        "$indent╚$border╝"
     )
 }
 

@@ -160,7 +160,8 @@ Describe 'Application banner' {
             $lines = @(Get-ApplicationBannerLines -Version $version)
 
             $lines.Count | Should Be 3
-            $lines[1] | Should Match "Updater V$version"
+            $lines | ForEach-Object { $_ | Should Match '^  [^ ]' }
+            $lines[1] | Should Match "Tool Checker V$version"
             $lines[0].Length | Should Be $lines[1].Length
             $lines[1].Length | Should Be $lines[2].Length
         }

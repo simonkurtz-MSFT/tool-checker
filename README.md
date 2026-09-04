@@ -263,6 +263,11 @@ Release APIs and package catalogs can disagree temporarily. For most Windows too
 
 On Windows, uv installs and updates use one non-interactive WinGet path. Before installing, Tool Checker removes a registered WinGet copy, detected pipx or Cargo copies, and leftover `uv`, `uvx`, and `uvw` binaries from the current user's `.local\bin` and `.cargo\bin` directories. It then performs a clean WinGet install. This standardizes future updates without deleting uv's cache, managed Python installations, or installed tools. On Linux, uv continues to use Astral's standalone installer and `uv self update`.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and the
+requirements for proposing or implementing a tool catalog addition.
+
 ## License
 
 Licensed under the terms in [`LICENSE`](LICENSE).

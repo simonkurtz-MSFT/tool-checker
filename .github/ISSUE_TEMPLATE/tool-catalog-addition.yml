@@ -1,0 +1,111 @@
+name: Tool Catalog Addition
+description: Propose a development tool for the Tool Checker catalog.
+title: "[Tool Catalog]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a tool. Please provide authoritative sources and
+        sanitize command output so it contains no credentials or private URLs.
+
+  - type: input
+    id: tool-name
+    attributes:
+      label: Tool name
+      description: Use the official, human-readable product or package name.
+      placeholder: Example CLI
+    validations:
+      required: true
+
+  - type: input
+    id: catalog-id
+    attributes:
+      label: Proposed catalog ID
+      description: Use a stable ID containing lowercase letters, numbers, and hyphens.
+      placeholder: example-cli
+    validations:
+      required: true
+
+  - type: input
+    id: project-url
+    attributes:
+      label: Official project URL
+      placeholder: https://example.com/example-cli
+    validations:
+      required: true
+
+  - type: textarea
+    id: value
+    attributes:
+      label: Why should this tool be included?
+      description: Explain who uses it and why it belongs in this development-tool catalog.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: check-type
+    attributes:
+      label: Proposed check type
+      description: Standard is preferred unless the shared version and update framework cannot model the tool.
+      options:
+        - standard
+        - custom
+        - unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: version-detection
+    attributes:
+      label: Installed-version detection
+      description: Provide the command, sanitized output, and the version value or regex capture to extract.
+      placeholder: |
+        Command: example --version
+        Output: example 1.2.3
+        Version: 1.2.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: release-source
+    attributes:
+      label: Latest-release source
+      description: Link the authoritative API or registry endpoint and show the field containing the latest version.
+      placeholder: |
+        API: https://api.example.com/releases/latest
+        Version field: version
+        Release notes: https://example.com/releases
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: Install and update commands
+      description: List non-interactive commands by OS and architecture. Mark unsupported combinations explicitly.
+      placeholder: |
+        Windows (amd64):
+        Windows (arm64):
+        Linux (amd64):
+        Linux (arm64):
+        Update command:
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional behavior or constraints
+      description: Note prerelease policy, elevation needs, package-manager quirks, or other relevant constraints.
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Verification
+      options:
+        - label: I searched existing issues and catalog entries for this tool.
+          required: true
+        - label: I used official release and installation sources where available.
+          required: true
+        - label: I removed credentials and private URLs from the information above.
+          required: true

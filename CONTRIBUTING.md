@@ -41,6 +41,11 @@ version that Tool Checker can compare consistently.
 
 ## Tool-specific file template
 
+Keep the npm cooldown default in catalog `settings.CooldownDays`, not in script
+or tool-file constants. The runtime `-CooldownDays` override takes precedence;
+reuse the resolved `$script:NpmUpdateCooldownDays` in main and worker checks.
+Cover catalog values, overrides (including zero), and worker propagation in tests.
+
 Use [Tools/_tool-template.ps1](Tools/_tool-template.ps1) when extracting or adding
 tool-unique behavior. Prefer `Tools/<catalog-id>.ps1` and explicitly set
 `"ToolFile": "<catalog-id>.ps1"` in its catalog entry. Filenames may differ from

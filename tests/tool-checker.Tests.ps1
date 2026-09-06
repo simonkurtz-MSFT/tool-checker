@@ -1330,6 +1330,103 @@ Describe 'Parallel check orchestration' {
     }
 }
 
+Describe 'Cooldown configuration' {
+    BeforeEach {
+        $cooldownDirectory = Join-Path $TestDrive 'cooldown-catalog'
+        New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
+        $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
+        $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
+    }
+
+    It 'uses catalog <CatalogDays> and runtime <OverrideDays> consistently in the main session and workers' -TestCases @(
+        @{ CatalogDays = 8; OverrideDays = $null; ExpectedDays = 8; ExpectedInstallable = $false },
+        @{ CatalogDays = 12; OverrideDays = $null; ExpectedDays = 12; ExpectedInstallable = $false },
+        @{ CatalogDays = 8; OverrideDays = 2; ExpectedDays = 2; ExpectedInstallable = $true },
+        @{ CatalogDays = 8; OverrideDays = 0; ExpectedDays = 0; ExpectedInstallable = $true }
+    ) {
+        param($CatalogDays, $OverrideDays, $ExpectedDays, $ExpectedInstallable)
+
+        $cooldownCatalog.settings.CooldownDays = $CatalogDays
+        $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile, $overrideDays)
+                $options = @{ EnvFile = $envFile }
+                if ($null -ne $overrideDays) { $options.CooldownDays = $overrideDays }
+                . $path @options
+                $check = {
+                    $apiData = [PSCustomObject]@{
+                        versions = [PSCustomObject]@{ '1.1.0' = @{} }
+                        time = [PSCustomObject]@{ '1.1.0' = [DateTimeOffset]::UtcNow.AddDays(-3).ToString('O') }
+                    }
+                    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion '1.0.0' -MaximumVersion '1.1.0'
+                    $results.Tools['Cooldown probe'] = @{
+                        Days = $script:NpmUpdateCooldownDays
+                        Installable = $null -ne $release -and $release.Installable
+                    }
+                }
+                & $check
+                $mainResult = $results.Tools['Cooldown probe']
+                $results = New-ToolCheckResults
+                Invoke-ParallelChecks -Checks @(@{ Name = 'Cooldown probe'; Block = $check }) -Total 1 -TimeoutSec 5
+                [PSCustomObject]@{
+                    Main = $mainResult
+                    Worker = $results.Tools['Cooldown probe']
+                }
+            }).AddArgument((Join-Path $cooldownDirectory 'tool-checker.ps1')).AddArgument($testEnvFile).AddArgument($OverrideDays)
+            $observed = @($session.Invoke())
+
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].Main.Days | Should Be $ExpectedDays
+            $observed[0].Worker.Days | Should Be $ExpectedDays
+            $observed[0].Main.Installable | Should Be $ExpectedInstallable
+            $observed[0].Worker.Installable | Should Be $ExpectedInstallable
+        } finally {
+            $session.Dispose()
+        }
+    }
+
+    It 'rejects missing and invalid catalog cooldown values' {
+        foreach ($invalidValue in @($null, -1, 1.5, '8', $true, 2147483648)) {
+            $cooldownCatalog.settings = @{ CooldownDays = $invalidValue }
+            if ($null -eq $invalidValue) { $cooldownCatalog.Remove('settings') | Out-Null }
+            $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
+            $session = [powershell]::Create()
+            try {
+                $null = $session.AddScript({
+                    param($path, $envFile)
+                    try { . $path -EnvFile $envFile } catch { $_.Exception.Message }
+                }).AddArgument((Join-Path $cooldownDirectory 'tool-checker.ps1')).AddArgument($testEnvFile)
+                $observed = @($session.Invoke())
+
+                $observed.Count | Should Be 1
+                $observed[0] | Should Match 'Catalog settings.CooldownDays must be a nonnegative integer'
+            } finally {
+                $session.Dispose()
+            }
+        }
+    }
+
+    It 'rejects a negative runtime override' {
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path)
+                try { . $path -CooldownDays -1 -Version } catch { $_.FullyQualifiedErrorId }
+            }).AddArgument($scriptPath)
+            $observed = @($session.Invoke())
+
+            $observed.Count | Should Be 1
+            $observed[0] | Should Match 'ParameterArgumentValidationError'
+        } finally {
+            $session.Dispose()
+        }
+    }
+}
+
 Describe 'npm release selection' {
     It 'selects the newest production version when latest points to a prerelease' {
         $apiData = [PSCustomObject]@{

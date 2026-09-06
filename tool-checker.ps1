@@ -17,6 +17,10 @@
 .PARAMETER Timeout
     Maximum seconds to wait for each tool check before killing it. Default: 60.
 
+.PARAMETER CooldownDays
+    Override settings.CooldownDays from the catalog for npm release maturity.
+    Use a nonnegative number of full days; zero removes the release-age delay.
+
 .PARAMETER Version
     Print the tool checker version and exit.
 
@@ -37,12 +41,13 @@ param(
     [switch]$SkipUpdate,
     [switch]$Force,
     [int]$Timeout = 60,
+    [ValidateRange(0, 2147483647)]
+    [int]$CooldownDays,
     [string]$EnvFile = (Join-Path $PSScriptRoot '.env'),
     [switch]$Version
 )
 
 $script:ToolCheckerVersion = '1.2.5'
-$script:NpmUpdateCooldownDays = 8
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 
@@ -190,6 +195,16 @@ if (-not (Test-Path $configPath)) {
 
 $toolsConfig = [ordered]@{}
 $toolsJson   = Get-Content $configPath -Raw | ConvertFrom-Json
+$catalogCooldownDays = $toolsJson.settings.CooldownDays
+if (($catalogCooldownDays -isnot [int] -and $catalogCooldownDays -isnot [long]) -or
+    $catalogCooldownDays -lt 0 -or $catalogCooldownDays -gt [int]::MaxValue) {
+    throw 'Catalog settings.CooldownDays must be a nonnegative integer no greater than 2147483647.'
+}
+$script:NpmUpdateCooldownDays = if ($PSBoundParameters.ContainsKey('CooldownDays')) {
+    $CooldownDays
+} else {
+    [int]$catalogCooldownDays
+}
 $resolvedEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
 $script:RegistryEnvironment = Read-DotEnvFile -Path $resolvedEnvFile
 $requestedToolIds = @()

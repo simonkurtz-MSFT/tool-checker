@@ -1,4 +1,7 @@
 {
+  "settings": {
+    "CooldownDays": 8
+  },
   "tools": {
     "nodejs": {
       "Name": "NodeJS",

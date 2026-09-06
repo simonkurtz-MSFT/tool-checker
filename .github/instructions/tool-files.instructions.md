@@ -13,6 +13,9 @@ applyTo: "Tools/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTR
   behavior, using `Tools/_tool-template.ps1` as the starting point.
 - Tool files define functions only. Preserve shared state and helper
   reuse, check-only behavior, result shapes, and action approval gates.
+- Keep cooldown defaults in catalog `settings.CooldownDays`. Reuse the resolved
+  `$script:NpmUpdateCooldownDays` (runtime `-CooldownDays` takes precedence),
+  including in workers; never hard-code cooldown periods in tool files.
 - Exclude `_tool-template.ps1` from runtime loading and parallel function
   discovery. The template must remain safe to dot-source and must not silently
   report success when its unfinished checker is invoked.

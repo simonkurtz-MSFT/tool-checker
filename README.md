@@ -2,7 +2,7 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Checks npm releases from newest to oldest and selects the newest production version that has completed the eight-full-day cooldown. If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
+Checks npm releases from newest to oldest and selects the newest production version that has completed the catalog-configured cooldown (eight full days by default, overridable at runtime). If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
 
 The included configuration checks:
 
@@ -47,13 +47,14 @@ Checks run concurrently, followed by a summary showing installed and latest vers
 
 ### Options
 
-| Option               | Description                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-SkipUpdate`        | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
-| `-Force`             | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools.                      |
-| `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds.                                                                        |
-| `-EnvFile <path>`    | Read tool selection and registry policy from a specific dotenv file instead of `.env` beside the script.                                          |
-| `-Version`           | Print the Tool Checker version and exit.                                                                                                          |
+| Option | Description |
+| --- | --- |
+| `-SkipUpdate` | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
+| `-Force` | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools. |
+| `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds. |
+| `-CooldownDays <days>` | Override the catalog's npm release cooldown for this run. Nonnegative integer; `0` removes the age delay. |
+| `-EnvFile <path>` | Read tool selection and registry policy from a specific dotenv file instead of `.env` beside the script. |
+| `-Version` | Print the Tool Checker version and exit. |
 
 Examples:
 
@@ -69,6 +70,9 @@ Examples:
 
 # Allow slower checks up to 60 seconds each
 ./tool-checker.ps1 -Timeout 60
+
+# Override the catalog's cooldown for this run
+./tool-checker.ps1 -CooldownDays 10
 
 # Use a tool-selection and registry policy stored outside the repository
 ./tool-checker.ps1 -EnvFile C:\secure\tool-checker.env
@@ -207,7 +211,17 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 
 For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`. Numeric revision suffixes such as GitHub Copilot CLI's `1.0.83-2` are compared numerically when prereleases are enabled.
 
-The script enforces an eight-full-day cooldown after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
+The catalog defines the npm release cooldown at the top level, alongside `tools`:
+
+```json
+"settings": {
+  "CooldownDays": 8
+}
+```
+
+`settings.CooldownDays` is required and must be a nonnegative integer (at most 2147483647). There is no hard-coded script fallback. `-CooldownDays <days>` takes precedence for the current run without modifying the catalog; `0` removes the age delay but retains version filtering and release-metadata checks. The resolved value applies to npm-hosted CLI updates and global npm package updates, including parallel checks and action eligibility. It does not add cooldowns to other release sources. `-Force` still respects the resolved cooldown.
+
+The cooldown applies after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
 
 ### Add a custom tool
 

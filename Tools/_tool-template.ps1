@@ -37,6 +37,9 @@
     Functions run in the main script or an isolated check worker. They use the
     existing toolsConfig, results, SkipUpdate, and script-scoped platform/timeout
     settings. Do not initialize shared state in this file.
+    For npm maturity checks, reuse script:NpmUpdateCooldownDays, resolved from
+    catalog settings.CooldownDays or the runtime -CooldownDays override. Do not
+    hard-code a cooldown in tool files; workers receive the same resolved value.
 
     After catalog selection, the main script loads only declared ToolFile files for
     selected, enabled tools in catalog-ID order into a per-tool definition registry.

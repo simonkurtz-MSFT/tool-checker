@@ -84,6 +84,43 @@ Describe 'Tool configuration' {
     }
 }
 
+Describe 'pnpm version refresh' {
+    It 'reports the updated global package instead of an older command version' {
+        $previousTools = $results.Tools.Clone()
+        $results.Tools['pnpm'] = @{ Installed = '10.0.0'; Latest = '10.1.0' }
+        Mock Get-GlobalNpmInstalledVersion { '10.1.0' } -ParameterFilter { $PackageName -eq 'pnpm' }
+        Mock Test-CommandExists { $true }
+        Mock Get-CommandVersion { '10.0.0' }
+
+        try {
+            Refresh-ToolVersion -ToolName 'pnpm' | Should Be $true
+
+            $results.Tools['pnpm'].Installed | Should Be '10.1.0'
+            Assert-MockCalled Get-GlobalNpmInstalledVersion 1 -ParameterFilter { $PackageName -eq 'pnpm' }
+            Assert-MockCalled Get-CommandVersion 0
+        } finally {
+            $results.Tools = $previousTools
+        }
+    }
+
+    It 'falls back to the command version when global npm metadata is unavailable' {
+        $previousTools = $results.Tools.Clone()
+        $results.Tools['pnpm'] = @{ Installed = '10.0.0'; Latest = '10.1.0' }
+        Mock Get-GlobalNpmInstalledVersion { $null } -ParameterFilter { $PackageName -eq 'pnpm' }
+        Mock Test-CommandExists { $true }
+        Mock Get-CommandVersion { '10.1.0' }
+
+        try {
+            Refresh-ToolVersion -ToolName 'pnpm' | Should Be $true
+
+            $results.Tools['pnpm'].Installed | Should Be '10.1.0'
+            Assert-MockCalled Get-CommandVersion 1 -ParameterFilter { $Command -eq 'pnpm' }
+        } finally {
+            $results.Tools = $previousTools
+        }
+    }
+}
+
 Describe 'Tool catalog selection' {
     It 'selects the complete catalog when no IDs are requested' {
         $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
@@ -357,6 +394,73 @@ Describe 'Standard tool update flow' {
         $results.Tools['Azure Bicep CLI'].Latest | Should Be '0.46.1'
         $results.Updates[0] | Should Be 'Azure Bicep CLI'
         $results.AvailableUpdates[0].Command | Should Be $toolsConfig['Azure Bicep CLI'].UpdateCommand
+    }
+}
+
+Describe 'Azure Developer CLI package version' {
+    BeforeEach {
+        $results.Tools = @{ 'Azure Developer CLI' = @{ Installed = '1.33.0'; Latest = '' } }
+        $results.Updates = @()
+        $results.AvailableUpdates = @()
+        Mock Test-CommandExists { $true }
+        Mock Get-CommandVersion { 'azd version 1.33.0 (commit abc123)' }
+        Mock Get-WingetLatestVersion { '1.33.100' }
+        Mock Invoke-SafeApiRequest { throw 'Windows azd checks must use WinGet' }
+    }
+
+    It 'does not offer an update for an already installed package build' -Skip:(-not $IsWindows) {
+        Mock winget.exe { $global:LASTEXITCODE = 0; 'Azure Developer CLI Microsoft.Azd 1.33.100' }
+
+        $installed = Get-InstalledVersionFromOutput -ToolName 'Azure Developer CLI' -Output 'azd version 1.33.0 (commit abc123)'
+        Get-StandardToolUpdates -ToolName 'Azure Developer CLI' -InstalledVersion $installed
+
+        $installed | Should Be '1.33.100'
+        $results.Tools['Azure Developer CLI'].Latest | Should Be '1.33.100'
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+
+    It 'refreshes the installed package build after an update' -Skip:(-not $IsWindows) {
+        Mock winget.exe { $global:LASTEXITCODE = 0; 'Azure Developer CLI Microsoft.Azd 1.33.100' }
+
+        Refresh-ToolVersion -ToolName 'Azure Developer CLI' | Should Be $true
+
+        $results.Tools['Azure Developer CLI'].Installed | Should Be '1.33.100'
+    }
+
+    It 'still offers a genuinely newer package build' -Skip:(-not $IsWindows) {
+        Mock winget.exe {
+            $global:LASTEXITCODE = 0
+            'Name                Id            Version  Available Source'
+            '----------------------------------------------------------'
+            'Azure Developer CLI Microsoft.Azd 1.32.100 1.33.100  winget'
+        }
+
+        $installed = Get-InstalledVersionFromOutput -ToolName 'Azure Developer CLI' -Output 'azd version 1.32.0'
+        Get-StandardToolUpdates -ToolName 'Azure Developer CLI' -InstalledVersion $installed
+
+        $installed | Should Be '1.32.100'
+        $results.AvailableUpdates.Count | Should Be 1
+        $results.AvailableUpdates[0].Details | Should Be '1.32.100 -> 1.33.100'
+    }
+
+    It 'falls back to the CLI version when the package lookup fails' -Skip:(-not $IsWindows) {
+        Mock winget.exe { $global:LASTEXITCODE = 1; 'No installed package found matching input criteria.' }
+
+        Get-InstalledVersionFromOutput -ToolName 'Azure Developer CLI' -Output 'azd version 1.33.0' |
+            Should Be '1.33.0'
+    }
+
+    It 'falls back to the CLI version when WinGet is unavailable' {
+        Mock Test-CommandExists { $false }
+
+        Get-InstalledVersionFromOutput -ToolName 'Azure Developer CLI' -Output 'azd version 1.33.0' |
+            Should Be '1.33.0'
+    }
+
+    It 'includes the installed-package lookup in parallel checks' {
+        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration $toolsConfig
+
+        $functionBlock | Should Match 'function Get-WingetInstalledVersion'
     }
 }
 

@@ -60,6 +60,7 @@
       "VersionParseRegex": "^v?(.+)$",
       "VersionExtractor": "npmDistTagLatest",
       "NpmPackageName": "pnpm",
+      "RefreshMethod": "pnpm",
       "UpdateType": "npm-global",
       "UpdateCommand": "npm install -g pnpm@latest --loglevel=error",
       "ReleaseNotesUrl": "https://github.com/pnpm/pnpm/releases",

@@ -856,6 +856,27 @@ function Register-ToolUpdate {
     $true
 }
 
+function Get-WingetInstalledVersion {
+    param([string]$ToolName, [string]$PackageId)
+
+    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT') -or
+        [string]::IsNullOrWhiteSpace($PackageId) -or -not (Test-CommandExists 'winget')) {
+        return $null
+    }
+
+    try {
+        $metadata = @(& winget.exe list --id $PackageId -e --source winget --accept-source-agreements --disable-interactivity 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "winget list exited with code $LASTEXITCODE." }
+        $packagePattern = '(?m)^[^\r\n]*[ \t]+' + [regex]::Escape($PackageId) + '[ \t]+(\d+(?:\.\d+)+)(?=[ \t]|\r?$)'
+        $versionMatch = [regex]::Match(($metadata -join "`n"), $packagePattern)
+        if (-not $versionMatch.Success) { throw 'Could not parse the installed package version from winget output.' }
+        $versionMatch.Groups[1].Value
+    } catch {
+        Write-Warning "  Could not check installed $ToolName in WinGet: $_"
+        $null
+    }
+}
+
 function Get-WingetLatestVersion {
     param([string]$ToolName, [string]$PackageId)
 
@@ -936,6 +957,10 @@ function Get-InstalledVersionFromOutput {
 
     $config    = $toolsConfig[$ToolName]
     $extractor = $config.VersionExtractor
+    if ($extractor -eq 'azdGitHubTag') {
+        $packageVersion = Get-WingetInstalledVersion -ToolName $ToolName -PackageId $config.WingetId
+        if ($packageVersion) { return $packageVersion }
+    }
     $outputStr = if ($Output -is [array]) { $Output -join "`n" } else { "$Output" }
     if ([string]::IsNullOrWhiteSpace($outputStr) -or $outputStr.Trim() -eq 'Unable to retrieve version') {
         return $null
@@ -1117,7 +1142,7 @@ function Refresh-ToolVersion {
             "azure-cli" { Refresh-AzureCliVersion -ToolName $ToolName }
             "bicep"     { Refresh-BicepVersion    -ToolName $ToolName }
             "dotnet"    { Refresh-DotNetVersion }
-            "pnpm"      { Refresh-PnpmPath -ToolName $ToolName }
+            "pnpm"      { Refresh-PnpmVersion -ToolName $ToolName }
             "python"    { Refresh-PythonVersion   -ToolName $ToolName }
             # --- Add new refresh handlers here ---
             default     { Refresh-StandardVersion -ToolName $ToolName -Config $config }
@@ -1134,12 +1159,8 @@ function Refresh-StandardVersion {
     if (-not (Test-CommandExists $Config.Command)) { return }
     $version = Get-CommandVersion $Config.Command $Config.VersionFlag
     if ($version -and $version -notmatch "Unable to retrieve") {
-        $firstLine = ($version -split "`n" | Select-Object -First 1).Trim()
-        if ($Config.VersionParseRegex -and $firstLine -match $Config.VersionParseRegex) {
-            $results.Tools[$ToolName].Installed = $Matches[1]
-        } else {
-            $results.Tools[$ToolName].Installed = $firstLine -replace '^v', ''
-        }
+        $installedVersion = Get-InstalledVersionFromOutput -ToolName $ToolName -Output $version
+        if ($installedVersion) { $results.Tools[$ToolName].Installed = $installedVersion }
     }
 }
 
@@ -1161,31 +1182,15 @@ function Refresh-BicepVersion {
     }
 }
 
-function Refresh-PnpmPath {
+function Refresh-PnpmVersion {
     param([string]$ToolName)
-    # After winget install/upgrade, pnpm may land in a new directory that isn't
-    # on the current session's PATH yet. Probe common winget locations and the
-    # refreshed Machine+User PATH from the registry so we can verify the version
-    # without requiring the user to restart their shell.
-    $pnpmBin = $null
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'),
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'),
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps')
-    )
-    foreach ($root in $candidates) {
-        $found = Get-ChildItem $root -Filter 'pnpm.exe' -Recurse -ErrorAction SilentlyContinue |
-                 Select-Object -First 1 -ExpandProperty DirectoryName
-        if ($found) { $pnpmBin = $found; break }
+    $config = $toolsConfig[$ToolName]
+    $version = Get-GlobalNpmInstalledVersion -PackageName $config.NpmPackageName
+    if ($version) {
+        $results.Tools[$ToolName].Installed = $version
+    } else {
+        Refresh-StandardVersion -ToolName $ToolName -Config $config
     }
-    # Also pull the up-to-date Machine+User PATH from the registry
-    $regMachine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $regUser    = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $freshPath  = "$regMachine;$regUser"
-    if ($pnpmBin -and $freshPath -notlike "*$pnpmBin*") { $freshPath += ";$pnpmBin" }
-    $env:Path = $freshPath
-
-    Refresh-StandardVersion -ToolName $ToolName -Config $toolsConfig[$ToolName]
 }
 
 function Refresh-DotNetVersion {
@@ -2821,7 +2826,7 @@ function Get-ParallelCheckFunctionBlock {
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease','Get-NodeReleasePlan','ConvertFrom-DotNetSDKList','Get-DotNetSDKInventory','Get-DotNetSDKReleasePlan',
-        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetLatestVersion',
+        'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetInstalledVersion','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
         'Parse-NpmInstallCommand','ConvertFrom-NcuGlobalOutput','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
         'ConvertFrom-PythonLauncherList','Get-PythonLauncherUpdatePlan','Get-PythonUpdateViaPy','Get-PythonUpdateConventional'

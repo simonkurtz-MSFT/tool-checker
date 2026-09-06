@@ -37,6 +37,7 @@
     install/update routines together here. Keep dispatch in tool-checker.ps1;
     shared registry checks, repairs, and endpoint resolution live in
     Infra/registry.ps1, loaded independently of tool selection.
+    Shared console rendering lives in Infra/output.ps1, also loaded explicitly.
     Do not duplicate shared helpers or create modules.
     Cross-tool npm release metadata helpers remain in the main script. Prefer catalog
     JSON properties, regexes, and platform command overrides for simple differences.
@@ -55,8 +56,9 @@
     This template and unrelated or disabled tool files are never loaded. Workers
     receive the same registry, including private helpers, and use the same dispatcher.
     Tool-local helpers need no dependency-list entry. Do not rely on file paths in
-    tool functions. Shared worker helpers in the main script still require an
-    entry in Get-ParallelCheckFunctionBlock. Keep files directly under Tools/.
+    tool functions. Shared worker helpers in the main script or Infra/output.ps1
+    still require an entry in Get-ParallelCheckFunctionBlock, which explicitly
+    reads both sources. Keep files directly under Tools/.
 #>
 
 #region Public entry points

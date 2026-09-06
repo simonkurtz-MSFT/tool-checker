@@ -142,7 +142,7 @@ Tools are catalog entries under the top-level `tools` object in [`tool-checker.j
 There are two kinds of checks:
 
 - `standard`: Uses the generic command, version parser, release API, and update-command framework. Most new command-line tools should use this type.
-- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. All custom checker implementations live in their tool files; shared checking, output, and orchestration remain in [tool-checker.ps1](tool-checker.ps1), with registry handling in [Infra/registry.ps1](Infra/registry.ps1).
+- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. All custom checker implementations live in their tool files; shared checking and orchestration remain in [tool-checker.ps1](tool-checker.ps1), with registry handling in [Infra/registry.ps1](Infra/registry.ps1) and shared console rendering in [Infra/output.ps1](Infra/output.ps1).
 
 ### Add a standard tool
 

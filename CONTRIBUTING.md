@@ -52,7 +52,8 @@ tool-unique behavior. Prefer `Tools/<catalog-id>.ps1` and explicitly set
 catalog IDs; the loader never infers them. Keep specialized checks, parsing, refresh handlers, and
 action routines together; keep orchestration in
 [tool-checker.ps1](tool-checker.ps1) and shared registry behavior in
-[Infra/registry.ps1](Infra/registry.ps1). Standard entries without specialized
+[Infra/registry.ps1](Infra/registry.ps1). Shared console rendering belongs in
+[Infra/output.ps1](Infra/output.ps1). Standard entries without specialized
 behavior do not need a tool file.
 
 The template is scaffolding, not a registered tool. After catalog selection and
@@ -65,7 +66,8 @@ Unselected, disabled, undeclared, and template files are not loaded. Omit
 continue through the shared framework. Files must define functions only.
 Parallel workers receive the same per-tool definition registry, so
 tool-local helpers do not need separate dependency-list entries. Shared worker
-helpers in the main script still belong in `Get-ParallelCheckFunctionBlock`.
+helpers in the main script or output infrastructure still belong in the
+`Get-ParallelCheckFunctionBlock` allowlist.
 
 Use the same public names in every tool file: `Test-Tool`, `Refresh-ToolStatus`,
 `Invoke-ToolInstall`, and `Invoke-ToolUpdate`. Implement only the entry points the
@@ -131,6 +133,27 @@ resolved tool configuration through the existing shared worker setup.
 Validate changes with [tests/registry.Tests.ps1](tests/registry.Tests.ps1) and the
 existing action/force-mode tests. Mock external commands and redirect uv writes
 to `TestDrive`; never modify the developer's real package-manager configuration.
+
+## Output infrastructure
+
+[Infra/output.ps1](Infra/output.ps1) owns the shared message helpers, banner,
+startup information, registry metadata display, progress heading, results table,
+legend, and summary. It renders existing state without changing results or running
+checks, updates, or prompts. Update eligibility and action approval remain in the
+main script; the summary receives the already-filtered available update names.
+Operation-specific messages remain with their checks and actions.
+
+The main script explicitly dot-sources the function-only file via `$PSScriptRoot`
+and fails startup if it is missing, independently of catalog selection. Preserve
+the existing host-only `Write-Warning` and `Write-Error` wrappers, colors, and text.
+Shared state and color initialization remain in the main script.
+
+`Get-ParallelCheckFunctionBlock` explicitly reads the output file alongside the
+main source and selects only allowlisted worker helpers. Do not scan `Infra/` or
+send table/summary rendering to workers. The worker's `Write-Host` capture override
+remains in worker setup. Validate with [tests/output.Tests.ps1](tests/output.Tests.ps1)
+and the existing banner, legend, action, and parallel-check tests. Copied-application
+fixtures must include both infrastructure files.
 
 ## Validate your change
 

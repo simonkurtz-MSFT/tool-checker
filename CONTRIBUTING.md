@@ -38,6 +38,25 @@ When proposing a tool, include sanitized examples of its installed-version
 output and upstream release response. The configured parser must extract a
 version that Tool Checker can compare consistently.
 
+## Tool-specific file template
+
+Use [Tools/_tool-template.ps1](Tools/_tool-template.ps1) when extracting or adding
+tool-unique behavior. Name the implementation `Tools/<catalog-id>.ps1`, matching
+the exact catalog key. Keep specialized checks, parsing, refresh handlers, and
+action routines together; keep general functionality in
+[tool-checker.ps1](tool-checker.ps1). Standard entries without specialized
+behavior do not need a tool file.
+
+The template is scaffolding, not a registered tool. The application does not yet
+load `Tools/` files; integration must update both main-script loading and parallel
+worker discovery, excluding `_tool-template.ps1`. Until that integration lands,
+the custom-check implementation location described above remains unchanged.
+
+When conventions, helper contracts, loading, or validation practices change,
+update the template and this guidance in the same change. The corresponding
+[tool-file instructions](.github/instructions/tool-files.instructions.md) apply
+to the implementation, catalog, and tests.
+
 ## Validate your change
 
 Run the automated tests from the repository root:

@@ -42,7 +42,7 @@ param(
 )
 
 $script:ToolCheckerVersion = '1.2.5'
-$script:NpmUpdateCooldownDays = 7
+$script:NpmUpdateCooldownDays = 8
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 

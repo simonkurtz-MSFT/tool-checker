@@ -2,7 +2,7 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Checks npm releases from newest to oldest and selects the newest production version that has completed the seven-full-day cooldown. If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
+Checks npm releases from newest to oldest and selects the newest production version that has completed the eight-full-day cooldown. If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
 
 The included configuration checks:
 
@@ -207,7 +207,7 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 
 For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest` and provide `NpmPackageName`. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`. Numeric revision suffixes such as GitHub Copilot CLI's `1.0.83-2` are compared numerically when prereleases are enabled.
 
-The script enforces a seven-full-day cooldown after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
+The script enforces an eight-full-day cooldown after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
 
 ### Add a custom tool
 

@@ -1285,7 +1285,8 @@ Describe 'npm release selection' {
         Get-LatestProductionNpmVersion -ApiData $apiData | Should Be '1.10.0'
     }
 
-    It 'selects the newest release that has completed the cooldown' {
+    It 'requires eight full days before a release completes the cooldown' {
+        $script:NpmUpdateCooldownDays | Should Be 8
         $apiData = [PSCustomObject]@{
             versions = [PSCustomObject]@{
                 '1.2.0' = @{}
@@ -1293,7 +1294,7 @@ Describe 'npm release selection' {
                 '1.0.0' = @{}
             }
             time = [PSCustomObject]@{
-                '1.2.0' = [DateTimeOffset]::UtcNow.AddDays(-2).ToString('O')
+                '1.2.0' = [DateTimeOffset]::UtcNow.AddDays(-7.5).ToString('O')
                 '1.1.0' = [DateTimeOffset]::UtcNow.AddDays(-8).ToString('O')
                 '1.0.0' = [DateTimeOffset]::UtcNow.AddDays(-30).ToString('O')
             }

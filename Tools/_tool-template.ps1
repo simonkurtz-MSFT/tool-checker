@@ -5,9 +5,24 @@
 
 .DESCRIPTION
     Copy to Tools/<catalog-id>.ps1, using the exact key in tool-checker.json.
-    Replace ExampleTool and Example CLI with the checker name and catalog Name.
-    Set CustomFunction to the checker function name for a custom catalog entry.
+    Replace Example CLI with the catalog Name; keep public function names unchanged.
+    Set CustomFunction to Test-Tool for a custom catalog entry.
     Standard entries need a file only when they have specialized behavior.
+
+    Public entry points use the same tool-agnostic names in every file:
+    - Test-Tool - checker; accepts [string]$Progress.
+    - Refresh-ToolStatus - optional post-action inventory refresh.
+    - Invoke-ToolInstall - optional specialized installer.
+    - Invoke-ToolUpdate - optional specialized updater.
+    Keep platform-specific details behind these names, not in public names.
+    Action parameters and results must match the main script's dispatcher.
+
+    Put public functions in '#region Public entry points' and private helpers in
+    '#region Private helpers'. Private names may vary; prefer tool-qualified names
+    for clarity. Only this tool's implementation and tests should call them.
+    Invoke-ToolEntryPoint dispatches by catalog ID and dot-sources the registered
+    definitions into its local call scope. Names can repeat across tool files
+    without collisions or leaking into the caller. Regions document ownership.
 
     Define functions only: dot-sourcing must not run checks, perform network
     requests, prompt, or modify the machine. Runtime loaders and parallel worker
@@ -21,11 +36,17 @@
     existing toolsConfig, results, SkipUpdate, and script-scoped platform/timeout
     settings. Do not initialize shared state in this file.
 
-    The Tools loader is not implemented yet. Creating a file alone does not
-    register it with the current application or parallel workers.
+    After catalog selection, the main script loads only existing files for
+    selected, enabled tools in catalog-ID order into a per-tool definition registry.
+    This template and unrelated or disabled tool files are never loaded. Workers
+    receive the same registry, including private helpers, and use the same dispatcher.
+    Tool-local helpers need no dependency-list entry. Do not rely on file paths in
+    tool functions. Shared worker helpers in the main script still require an
+    entry in Get-ParallelCheckFunctionBlock. Keep files directly under Tools/.
 #>
 
-function Test-ExampleTool {
+#region Public entry points
+function Test-Tool {
     param([string]$Progress)
 
     $toolName = 'Example CLI'
@@ -47,10 +68,14 @@ function Test-ExampleTool {
     - Respect ProductionReleasesOnly and applicable npm maturity policy.
     - Detect and report only; never install, update, or repair during a check.
 
-    Add only needed helpers below this function. Refresh and action routines are
+    Add needed helpers in the Private helpers region. Refresh and action routines are
     optional; preserve existing dispatch and approval gates in tool-checker.ps1.
     Add focused Pester coverage, including execution through a real check worker
-    when this file is integrated. Keep this template aligned with that integration.
+    with synthetic inputs and no real installs, updates, or registry repairs.
     #>
     throw [System.NotImplementedException]::new('Implement the tool-specific check before registering this file.')
 }
+#endregion
+
+#region Private helpers
+#endregion

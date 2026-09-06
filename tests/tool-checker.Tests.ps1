@@ -20,7 +20,7 @@ Describe 'Tool configuration' {
     It 'returns a configured custom checker with required properties' {
         $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('CustomFunction', 'Command')
 
-        $config.CustomFunction | Should Be 'Test-NodeJS'
+        $config.CustomFunction | Should Be 'Test-Tool'
         $config.Command | Should Be 'node'
     }
 
@@ -464,7 +464,223 @@ Describe 'Azure Developer CLI package version' {
     }
 }
 
+Describe 'Tool definition loading' {
+    It 'resolves only enabled selected catalog files and ignores unrelated files' {
+        $directory = Join-Path $TestDrive 'tool-definitions'
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        foreach ($fileName in @('nodejs.ps1', 'git.ps1', 'unselected.ps1', '_tool-template.ps1')) {
+            Set-Content -LiteralPath (Join-Path $directory $fileName) -Value "throw 'Must not execute during discovery'"
+        }
+        $configuration = [ordered]@{
+            NodeJS = @{ Id = 'nodejs'; Enabled = $true }
+            Git = @{ Id = 'git'; Enabled = $false }
+            Standard = @{ Id = 'standard'; Enabled = $true }
+        }
+
+        $files = @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $directory)
+
+        $files.Count | Should Be 1
+        $files[0].Name | Should Be 'nodejs.ps1'
+        $configuration.NodeJS.Enabled = $false
+        @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $directory).Count | Should Be 0
+    }
+
+    It 'does not require a Tools directory for selected tools without specialized files' {
+        $configuration = @{ Git = @{ Id = 'git'; Enabled = $true } }
+
+        @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory (Join-Path $TestDrive 'absent')).Count | Should Be 0
+    }
+
+    It 'does not load Node.js into the main session or workers when only Git is selected' {
+        $selectionFile = Join-Path $TestDrive 'git-only.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile)
+                . $path -EnvFile $envFile
+                [PSCustomObject]@{
+                    LoadedCount = @($script:ToolDefinitionFiles).Count
+                    HasNodeChecker = $script:ToolDefinitions.ContainsKey('nodejs')
+                    HasNodeUpdater = [bool](Get-Command -CommandType Function | Where-Object Name -eq 'Invoke-ToolUpdate')
+                    WorkerDefinitions = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $path -Raw) -ToolsConfiguration $toolsConfig
+                }
+            }).AddArgument($scriptPath).AddArgument($selectionFile)
+            $observed = @($session.Invoke())
+
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].LoadedCount | Should Be 0
+            $observed[0].HasNodeChecker | Should Be $false
+            $observed[0].HasNodeUpdater | Should Be $false
+            $observed[0].WorkerDefinitions | Should Not Match 'function (Test-Tool|Get-NodeReleasePlan|Invoke-ToolUpdate)\s*\{'
+        } finally {
+            $session.Dispose()
+        }
+    }
+
+    It 'registers Node.js functions without exposing them in the caller scope' {
+        foreach ($functionName in @('Get-NodeReleasePlan', 'Test-Tool', 'Invoke-ToolUpdate')) {
+            $script:ToolDefinitions['nodejs'].ContainsKey($functionName) | Should Be $true
+            [bool](Get-Command -CommandType Function | Where-Object Name -eq $functionName) | Should Be $false
+        }
+        @($script:ToolDefinitionFiles.Name) -contains '_tool-template.ps1' | Should Be $false
+    }
+
+    It 'isolates identical entry points and private helpers across tools and workers' {
+        $previousDefinitions = $script:ToolDefinitions
+        $previousResults = $results
+        $script:ToolDefinitions = @{
+            'probe-a' = @{
+                'Test-Tool' = 'function Test-Tool { param([string]$Progress) Get-ProbeValue }'
+                'Get-ProbeValue' = 'function Get-ProbeValue { "first" }'
+            }
+            'probe-b' = @{
+                'Test-Tool' = 'function Test-Tool { param([string]$Progress) Get-ProbeValue }'
+                'Get-ProbeValue' = 'function Get-ProbeValue { "second" }'
+            }
+        }
+        $results = New-ToolCheckResults
+        try {
+            Invoke-ToolEntryPoint -ToolId 'probe-a' -EntryPoint 'Test-Tool' | Should Be 'first'
+            Invoke-ToolEntryPoint -ToolId 'probe-b' -EntryPoint 'Test-Tool' | Should Be 'second'
+            Invoke-ToolEntryPoint -ToolId 'probe-a' -EntryPoint 'Test-Tool' | Should Be 'first'
+            [bool](Get-Command -CommandType Function | Where-Object Name -in @('Test-Tool', 'Get-ProbeValue')) | Should Be $false
+
+            $checks = @(@{
+                Name = 'Probe'
+                Block = {
+                    $first = Invoke-ToolEntryPoint -ToolId 'probe-a' -EntryPoint 'Test-Tool'
+                    $second = Invoke-ToolEntryPoint -ToolId 'probe-b' -EntryPoint 'Test-Tool'
+                    $results.Tools['Probe'] = @{ Installed = $first; Latest = $second }
+                    if (Get-Command -CommandType Function | Where-Object Name -in @('Test-Tool', 'Get-ProbeValue')) {
+                        throw 'Tool functions leaked into worker scope.'
+                    }
+                }
+            })
+            Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+            $results.Tools['Probe'].Installed | Should Be 'first'
+            $results.Tools['Probe'].Latest | Should Be 'second'
+            $results.Errors.Count | Should Be 0
+        } finally {
+            $script:ToolDefinitions = $previousDefinitions
+            $results = $previousResults
+        }
+    }
+
+    It 'rejects absent entry points instead of falling back to caller functions' {
+        function Invoke-ToolInstall { throw 'Must not reach caller function' }
+        { Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Invoke-ToolInstall' } |
+            Should Throw "Tool 'nodejs' does not define entry point 'Invoke-ToolInstall'."
+        { Invoke-ToolEntryPoint -ToolId 'unselected' -EntryPoint 'Test-Tool' } |
+            Should Throw "Tool 'unselected' does not define entry point 'Test-Tool'."
+    }
+
+    It 'keeps all tool files including the template definition-only and syntactically valid' {
+        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'Tools'
+        foreach ($toolFile in Get-ChildItem -LiteralPath $toolDirectory -Filter '*.ps1' -File) {
+            $parseErrors = $null
+            $toolAst = [System.Management.Automation.Language.Parser]::ParseFile($toolFile.FullName, [ref]$null, [ref]$parseErrors)
+            @($parseErrors).Count | Should Be 0
+            @($toolAst.EndBlock.Statements | Where-Object {
+                $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst]
+            }).Count | Should Be 0
+        }
+    }
+
+    It 'marks every tool function public or private and standardizes public names' {
+        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'Tools'
+        foreach ($toolFile in Get-ChildItem -LiteralPath $toolDirectory -Filter '*.ps1' -File) {
+            $content = Get-Content -LiteralPath $toolFile.FullName -Raw
+            $regions = [regex]::Matches($content, '(?ms)^#region (Public entry points|Private helpers)\r?\n(.*?)^#endregion')
+            $regions.Count | Should Be 2
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$null)
+            foreach ($definition in $ast.EndBlock.Statements) {
+                $region = @($regions | Where-Object {
+                    $definition.Extent.StartOffset -ge $_.Groups[2].Index -and
+                    $definition.Extent.EndOffset -le ($_.Groups[2].Index + $_.Groups[2].Length)
+                })
+                $region.Count | Should Be 1
+                if ($region[0].Groups[1].Value -eq 'Public entry points') {
+                    $definition.Name | Should Match '^(Test-Tool|Refresh-ToolStatus|Invoke-Tool(Install|Update))$'
+                }
+            }
+        }
+    }
+
+    It 'includes tool-local helpers in worker definitions but excludes the template' {
+        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration $toolsConfig
+
+        $functionBlock | Should Match 'function Get-NodeReleasePlan'
+        $functionBlock | Should Match 'function Test-Tool'
+        $functionBlock | Should Match 'function Invoke-ToolUpdate'
+        $functionBlock | Should Not Match 'Implement the tool-specific check before registering this file'
+    }
+
+    It 'runs the extracted Node.js checker and release planner in a network-free worker' {
+        $previousResults = $results
+        $results = New-ToolCheckResults
+        try {
+            $checks = @(@{
+                Name = 'NodeJS'
+                Block = {
+                    function Test-CommandExists { $true }
+                    function Get-CommandVersion { 'v22.1.0' }
+                    function Get-WingetLatestVersion { '22.1.1' }
+                    function Invoke-RestMethod {
+                        @([PSCustomObject]@{ version = 'v22.1.1'; lts = 'Example' })
+                    }
+                    $SkipUpdate = $false
+                    Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+                }
+            })
+
+            Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+            $results.Tools['NodeJS'].Installed | Should Be 'v22.1.0'
+            $results.Tools['NodeJS'].Latest | Should Be 'v22.1.1'
+            $results.Updates -contains 'NodeJS (patch)' | Should Be $true
+            $results.AvailableUpdates.Count | Should Be 1
+            $results.AvailableUpdates[0].Command | Should Be $toolsConfig['NodeJS'].UpdateCommand
+            $results.Errors.Count | Should Be 0
+        } finally {
+            $results = $previousResults
+        }
+    }
+
+    It 'preserves check-only behavior in the extracted Node.js worker' {
+        $previousResults = $results
+        $results = New-ToolCheckResults
+        try {
+            $checks = @(@{
+                Name = 'NodeJS'
+                Block = {
+                    function Test-CommandExists { $true }
+                    function Get-CommandVersion { 'v22.1.0' }
+                    function Get-WingetLatestVersion { throw 'Unexpected package lookup' }
+                    function Invoke-RestMethod { throw 'Unexpected release lookup' }
+                    $SkipUpdate = $true
+                    Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+                }
+            })
+
+            Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+            $results.Tools['NodeJS'].Installed | Should Be 'v22.1.0'
+            $results.Tools['NodeJS'].Latest | Should Be ''
+            $results.AvailableUpdates.Count | Should Be 0
+            $results.Errors.Count | Should Be 0
+        } finally {
+            $results = $previousResults
+        }
+    }
+}
+
 Describe 'Node release planning' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/nodejs.ps1')
+    }
+
     It 'filters prereleases and classifies the latest patch in the installed major' {
         $distributionIndex = @(
             [PSCustomObject]@{ version = 'v27.0.0-rc.1'; lts = $false },
@@ -660,13 +876,13 @@ Describe 'Action execution' {
     }
 
     It 'dispatches direct Node updates through the verified installer' {
-        Mock Invoke-NodeWindowsUpdate { @{ Output = 'done'; ExitCode = 0 } }
+        Mock Invoke-ToolEntryPoint { @{ Output = 'done'; ExitCode = 0 } }
         $action = @{ Name = 'NodeJS'; Command = 'Node.js MSI'; Type = 'node-direct'; Version = '26.8.1' }
 
         $execution = Invoke-ActionCommand -Action $action
 
         $execution.ExitCode | Should Be 0
-        Assert-MockCalled Invoke-NodeWindowsUpdate 1 -ParameterFilter { $Version -eq '26.8.1' }
+        Assert-MockCalled Invoke-ToolEntryPoint 1 -ParameterFilter { $ToolId -eq 'nodejs' -and $EntryPoint -eq 'Invoke-ToolUpdate' -and $Arguments.Version -eq '26.8.1' }
     }
 
     It 'completes a successful update without recording a failure' {

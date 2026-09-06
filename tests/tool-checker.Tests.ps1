@@ -491,7 +491,7 @@ Describe 'Tool definition loading' {
         @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory (Join-Path $TestDrive 'absent')).Count | Should Be 0
     }
 
-    It 'does not load Node.js into the main session or workers when only Git is selected' {
+    It 'does not load specialized tools into the main session or workers when only Git is selected' {
         $selectionFile = Join-Path $TestDrive 'git-only.env'
         Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
         $session = [powershell]::Create()
@@ -502,6 +502,7 @@ Describe 'Tool definition loading' {
                 [PSCustomObject]@{
                     LoadedCount = @($script:ToolDefinitionFiles).Count
                     HasNodeChecker = $script:ToolDefinitions.ContainsKey('nodejs')
+                    HasDotNetChecker = $script:ToolDefinitions.ContainsKey('dotnet-sdk')
                     HasNodeUpdater = [bool](Get-Command -CommandType Function | Where-Object Name -eq 'Invoke-ToolUpdate')
                     WorkerDefinitions = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $path -Raw) -ToolsConfiguration $toolsConfig
                 }
@@ -512,8 +513,9 @@ Describe 'Tool definition loading' {
             $observed.Count | Should Be 1
             $observed[0].LoadedCount | Should Be 0
             $observed[0].HasNodeChecker | Should Be $false
+            $observed[0].HasDotNetChecker | Should Be $false
             $observed[0].HasNodeUpdater | Should Be $false
-            $observed[0].WorkerDefinitions | Should Not Match 'function (Test-Tool|Get-NodeReleasePlan|Invoke-ToolUpdate)\s*\{'
+            $observed[0].WorkerDefinitions | Should Not Match 'function (Test-Tool|Get-NodeReleasePlan|Invoke-ToolUpdate|ConvertFrom-DotNetSDKList|Get-DotNetSDKInventory|Get-DotNetSDKReleasePlan|Refresh-ToolStatus)\s*\{'
         } finally {
             $session.Dispose()
         }
@@ -726,7 +728,164 @@ Describe 'Global npm output parsing' {
     }
 }
 
+Describe '.NET SDK tool integration' {
+    BeforeEach {
+        $previousResults = $results
+        $results = New-ToolCheckResults
+    }
+
+    AfterEach {
+        $results = $previousResults
+    }
+
+    It 'loads only the .NET definition when its catalog ID is selected' {
+        $selectionFile = Join-Path $TestDrive 'dotnet-only.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=dotnet-sdk'
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile)
+                . $path -EnvFile $envFile
+                Assert-ToolConfigurations
+                [PSCustomObject]@{
+                    LoadedFiles = @($script:ToolDefinitionFiles.Name)
+                    EntryPoints = @($script:ToolDefinitions['dotnet-sdk'].Keys)
+                    LeakedFunctions = @(Get-Command -CommandType Function | Where-Object Name -in @(
+                        'Test-Tool', 'Refresh-ToolStatus', 'ConvertFrom-DotNetSDKList',
+                        'Get-DotNetSDKInventory', 'Get-DotNetSDKReleasePlan'
+                    ))
+                    WorkerDefinitions = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $path -Raw) -ToolsConfiguration $toolsConfig
+                }
+            }).AddArgument($scriptPath).AddArgument($selectionFile)
+            $observed = @($session.Invoke())
+
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].LoadedFiles.Count | Should Be 1
+            $observed[0].LoadedFiles[0] | Should Be 'dotnet-sdk.ps1'
+            $observed[0].EntryPoints -contains 'Test-Tool' | Should Be $true
+            $observed[0].EntryPoints -contains 'Refresh-ToolStatus' | Should Be $true
+            $observed[0].LeakedFunctions.Count | Should Be 0
+            $observed[0].WorkerDefinitions | Should Match 'function Get-DotNetSDKReleasePlan'
+            $observed[0].WorkerDefinitions | Should Not Match 'function Get-NodeReleasePlan'
+        } finally {
+            $session.Dispose()
+        }
+    }
+
+    It 'plans patch updates and newer majors in a network-free worker' {
+        $checks = @(@{
+            Name = '.NET SDK'
+            Block = {
+                function Test-CommandExists { $true }
+                function dotnet { '8.0.100 [C:\dotnet\sdk]'; '8.0.301 [C:\dotnet\sdk]' }
+                function Get-WingetLatestVersion {
+                    param($ToolName, $PackageId)
+                    if ($PackageId -eq 'Microsoft.DotNet.SDK.8') { '8.0.410' } else { '9.0.203' }
+                }
+                function Invoke-RestMethod {
+                    [PSCustomObject]@{ 'releases-index' = @(
+                        [PSCustomObject]@{ 'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'; 'support-phase' = 'active' },
+                        [PSCustomObject]@{ 'channel-version' = '9.0'; 'latest-sdk' = '9.0.203'; 'support-phase' = 'active' }
+                    ) }
+                }
+                $SkipUpdate = $false
+                Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+            }
+        })
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+        $results.DotNetSDKs.Count | Should Be 2
+        $results.DotNetSDKs['8.0.100'].HighestInstalled | Should Be '8.0.301'
+        $results.Tools['.NET SDK 8.0.100'].Latest | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.301'].Latest | Should Be '8.0.410'
+        $results.Updates -contains '.NET SDK: 8.0.301 -> 8.0.410' | Should Be $true
+        $results.Updates -contains '.NET SDK: Major version 9 available' | Should Be $true
+        $results.AvailableUpdates.Count | Should Be 2
+        ($results.AvailableUpdates | Where-Object Type -eq 'winget').Command | Should Be 'winget upgrade Microsoft.DotNet.SDK.8 --silent'
+        ($results.AvailableUpdates | Where-Object Type -eq 'winget-new').Command | Should Be 'winget install Microsoft.DotNet.SDK.9 --silent'
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'preserves check-only inventory without release or package lookups in a worker' {
+        $checks = @(@{
+            Name = '.NET SDK'
+            Block = {
+                function Test-CommandExists { $true }
+                function dotnet { '8.0.301 [C:\dotnet\sdk]' }
+                function Get-WingetLatestVersion { $results.Errors += 'Unexpected package lookup'; throw 'Unexpected package lookup' }
+                function Invoke-RestMethod { $results.Errors += 'Unexpected release lookup'; throw 'Unexpected release lookup' }
+                $SkipUpdate = $true
+                Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+            }
+        })
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+        $results.DotNetSDKs.Count | Should Be 1
+        $results.Tools['.NET SDK 8.0.301'].Installed | Should Be '8.0.301'
+        $results.Tools['.NET SDK 8.0.301'].Latest | Should Be ''
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'refreshes catalog and dynamic SDK rows and prunes only satisfied updates' {
+        function dotnet { '8.0.410 [C:\dotnet\sdk]' }
+        Mock Test-CommandExists { $true }
+        Mock Invoke-RestMethod {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{ 'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'; 'support-phase' = 'active' }
+            ) }
+        }
+
+        foreach ($toolName in @('.NET SDK', '.NET SDK 8.0.301')) {
+            $results = New-ToolCheckResults
+            $results.Tools['.NET SDK 8.0.301'] = @{ Installed = '8.0.301'; Latest = '8.0.410' }
+            $results.Tools['NodeJS'] = @{ Installed = '22.1.0'; Latest = '22.1.1' }
+            $results.DotNetSDKs['8.0.301'] = @{ Installed = '8.0.301'; Latest = '8.0.410' }
+            $results.Updates = @('.NET SDK: 8.0.301 -> 8.0.410', '.NET SDK: Major version 9 available', 'NodeJS')
+            $results.AvailableUpdates = @(
+                @{ Name = '.NET SDK 8.0.301' },
+                @{ Name = '.NET SDK 9 (new major version)' },
+                @{ Name = 'NodeJS' }
+            )
+
+            Refresh-ToolVersion -ToolName $toolName | Should Be $true
+
+            $results.Tools.ContainsKey('.NET SDK 8.0.301') | Should Be $false
+            $results.DotNetSDKs.ContainsKey('8.0.301') | Should Be $false
+            $results.DotNetSDKs['8.0.410'].HighestInstalled | Should Be '8.0.410'
+            $results.Tools['.NET SDK 8.0.410'].Latest | Should Be '8.0.410'
+            $results.Tools['NodeJS'].Installed | Should Be '22.1.0'
+            $results.Updates.Count | Should Be 2
+            $results.Updates -contains '.NET SDK: Major version 9 available' | Should Be $true
+            $results.Updates -contains 'NodeJS' | Should Be $true
+            $results.AvailableUpdates.Count | Should Be 2
+            $results.AvailableUpdates.Name -contains '.NET SDK 9 (new major version)' | Should Be $true
+            $results.AvailableUpdates.Name -contains 'NodeJS' | Should Be $true
+        }
+    }
+
+    It 'keeps refreshed inventory when release metadata is unavailable' {
+        function dotnet { '8.0.410 [C:\dotnet\sdk]' }
+        Mock Test-CommandExists { $true }
+        Mock Invoke-RestMethod { throw 'Synthetic offline response' }
+
+        Refresh-ToolVersion -ToolName '.NET SDK 8.0.301' | Should Be $true
+
+        $results.DotNetSDKs.Count | Should Be 1
+        $results.Tools['.NET SDK 8.0.410'].Installed | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.410'].Latest | Should Be ''
+    }
+}
+
 Describe '.NET SDK release planning' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/dotnet-sdk.ps1')
+    }
+
     It 'parses SDK list output and annotates every row from its channel' {
         $records = ConvertFrom-DotNetSDKList -OutputLines @(
             '8.0.100 [C:\Program Files\dotnet\sdk]',

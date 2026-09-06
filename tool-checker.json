@@ -191,7 +191,7 @@
       "enabled": true,
       "CheckType": "custom",
       "ProductionReleasesOnly": true,
-      "CustomFunction": "Test-DotNetSDKs",
+      "CustomFunction": "Test-Tool",
       "Command": "dotnet",
       "RefreshMethod": "dotnet",
       "UpdateType": "winget",

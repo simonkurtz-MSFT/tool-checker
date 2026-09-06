@@ -75,7 +75,10 @@ leak into the caller. Helpers remain accessible within the tool call, but other
 tools must not call them. Shared state and helpers remain in the main script;
 this does not introduce PowerShell modules or a new directory hierarchy.
 
-[Tools/nodejs.ps1](Tools/nodejs.ps1) is the first extracted implementation.
+[Tools/nodejs.ps1](Tools/nodejs.ps1) and
+[Tools/dotnet-sdk.ps1](Tools/dotnet-sdk.ps1) are extracted implementations.
+The .NET file includes SDK inventory and release planning plus post-update
+refresh through `Refresh-ToolStatus`; shared orchestration stays in the main script.
 Existing custom checks for other tools remain in the main script until extracted.
 Test changes with focused Pester coverage and synthetic real-runspace checks;
 never execute real installs, updates, or registry repairs in tests.

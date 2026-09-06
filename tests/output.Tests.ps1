@@ -31,7 +31,7 @@ Describe 'Output infrastructure' {
             $observed = @($session.Invoke())[0]
             $observed.StartupError | Should Match 'Configuration infrastructure file not found'
             $observed.AfterNormal | Should Be 1
-            $observed.Version | Should Be '1.3.0'
+            $observed.Version | Should Be '2.0.0'
             $observed.AfterVersion | Should Be 1
             $observed.AfterDotSource | Should Be 1
         } finally {

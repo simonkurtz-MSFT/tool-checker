@@ -30,7 +30,7 @@ The following screenshots show Tool Checker `1.2.0` validating registry policy a
 - [PowerShell 7 or later](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
 - Internet access to query release APIs and package registries
 - The package managers used by your configured install and update commands, such as WinGet, npm, or `apt`
-- [tool-checker.ps1](tool-checker.ps1), [tool-checker.json](tool-checker.json), and the bundled `Tools/` directory kept together
+- [tool-checker.ps1](tool-checker.ps1), [tool-checker.json](tool-checker.json), and the bundled `Tools/` and `Infra/` directories kept together
 - An optional `.env` tool-selection and registry policy based on [`.env.example`](.env.example)
 
 The script does not require installation or additional PowerShell modules.
@@ -131,6 +131,10 @@ Before regenerating a lock, verify that the proxy exposes all metadata required 
 
 Registry alignment is intentionally approval-gated. In a normal run, each misaligned registry appears as an `Align ... registry` action. `-SkipUpdate` reports drift without offering a repair. `-Force` may apply tool updates automatically, but registry repairs still require an explicit action-menu selection.
 
+Shared registry checks, repairs, and npm endpoint resolution live in
+[Infra/registry.ps1](Infra/registry.ps1). The main script loads this file explicitly,
+independently of tool selection; loading alone does not perform checks or repairs.
+
 ## Configuration
 
 Tools are catalog entries under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Each property name is a unique, stable semantic ID made of lowercase letters, numbers, and hyphens; each entry's required `Name` field supplies the human-readable display name used by the script. Tool Checker sorts display names when loading selected entries and uses that order for both processing and display. Names are sorted alphabetically, with Azure CLI extensions grouped under Azure CLI and versioned .NET SDK and Python entries sorted by version descending.
@@ -138,7 +142,7 @@ Tools are catalog entries under the top-level `tools` object in [`tool-checker.j
 There are two kinds of checks:
 
 - `standard`: Uses the generic command, version parser, release API, and update-command framework. Most new command-line tools should use this type.
-- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. All custom checker implementations live in their tool files; shared checking, registry handling, output, and orchestration remain in [tool-checker.ps1](tool-checker.ps1).
+- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. All custom checker implementations live in their tool files; shared checking, output, and orchestration remain in [tool-checker.ps1](tool-checker.ps1), with registry handling in [Infra/registry.ps1](Infra/registry.ps1).
 
 ### Add a standard tool
 
@@ -175,32 +179,32 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 
 ### Standard fields
 
-| Field                    | Required              | Purpose                                                                                                                |
-| ------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Catalog ID               | Yes                   | The top-level `tools` property name: a unique semantic ID used in `TOOL_CHECKER_TOOLS`.                                |
-| `Name`                   | Yes                   | Human-readable unique display name used in output and custom checker lookups.                                          |
-| `enabled`                | No                    | Set to `false` to skip this checker. Defaults to `true` when omitted.                                                  |
-| `CheckType`              | Yes                   | Set to `standard` or `custom`.                                                                                         |
-| `Command`                | Yes                   | Executable name used to detect whether the tool is installed.                                                          |
-| `VersionFlag`            | Usually               | Argument passed to `Command`; defaults to `--version`.                                                                 |
-| `VersionCommand`         | No                    | Full command used instead of `Command` plus `VersionFlag`.                                                             |
-| `VersionParseRegex`      | Recommended           | Regex whose first capture group is the installed version.                                                              |
-| `VersionExtractor`       | No                    | Shared parser: `npmDistTagLatest` for npm releases or `jsonProperty` for installed JSON output.                         |
-| `VersionProperty`        | For `jsonProperty`    | Top-level installed-version JSON property, for example `azure-cli`.                                                     |
-| `ParseEntireVersionOutput` | No                  | Apply `VersionParseRegex` to all output lines instead of only the first; return no version if it does not match.       |
-| `PreferWingetInstalledVersion` | No              | Prefer the installed WinGet package version, falling back to command output when unavailable.                          |
-| `ApiVersionProperty`     | No                    | Dot-separated path to the API version, for example `info.version`; takes precedence over tag parsing.                 |
-| `ApiVersionRegex`        | No                    | Regex whose first capture group extracts the version from an API `tag_name`.                                          |
-| `ApiUrl`                 | Yes for update checks | Endpoint used to determine the latest release.                                                                         |
-| `WingetId`               | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.              |
-| `ProductionReleasesOnly` | No                    | Accepts optional `v` + `major.minor.patch[.0]`, without a suffix. Defaults to `true`; `false` permits prereleases.     |
-| `UpdateParseRegex`       | No                    | Extracts an available version from a self-reporting version command instead of the API result.                         |
-| `UpdateType`             | Recommended           | Identifies the command family for execution and error handling, such as `winget`, `direct`, or `npm-global`.           |
-| `UpdateCommand`          | Yes for updates       | PowerShell command executed to update the tool.                                                                        |
-| `WindowsUpdateCommand`   | No                    | Windows-only override for `UpdateCommand`.                                                                             |
-| `InstallCommands`        | No                    | Platform-specific commands offered when the tool is missing.                                                           |
-| `ReleaseNotesUrl`        | No                    | Link displayed when an update is actionable.                                                                           |
-| `ToolFile`               | No for standard tools | Explicit filename under `Tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                |
+| Field                          | Required              | Purpose                                                                                                                |
+| ------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Catalog ID                     | Yes                   | The top-level `tools` property name: a unique semantic ID used in `TOOL_CHECKER_TOOLS`.                                |
+| `Name`                         | Yes                   | Human-readable unique display name used in output and custom checker lookups.                                          |
+| `enabled`                      | No                    | Set to `false` to skip this checker. Defaults to `true` when omitted.                                                  |
+| `CheckType`                    | Yes                   | Set to `standard` or `custom`.                                                                                         |
+| `Command`                      | Yes                   | Executable name used to detect whether the tool is installed.                                                          |
+| `VersionFlag`                  | Usually               | Argument passed to `Command`; defaults to `--version`.                                                                 |
+| `VersionCommand`               | No                    | Full command used instead of `Command` plus `VersionFlag`.                                                             |
+| `VersionParseRegex`            | Recommended           | Regex whose first capture group is the installed version.                                                              |
+| `VersionExtractor`             | No                    | Shared parser: `npmDistTagLatest` for npm releases or `jsonProperty` for installed JSON output.                        |
+| `VersionProperty`              | For `jsonProperty`    | Top-level installed-version JSON property, for example `azure-cli`.                                                    |
+| `ParseEntireVersionOutput`     | No                    | Apply `VersionParseRegex` to all output lines instead of only the first; return no version if it does not match.       |
+| `PreferWingetInstalledVersion` | No                    | Prefer the installed WinGet package version, falling back to command output when unavailable.                          |
+| `ApiVersionProperty`           | No                    | Dot-separated path to the API version, for example `info.version`; takes precedence over tag parsing.                  |
+| `ApiVersionRegex`              | No                    | Regex whose first capture group extracts the version from an API `tag_name`.                                           |
+| `ApiUrl`                       | Yes for update checks | Endpoint used to determine the latest release.                                                                         |
+| `WingetId`                     | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.              |
+| `ProductionReleasesOnly`       | No                    | Accepts optional `v` + `major.minor.patch[.0]`, without a suffix. Defaults to `true`; `false` permits prereleases.     |
+| `UpdateParseRegex`             | No                    | Extracts an available version from a self-reporting version command instead of the API result.                         |
+| `UpdateType`                   | Recommended           | Identifies the command family for execution and error handling, such as `winget`, `direct`, or `npm-global`.           |
+| `UpdateCommand`                | Yes for updates       | PowerShell command executed to update the tool.                                                                        |
+| `WindowsUpdateCommand`         | No                    | Windows-only override for `UpdateCommand`.                                                                             |
+| `InstallCommands`              | No                    | Platform-specific commands offered when the tool is missing.                                                           |
+| `ReleaseNotesUrl`              | No                    | Link displayed when an update is actionable.                                                                           |
+| `ToolFile`                     | No for standard tools | Explicit filename under `Tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                |
 
 `InstallCommands` supports these platform keys:
 

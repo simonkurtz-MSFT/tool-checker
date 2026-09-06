@@ -50,8 +50,9 @@ Use [Tools/_tool-template.ps1](Tools/_tool-template.ps1) when extracting or addi
 tool-unique behavior. Prefer `Tools/<catalog-id>.ps1` and explicitly set
 `"ToolFile": "<catalog-id>.ps1"` in its catalog entry. Filenames may differ from
 catalog IDs; the loader never infers them. Keep specialized checks, parsing, refresh handlers, and
-action routines together; keep general functionality in
-[tool-checker.ps1](tool-checker.ps1). Standard entries without specialized
+action routines together; keep orchestration in
+[tool-checker.ps1](tool-checker.ps1) and shared registry behavior in
+[Infra/registry.ps1](Infra/registry.ps1). Standard entries without specialized
 behavior do not need a tool file.
 
 The template is scaffolding, not a registered tool. After catalog selection and
@@ -82,8 +83,8 @@ Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Pro
 The dispatcher dot-sources only that tool's definitions into its local call scope,
 then invokes the entry point. Repeated names cannot overwrite another tool or
 leak into the caller. Helpers remain accessible within the tool call, but other
-tools must not call them. Shared state and helpers remain in the main script;
-this does not introduce PowerShell modules or a new directory hierarchy.
+tools must not call them. Shared state remains in the main script;
+tool isolation does not require PowerShell modules.
 
 All custom checks now live in their catalog-declared tool files: Node.js, .NET
 SDK, Python, Python Install Manager, global npm packages, Azure CLI extensions,
@@ -96,7 +97,7 @@ whole inventory. Dynamic SDK, Python, and npm rows route to their owning tool.
 No `RefreshMethod` field or named-handler switch is needed. Specialized actions
 remain behind the shared dispatcher and approval gates.
 
-Keep cross-tool npm metadata and registry helpers in the main script. In
+Keep cross-tool npm release metadata helpers in the main script. In
 particular, a pnpm-only selection must not depend on the global npm tool file.
 Use catalog JSON properties, regexes, and platform command overrides for simple
 differences instead of adding tool-name branches to the standard framework.
@@ -108,6 +109,28 @@ When conventions, helper contracts, loading, or validation practices change,
 update the template and this guidance in the same change. The corresponding
 [tool-file instructions](.github/instructions/tool-files.instructions.md) apply
 to the implementation, catalog, and tests.
+
+## Registry infrastructure
+
+[Infra/registry.ps1](Infra/registry.ps1) owns registry policy checks, approved
+repairs for npm/pnpm/pip/uv/NuGet, npm metadata endpoint resolution, and repair
+result reporting. It includes the supporting Python interpreter, uv configuration,
+NuGet source, URL normalization, and credential-masking helpers.
+
+The main script explicitly dot-sources this function-only file via `$PSScriptRoot`,
+independently of selected tools, and fails startup if it is missing. Do not add
+catalog entries, folder scanning, or tool-dispatch entry points for infrastructure.
+Loading the file must not perform checks, requests, writes, or prompts.
+
+Configuration loading, shared state initialization, action menus, approval gates,
+and parallel orchestration remain in the main script. Registry repairs still
+require explicit approval with `-Force`; `-SkipUpdate` reports drift only.
+Registry policy is independent of tool selection. Workers continue receiving
+resolved tool configuration through the existing shared worker setup.
+
+Validate changes with [tests/registry.Tests.ps1](tests/registry.Tests.ps1) and the
+existing action/force-mode tests. Mock external commands and redirect uv writes
+to `TestDrive`; never modify the developer's real package-manager configuration.
 
 ## Validate your change
 

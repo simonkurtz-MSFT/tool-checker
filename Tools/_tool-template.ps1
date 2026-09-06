@@ -34,9 +34,11 @@
     discovery must exclude _tool-template.ps1.
 
     Keep tool-specific parsers, release planning, checks, refresh handlers, and
-    install/update routines together here. Keep shared functionality and dispatch
-    in tool-checker.ps1. Do not duplicate shared helpers or create modules.
-    Cross-tool npm metadata and registry helpers remain shared. Prefer catalog
+    install/update routines together here. Keep dispatch in tool-checker.ps1;
+    shared registry checks, repairs, and endpoint resolution live in
+    Infra/registry.ps1, loaded independently of tool selection.
+    Do not duplicate shared helpers or create modules.
+    Cross-tool npm release metadata helpers remain in the main script. Prefer catalog
     JSON properties, regexes, and platform command overrides for simple differences.
 
     Functions run in the main script or an isolated check worker. They use the

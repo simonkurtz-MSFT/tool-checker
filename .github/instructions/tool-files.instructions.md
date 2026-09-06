@@ -1,6 +1,6 @@
 ---
-description: "Maintain tool-specific PowerShell files and their template during tool additions and extraction."
-applyTo: "Tools/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
+description: "Maintain tool-specific PowerShell files, shared registry infrastructure, and their loading boundaries."
+applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
 ---
 
 # Tool-specific files
@@ -8,11 +8,18 @@ applyTo: "Tools/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTR
 - Keep general functionality in `tool-checker.ps1`. Extract only tool-unique
   behavior into a flat `Tools/` file explicitly named by the catalog's `ToolFile`.
   Prefer `<catalog-id>.ps1` for clarity, but never infer filenames from IDs.
-  Do not introduce infrastructure modules or a public/private module hierarchy.
+  Shared registry checks, repairs, and endpoint resolution belong in
+  `Infra/registry.ps1`. Keep orchestration and other shared behavior in the main
+  script; do not introduce a public/private module hierarchy.
 - Prefer JSON-only standard entries. Create a tool file only for specialized
   behavior, using `Tools/_tool-template.ps1` as the starting point.
   Keep simple parser and platform-command differences in catalog properties.
-  Cross-tool npm metadata and registry helpers stay shared in the main script.
+  Cross-tool npm release metadata helpers stay shared in the main script.
+- Explicitly dot-source `Infra/registry.ps1` via `$PSScriptRoot`, independently
+  of catalog selection; do not scan the folder or register it as a tool.
+  Infrastructure files define functions only and reuse main-script state.
+  Loading must not check or repair registries. Preserve explicit approval even
+  with `-Force`, and never offer repairs with `-SkipUpdate`.
 - Tool files define functions only. Preserve shared state and helper
   reuse, check-only behavior, result shapes, and action approval gates.
 - Keep cooldown defaults in catalog `settings.CooldownDays`. Reuse the resolved

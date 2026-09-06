@@ -513,6 +513,7 @@ Describe 'Tool definition loading' {
         $toolDirectory = Join-Path $directory 'Tools'
         New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $directory
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Infra') -Destination $directory -Recurse -Force
         Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Tools/nodejs.ps1') -Destination (Join-Path $toolDirectory 'node-runtime.ps1')
         $catalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $catalog.tools['probe-node'] = $catalog.tools['nodejs']
@@ -1343,6 +1344,7 @@ Describe 'Cooldown configuration' {
         $cooldownDirectory = Join-Path $TestDrive 'cooldown-catalog'
         New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Infra') -Destination $cooldownDirectory -Recurse -Force
         $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
     }

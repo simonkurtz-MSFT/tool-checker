@@ -1,6 +1,7 @@
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
 $testEnvFile = Join-Path ([System.IO.Path]::GetTempPath()) "tool-checker-tests-$([guid]::NewGuid()).env"
 . $scriptPath -EnvFile $testEnvFile
+$toolsJson = Get-Content (Join-Path (Split-Path $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json
 
 Describe 'Tool configuration' {
     It 'loads stable, unique catalog IDs for display-named tools' {

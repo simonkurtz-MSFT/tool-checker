@@ -1,5 +1,5 @@
 ---
-description: "Maintain tool-specific PowerShell files, shared registry and output infrastructure, and their loading boundaries."
+description: "Maintain tool-specific PowerShell files, shared configuration, registry and output infrastructure, and their loading boundaries."
 applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
 ---
 
@@ -10,17 +10,27 @@ applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests
   Prefer `<catalog-id>.ps1` for clarity, but never infer filenames from IDs.
   Shared registry checks, repairs, and endpoint resolution belong in
   `Infra/registry.ps1`; shared console rendering belongs in `Infra/output.ps1`.
+  Catalog/env parsing, selection, defaults, sorting, lookup, and validation belong
+  in `Infra/configuration.ps1`.
   Keep orchestration and other shared behavior in the main
   script; do not introduce a public/private module hierarchy.
 - Prefer JSON-only standard entries. Create a tool file only for specialized
   behavior, using `Tools/_tool-template.ps1` as the starting point.
   Keep simple parser and platform-command differences in catalog properties.
   Cross-tool npm release metadata helpers stay shared in the main script.
-- Explicitly dot-source `Infra/registry.ps1` and `Infra/output.ps1` via `$PSScriptRoot`, independently
+- Explicitly dot-source `Infra/configuration.ps1`, `Infra/registry.ps1`, and
+  `Infra/output.ps1` via `$PSScriptRoot`, independently
   of catalog selection; do not scan the folder or register it as a tool.
   Infrastructure files define functions only and reuse main-script state.
   Loading must not check or repair registries. Preserve explicit approval even
   with `-Force`, and never offer repairs with `-SkipUpdate`.
+- Configuration reading returns a snapshot without assigning shared state or
+  loading tool files. Main passes explicit catalog/env paths and cooldown override
+  presence (including zero), assigns the snapshot, and registers selected tools.
+  Validate catalog cooldown even with an override. Workers read configuration
+  source explicitly but receive only the allowlisted lookup helper, never readers.
+  Cover standalone loading and state preservation in configuration tests; copied
+  application fixtures must include required infrastructure files.
 - Output functions render existing state; keep checks, update eligibility, and
   action execution outside them. Preserve the host-only Write-Warning/Write-Error
   wrappers. Worker discovery explicitly reads the output file and includes only

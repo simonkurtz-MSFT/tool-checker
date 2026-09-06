@@ -42,6 +42,9 @@ Describe 'Output infrastructure' {
         $null = New-Item -ItemType Directory -Path $appRoot
         Copy-Item $scriptPath -Destination $appRoot
         Copy-Item (Join-Path (Split-Path $scriptPath) 'tool-checker.json') -Destination $appRoot
+        $infraRoot = Join-Path $appRoot 'Infra'
+        $null = New-Item -ItemType Directory -Path $infraRoot
+        Copy-Item (Join-Path (Split-Path $scriptPath) 'Infra/configuration.ps1') -Destination $infraRoot
         $selectionFile = Join-Path $appRoot 'git.env'
         Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
         { . (Join-Path $appRoot 'tool-checker.ps1') -EnvFile $selectionFile } | Should Throw 'Output infrastructure file not found'

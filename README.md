@@ -137,6 +137,12 @@ independently of tool selection; loading alone does not perform checks or repair
 
 ## Configuration
 
+[Infra/configuration.ps1](Infra/configuration.ps1) handles catalog and dotenv
+reading, tool selection, defaults, cooldown resolution, sorting, and validation.
+The main script loads it explicitly, assigns the resolved configuration, and then
+registers only selected, enabled tool files. Parallel workers reuse that resolved
+state without rereading configuration.
+
 Tools are catalog entries under the top-level `tools` object in [`tool-checker.json`](tool-checker.json). Each property name is a unique, stable semantic ID made of lowercase letters, numbers, and hyphens; each entry's required `Name` field supplies the human-readable display name used by the script. Tool Checker sorts display names when loading selected entries and uses that order for both processing and display. Names are sorted alphabetically, with Azure CLI extensions grouped under Azure CLI and versioned .NET SDK and Python entries sorted by version descending.
 
 There are two kinds of checks:

@@ -53,7 +53,8 @@ catalog IDs; the loader never infers them. Keep specialized checks, parsing, ref
 action routines together; keep orchestration in
 [tool-checker.ps1](tool-checker.ps1) and shared registry behavior in
 [Infra/registry.ps1](Infra/registry.ps1). Shared console rendering belongs in
-[Infra/output.ps1](Infra/output.ps1). Standard entries without specialized
+[Infra/output.ps1](Infra/output.ps1), and configuration handling belongs in
+[Infra/configuration.ps1](Infra/configuration.ps1). Standard entries without specialized
 behavior do not need a tool file.
 
 The template is scaffolding, not a registered tool. After catalog selection and
@@ -66,7 +67,7 @@ Unselected, disabled, undeclared, and template files are not loaded. Omit
 continue through the shared framework. Files must define functions only.
 Parallel workers receive the same per-tool definition registry, so
 tool-local helpers do not need separate dependency-list entries. Shared worker
-helpers in the main script or output infrastructure still belong in the
+helpers in the main script or configuration/output infrastructure still belong in the
 `Get-ParallelCheckFunctionBlock` allowlist.
 
 Use the same public names in every tool file: `Test-Tool`, `Refresh-ToolStatus`,
@@ -112,6 +113,26 @@ update the template and this guidance in the same change. The corresponding
 [tool-file instructions](.github/instructions/tool-files.instructions.md) apply
 to the implementation, catalog, and tests.
 
+## Configuration infrastructure
+
+[Infra/configuration.ps1](Infra/configuration.ps1) owns catalog and dotenv reading,
+selection, sorting, optional defaults, cooldown resolution, configuration lookup,
+and startup validation. `Get-ToolSortKey` is also shared with table rendering.
+The main script explicitly dot-sources this function-only file via `$PSScriptRoot`
+and calls `Read-ToolCheckerConfiguration` with catalog/env paths and explicit
+cooldown override presence. The reader returns a snapshot; main assigns shared
+state and registers selected tool definitions before validating them. Reading a
+snapshot must not load tool files, modify process environment, or replace shared state.
+
+Preserve relative env paths against the caller's working directory, optional
+missing env files, selection normalization, ordered install commands, explicit
+false values, and the catalog's cooldown validation even when overridden.
+Keep the `-Version` early return independent of infrastructure and configuration.
+Workers receive the resolved state and allowlisted `Get-ToolConfiguration` helper;
+they must not reread configuration. Validate these boundaries with
+[tests/configuration.Tests.ps1](tests/configuration.Tests.ps1) and the existing
+selection, cooldown, tool-loading, and real-runspace tests.
+
 ## Registry infrastructure
 
 [Infra/registry.ps1](Infra/registry.ps1) owns registry policy checks, approved
@@ -124,8 +145,8 @@ independently of selected tools, and fails startup if it is missing. Do not add
 catalog entries, folder scanning, or tool-dispatch entry points for infrastructure.
 Loading the file must not perform checks, requests, writes, or prompts.
 
-Configuration loading, shared state initialization, action menus, approval gates,
-and parallel orchestration remain in the main script. Registry repairs still
+Configuration reader invocation, shared state initialization, action menus,
+approval gates, and parallel orchestration remain in the main script. Registry repairs still
 require explicit approval with `-Force`; `-SkipUpdate` reports drift only.
 Registry policy is independent of tool selection. Workers continue receiving
 resolved tool configuration through the existing shared worker setup.
@@ -148,12 +169,12 @@ and fails startup if it is missing, independently of catalog selection. Preserve
 the existing host-only `Write-Warning` and `Write-Error` wrappers, colors, and text.
 Shared state and color initialization remain in the main script.
 
-`Get-ParallelCheckFunctionBlock` explicitly reads the output file alongside the
-main source and selects only allowlisted worker helpers. Do not scan `Infra/` or
+`Get-ParallelCheckFunctionBlock` explicitly reads the output and configuration files
+alongside the main source and selects only allowlisted worker helpers. Do not scan `Infra/` or
 send table/summary rendering to workers. The worker's `Write-Host` capture override
 remains in worker setup. Validate with [tests/output.Tests.ps1](tests/output.Tests.ps1)
 and the existing banner, legend, action, and parallel-check tests. Copied-application
-fixtures must include both infrastructure files.
+fixtures must include all required infrastructure files.
 
 ## Validate your change
 

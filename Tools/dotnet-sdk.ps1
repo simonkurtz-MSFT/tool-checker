@@ -195,6 +195,8 @@ function Test-Tool {
 }
 
 function Refresh-ToolStatus {
+    param([string]$ToolName)
+
     if (-not (Test-CommandExists "dotnet")) { return }
     $sdkList = dotnet --list-sdks 2>$null
     if (-not $sdkList) { return }

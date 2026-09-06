@@ -770,6 +770,10 @@ Describe 'Node release planning' {
 }
 
 Describe 'Global npm output parsing' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/npm-global-packages.ps1')
+    }
+
     It 'parses scoped update rows and normalizes the bulk install command' {
         $output = @(
             '@scope/example  1.2.0  →  1.3.0',
@@ -1003,6 +1007,10 @@ Describe '.NET SDK release planning' {
 }
 
 Describe 'Python launcher planning' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/python.ps1')
+    }
+
     It 'parses current and legacy installed-list formats' {
         $versions = ConvertFrom-PythonLauncherList -OutputLines @(
             '3.13[-64] * Python 3.13.7',

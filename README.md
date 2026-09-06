@@ -138,7 +138,7 @@ Tools are catalog entries under the top-level `tools` object in [`tool-checker.j
 There are two kinds of checks:
 
 - `standard`: Uses the generic command, version parser, release API, and update-command framework. Most new command-line tools should use this type.
-- `custom`: Calls a named function for tools requiring specialized behavior, such as multiple installed SDK channels. Extracted implementations live in the `Tools/` file explicitly named by the catalog's `ToolFile` field; remaining implementations still live in [tool-checker.ps1](tool-checker.ps1).
+- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. All custom checker implementations live in their tool files; shared checking, registry handling, output, and orchestration remain in [tool-checker.ps1](tool-checker.ps1).
 
 ### Add a standard tool
 
@@ -185,16 +185,22 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `VersionFlag`            | Usually               | Argument passed to `Command`; defaults to `--version`.                                                                 |
 | `VersionCommand`         | No                    | Full command used instead of `Command` plus `VersionFlag`.                                                             |
 | `VersionParseRegex`      | Recommended           | Regex whose first capture group is the installed version.                                                              |
-| `VersionExtractor`       | No                    | Named parser for special installed/API output. Built-in values include `npmDistTagLatest`, `azCliJson`, and `azBicep`. |
+| `VersionExtractor`       | No                    | Shared parser: `npmDistTagLatest` for npm releases or `jsonProperty` for installed JSON output.                         |
+| `VersionProperty`        | For `jsonProperty`    | Top-level installed-version JSON property, for example `azure-cli`.                                                     |
+| `ParseEntireVersionOutput` | No                  | Apply `VersionParseRegex` to all output lines instead of only the first; return no version if it does not match.       |
+| `PreferWingetInstalledVersion` | No              | Prefer the installed WinGet package version, falling back to command output when unavailable.                          |
+| `ApiVersionProperty`     | No                    | Dot-separated path to the API version, for example `info.version`; takes precedence over tag parsing.                 |
+| `ApiVersionRegex`        | No                    | Regex whose first capture group extracts the version from an API `tag_name`.                                          |
 | `ApiUrl`                 | Yes for update checks | Endpoint used to determine the latest release.                                                                         |
 | `WingetId`               | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.              |
 | `ProductionReleasesOnly` | No                    | Accepts optional `v` + `major.minor.patch[.0]`, without a suffix. Defaults to `true`; `false` permits prereleases.     |
 | `UpdateParseRegex`       | No                    | Extracts an available version from a self-reporting version command instead of the API result.                         |
 | `UpdateType`             | Recommended           | Identifies the command family for execution and error handling, such as `winget`, `direct`, or `npm-global`.           |
 | `UpdateCommand`          | Yes for updates       | PowerShell command executed to update the tool.                                                                        |
+| `WindowsUpdateCommand`   | No                    | Windows-only override for `UpdateCommand`.                                                                             |
 | `InstallCommands`        | No                    | Platform-specific commands offered when the tool is missing.                                                           |
 | `ReleaseNotesUrl`        | No                    | Link displayed when an update is actionable.                                                                           |
-| `RefreshMethod`          | No                    | Named post-update version refresh handler. Without one, the standard version check is reused.                          |
+| `ToolFile`               | No for standard tools | Explicit filename under `Tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                |
 
 `InstallCommands` supports these platform keys:
 

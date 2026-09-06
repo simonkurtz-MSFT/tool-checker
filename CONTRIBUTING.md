@@ -85,13 +85,24 @@ leak into the caller. Helpers remain accessible within the tool call, but other
 tools must not call them. Shared state and helpers remain in the main script;
 this does not introduce PowerShell modules or a new directory hierarchy.
 
-[Tools/nodejs.ps1](Tools/nodejs.ps1) and
-[Tools/dotnet-sdk.ps1](Tools/dotnet-sdk.ps1) are extracted implementations.
-The .NET file includes SDK inventory and release planning plus post-update
-refresh through `Refresh-ToolStatus`; shared orchestration stays in the main script.
-Existing custom checks for other tools remain in the main script until extracted.
+All custom checks now live in their catalog-declared tool files: Node.js, .NET
+SDK, Python, Python Install Manager, global npm packages, Azure CLI extensions,
+PowerShell, and WSL. Azure CLI, Bicep, and pnpm have refresh-only files; uv has its
+Windows installer. Tools handled entirely by catalog data need no file.
+
+`Refresh-ToolVersion` calls a loaded `Refresh-ToolStatus` automatically, passing
+the optional `[string]$ToolName` parameter. A handler may refresh one row or its
+whole inventory. Dynamic SDK, Python, and npm rows route to their owning tool.
+No `RefreshMethod` field or named-handler switch is needed. Specialized actions
+remain behind the shared dispatcher and approval gates.
+
+Keep cross-tool npm metadata and registry helpers in the main script. In
+particular, a pnpm-only selection must not depend on the global npm tool file.
+Use catalog JSON properties, regexes, and platform command overrides for simple
+differences instead of adding tool-name branches to the standard framework.
 Test changes with focused Pester coverage and synthetic real-runspace checks;
-never execute real installs, updates, or registry repairs in tests.
+test each specialized checker selected alone and in check-only mode. Never execute
+real installs, updates, or registry repairs in tests.
 
 When conventions, helper contracts, loading, or validation practices change,
 update the template and this guidance in the same change. The corresponding

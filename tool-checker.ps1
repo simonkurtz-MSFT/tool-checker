@@ -47,7 +47,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '1.2.5'
+$script:ToolCheckerVersion = '1.3.0'
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 
@@ -804,6 +804,37 @@ function Set-LatestToolVersion {
     $true
 }
 
+function Get-GlobalNpmInstalledVersion {
+    param([string]$PackageName)
+    try {
+        $json = npm list -g $PackageName --depth=0 --json --silent 2>$null
+        if (-not $json) { return $null }
+        $parsed = $json | ConvertFrom-Json
+        $dep = $parsed.dependencies.PSObject.Properties | Where-Object { $_.Name -eq $PackageName } | Select-Object -First 1
+        if ($dep -and $dep.Value.version) { $dep.Value.version } else { $null }
+    } catch { $null }
+}
+
+function Get-NpmVersionReleaseInfo {
+    param([string]$PackageName, [string]$Version)
+
+    try {
+        $json = npm view "$PackageName@$Version" time --json 2>$null
+        if (-not $json) { return $null }
+        $time = $json | ConvertFrom-Json
+        $publishedAt = [DateTimeOffset]::Parse($time.$Version).ToUniversalTime()
+        $age = [DateTimeOffset]::UtcNow - $publishedAt
+        [PSCustomObject]@{
+            PublishedAt = $publishedAt
+            AgeDays     = [Math]::Max(0, [Math]::Floor($age.TotalDays))
+            Installable = $age.TotalDays -ge $script:NpmUpdateCooldownDays
+        }
+    } catch {
+        Write-Warning "Could not determine publish time for $PackageName@$Version"
+        $null
+    }
+}
+
 function Get-LatestProductionNpmVersion {
     param([object]$ApiData)
 
@@ -1023,7 +1054,7 @@ function Get-InstalledVersionFromOutput {
 
     $config    = $toolsConfig[$ToolName]
     $extractor = $config.VersionExtractor
-    if ($extractor -eq 'azdGitHubTag') {
+    if ($config.PreferWingetInstalledVersion) {
         $packageVersion = Get-WingetInstalledVersion -ToolName $ToolName -PackageId $config.WingetId
         if ($packageVersion) { return $packageVersion }
     }
@@ -1033,21 +1064,18 @@ function Get-InstalledVersionFromOutput {
     }
 
     switch ($extractor) {
-        "azCliJson" {
-            try   { ($outputStr | ConvertFrom-Json).'azure-cli' }
+        "jsonProperty" {
+            try   { ($outputStr | ConvertFrom-Json).($config.VersionProperty) }
             catch { $null }
-        }
-        "azBicep" {
-            # VersionParseRegex should be "Bicep CLI version\s+(\S+)"
-            if ($config.VersionParseRegex -and $outputStr -match $config.VersionParseRegex) { $Matches[1] }
-            else { $null }
         }
         # --- Add new VersionExtractor cases here ---
         default {
             # Use VersionParseRegex from JSON; fall back to stripping a leading 'v'
-            $firstLine = ($outputStr -split "`n" | Select-Object -First 1).Trim()
+            $firstLine = if ($config.ParseEntireVersionOutput) { $outputStr } else { ($outputStr -split "`n" | Select-Object -First 1).Trim() }
             if ($config.VersionParseRegex -and $firstLine -match $config.VersionParseRegex) {
                 $Matches[1]
+            } elseif ($config.ParseEntireVersionOutput) {
+                $null
             } else {
                 $firstLine -replace '^v', ''
             }
@@ -1063,6 +1091,19 @@ function Get-LatestVersionFromApi {
     $config = $toolsConfig[$ToolName]
     $extractor = $config.VersionExtractor
 
+    if ($config.ApiVersionProperty) {
+        $value = $ApiData
+        foreach ($property in ($config.ApiVersionProperty -split '\.')) {
+            if ($null -eq $value) { return $null }
+            $value = $value.$property
+        }
+        return $value
+    }
+    if ($config.ApiVersionRegex) {
+        if ($ApiData.tag_name -match $config.ApiVersionRegex) { return $Matches[1] }
+        return $null
+    }
+
     switch ($extractor) {
         "npmDistTagLatest" {
             $latest = if ($ApiData.'dist-tags') { $ApiData.'dist-tags'.latest } else { $null }
@@ -1070,12 +1111,6 @@ function Get-LatestVersionFromApi {
                 return Get-LatestProductionNpmVersion -ApiData $ApiData
             }
             $latest
-        }
-        "azCliJson" {
-            if ($ApiData.info -and $ApiData.info.version) { $ApiData.info.version } else { $null }
-        }
-        "azdGitHubTag" {
-            if ($ApiData.tag_name -match '^azure-dev-cli_(.+)$') { $Matches[1] } else { $null }
         }
         # --- Add new API-version-extractor cases here ---
         default {
@@ -1185,33 +1220,31 @@ function Get-StandardToolUpdates {
 
 # ─────────────────────────────────────────────
 # 5. POST-UPDATE VERSION REFRESH
-#    RefreshMethod in JSON drives dispatch.
-#    Add new refresh handlers in the switch.
 # ─────────────────────────────────────────────
 
 function Refresh-ToolVersion {
     param([string]$ToolName)
     try {
         if ($ToolName -eq "ncu global packages" -or $ToolName -like 'npm: *') {
-            Refresh-NcuGlobalPackagesStatus
+            Invoke-ToolEntryPoint -ToolId 'npm-global-packages' -EntryPoint 'Refresh-ToolStatus'
             return $true
         }
 
         # Dynamic tool names don't have a direct config entry — route by pattern.
         # (e.g. ".NET SDK 10.0.201" maps to the ".NET SDK" config + dotnet refresh)
         if ($ToolName -match '^\.NET SDK\s') { Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Refresh-ToolStatus'; return $true }
+        if ($ToolName -match '^Python \d+\.\d+$') {
+            Invoke-ToolEntryPoint -ToolId 'python' -EntryPoint 'Refresh-ToolStatus' -Arguments @{ ToolName = $ToolName }
+            return $true
+        }
 
         $config = $toolsConfig[$ToolName]
         if (-not $config) { Write-Warning "  Tool configuration not found: $ToolName"; return $false }
 
-        switch ($config.RefreshMethod) {
-            "azure-cli" { Refresh-AzureCliVersion -ToolName $ToolName }
-            "bicep"     { Refresh-BicepVersion    -ToolName $ToolName }
-            "dotnet"    { Invoke-ToolEntryPoint -ToolId $config.Id -EntryPoint 'Refresh-ToolStatus' }
-            "pnpm"      { Refresh-PnpmVersion -ToolName $ToolName }
-            "python"    { Refresh-PythonVersion   -ToolName $ToolName }
-            # --- Add new refresh handlers here ---
-            default     { Refresh-StandardVersion -ToolName $ToolName -Config $config }
+        if ($config.Id -and $script:ToolDefinitions.ContainsKey($config.Id) -and $script:ToolDefinitions[$config.Id].ContainsKey('Refresh-ToolStatus')) {
+            Invoke-ToolEntryPoint -ToolId $config.Id -EntryPoint 'Refresh-ToolStatus' -Arguments @{ ToolName = $ToolName }
+        } else {
+            Refresh-StandardVersion -ToolName $ToolName -Config $config
         }
         return $true
     } catch {
@@ -1227,626 +1260,6 @@ function Refresh-StandardVersion {
     if ($version -and $version -notmatch "Unable to retrieve") {
         $installedVersion = Get-InstalledVersionFromOutput -ToolName $ToolName -Output $version
         if ($installedVersion) { $results.Tools[$ToolName].Installed = $installedVersion }
-    }
-}
-
-function Refresh-AzureCliVersion {
-    param([string]$ToolName)
-    if (Test-CommandExists "az") {
-        $json = az version --output json 2>$null | ConvertFrom-Json
-        if ($json.'azure-cli') { $results.Tools[$ToolName].Installed = $json.'azure-cli' }
-    }
-}
-
-function Refresh-BicepVersion {
-    param([string]$ToolName)
-    if (Test-CommandExists "az") {
-        $out = az bicep version 2>$null
-        $regex = $toolsConfig["Azure Bicep CLI"].VersionParseRegex
-        $line = $out | Where-Object { $_ -match 'Bicep CLI' } | Select-Object -First 1
-        if ($regex -and $line -match $regex) { $results.Tools[$ToolName].Installed = $Matches[1] }
-    }
-}
-
-function Refresh-PnpmVersion {
-    param([string]$ToolName)
-    $config = $toolsConfig[$ToolName]
-    $version = Get-GlobalNpmInstalledVersion -PackageName $config.NpmPackageName
-    if ($version) {
-        $results.Tools[$ToolName].Installed = $version
-    } else {
-        Refresh-StandardVersion -ToolName $ToolName -Config $config
-    }
-}
-
-function Refresh-PythonVersion {
-    param([string]$ToolName)
-    if (-not (Test-CommandExists "py") -or -not $ToolName.StartsWith("Python")) { return }
-    $major = ($results.Tools[$ToolName].Installed -split '\.')[0..1] -join '.'
-    $out = py --list-paths 2>$null
-    foreach ($line in $out) {
-        if ($line.ToString().Trim() -match '^\s*(\d+\.\d+)\[?-?\d*\]?\s+.*Python\s+(\d+\.\d+\.\d+)') {
-            if ($Matches[1] -eq $major) { $results.Tools[$ToolName].Installed = $Matches[2]; break }
-        }
-    }
-}
-
-function Refresh-NcuGlobalPackagesStatus {
-    if ($results.GlobalNpmPackageUpdates.Count -eq 0) { return }
-    foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-        $v = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
-        if ($v) { $pkg.Current = $v; $pkg.Installed = $v; $pkg.Latest = $v }
-    }
-    $results.Updates = @($results.Updates | Where-Object { $_ -ne "ncu global packages" })
-}
-
-# ─────────────────────────────────────────────
-# 6. CUSTOM TOOL CHECKERS
-#    These handle tools whose check/update logic
-#    is too complex for the standard framework.
-#    To add a custom checker:
-#      1. Add Tools/<catalog-id>.ps1 with a function
-#         matching the JSON CustomFunction field.
-#      2. Accept param([string]$Progress).
-# ─────────────────────────────────────────────
-
-# --- NCU Global npm packages -----------------------------------------------
-
-function Parse-NpmInstallCommand {
-    param([string]$Command)
-    $packages = @()
-    if ($Command -match 'install\s+(.+?)(?:\s+--loglevel|$)') {
-        foreach ($part in ($Matches[1].Trim() -split '\s+')) {
-            if ($part -match '^(@?[^@]+)@(.+)$' -and $Matches[1] -ne 'npm-check-updates') {
-                $packages += @{ Name = $Matches[1]; Version = $Matches[2] }
-            }
-        }
-    }
-    $packages
-}
-
-function ConvertFrom-NcuGlobalOutput {
-    param([Parameter(Mandatory)][array]$OutputLines)
-
-    $packages = @()
-    $installCommand = $null
-    foreach ($line in $OutputLines) {
-        $text = $line.ToString().Trim()
-        if ($text -match '^(@?[a-zA-Z0-9._/-]+)\s+([0-9a-zA-Z._-]+)\s+→\s+([0-9a-zA-Z._-]+)\s*$') {
-            $packages += @{ Name = $Matches[1]; Current = $Matches[2]; Latest = $Matches[3] }
-        } elseif (-not $installCommand -and $text -match '^npm\s+-g\s+install\s+') {
-            $installCommand = if ($text -match '--loglevel=') { $text } else { "$text --loglevel=error" }
-        }
-    }
-
-    [PSCustomObject]@{
-        Packages = $packages
-        InstallCommand = $installCommand
-    }
-}
-
-function Get-GlobalNpmInstalledVersion {
-    param([string]$PackageName)
-    try {
-        $json = npm list -g $PackageName --depth=0 --json --silent 2>$null
-        if (-not $json) { return $null }
-        $parsed = $json | ConvertFrom-Json
-        $dep = $parsed.dependencies.PSObject.Properties | Where-Object { $_.Name -eq $PackageName } | Select-Object -First 1
-        if ($dep -and $dep.Value.version) { $dep.Value.version } else { $null }
-    } catch { $null }
-}
-
-function Get-NpmVersionReleaseInfo {
-    param([string]$PackageName, [string]$Version)
-
-    try {
-        $json = npm view "$PackageName@$Version" time --json 2>$null
-        if (-not $json) { return $null }
-        $time = $json | ConvertFrom-Json
-        $publishedAt = [DateTimeOffset]::Parse($time.$Version).ToUniversalTime()
-        $age = [DateTimeOffset]::UtcNow - $publishedAt
-        [PSCustomObject]@{
-            PublishedAt = $publishedAt
-            AgeDays     = [Math]::Max(0, [Math]::Floor($age.TotalDays))
-            Installable = $age.TotalDays -ge $script:NpmUpdateCooldownDays
-        }
-    } catch {
-        Write-Warning "Could not determine publish time for $PackageName@$Version"
-        $null
-    }
-}
-
-function Test-NCUGlobal {
-    param([string]$Progress)
-    $config = Get-ToolConfiguration -ToolName 'Global npm packages'
-    Write-Header "Checking ncu -g (global npm packages updates)" -Progress $Progress
-
-    if (-not (Test-CommandExists "ncu")) {
-        Write-Error "ncu not installed (required for global package check)"
-        Add-NotInstalledTool "ncu"; return
-    }
-
-    try {
-        Write-Host "  Running ncu -g to check all global package updates..."
-        $output       = ncu -g 2>&1
-        $outputString = $output -join "`n"
-        $results.GlobalNpmPackageUpdates = @()
-
-        if ($LASTEXITCODE -ne 0 -and $outputString -match 'EALLOWREMOTE') {
-            $message = 'ncu could not inspect a global package installed from a remote source. Reinstall that package by registry name, then retry.'
-            Write-Warning $message
-            $results.Errors += $message
-            return
-        }
-
-        $parsedOutput = ConvertFrom-NcuGlobalOutput -OutputLines @($output)
-        $results.GlobalNpmPackageUpdates = @($parsedOutput.Packages)
-        if ($parsedOutput.InstallCommand) {
-            $results.GlobalNpmUpdateCommand = $parsedOutput.InstallCommand
-            $extracted = Parse-NpmInstallCommand $results.GlobalNpmUpdateCommand
-            if ($extracted.Count -gt 0 -and $results.GlobalNpmPackageUpdates.Count -eq 0) {
-                foreach ($pkg in $extracted) {
-                    $iv = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
-                    $results.GlobalNpmPackageUpdates += @{
-                        Name = $pkg.Name; Current = $(if ($iv) { $iv } else { "?" }); Latest = $pkg.Version
-                    }
-                }
-            }
-        }
-
-        # Dedicated npm-hosted tool checks own these packages; exclude duplicate ncu rows and actions.
-        $managedNpmPackageNames = @($toolsConfig.Values | Where-Object {
-            $_.VersionExtractor -eq 'npmDistTagLatest' -and $_.NpmPackageName
-        } | ForEach-Object { $_.NpmPackageName })
-        $results.GlobalNpmPackageUpdates = @($results.GlobalNpmPackageUpdates | Where-Object {
-            $_.Name -notin $managedNpmPackageNames
-        })
-
-        foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-            $productionReleasesOnly = $config.ProductionReleasesOnly
-            $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
-            if ($productionReleasesOnly -and -not (Test-IsProductionVersion $pkg.Latest)) {
-                $pkg.Latest = Get-LatestProductionNpmVersion -ApiData $metadata
-            }
-            if (-not $pkg.Latest) { continue }
-            $minimumVersion = if ($pkg.Current -and $pkg.Current -ne '?') { $pkg.Current } else { $null }
-            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MinimumVersion $minimumVersion -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly
-            if ($release) {
-                $pkg.Latest = $release.Version
-            } else {
-                $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest
-            }
-            $pkg.PublishedAt = $release.PublishedAt
-            $pkg.AgeDays = $release.AgeDays
-            $pkg.Installable = $release -and $release.Installable
-            if ($release -and -not $release.Installable) {
-                $results.MaturityBlockedUpdates += @{
-                    Name = $pkg.Name
-                    AgeDays = $release.AgeDays
-                    RequiredAgeDays = $script:NpmUpdateCooldownDays
-                }
-            }
-        }
-
-        $installablePackages = @($results.GlobalNpmPackageUpdates | Where-Object {
-            $_.Latest -and $_.Latest -ne "-" -and $_.Current -ne $_.Latest -and $_.Installable
-        })
-        $actionable = $installablePackages.Count -gt 0
-
-        if ($outputString -match "All global packages are up-to-date") {
-            Write-Success "All global npm packages are up to date"
-        } elseif ($results.GlobalNpmPackageUpdates.Count -gt 0) {
-            Write-Warning "Global package updates available:"
-            foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-                $status = if ($pkg.Installable) { "installable" } else { "FYI; $($script:NpmUpdateCooldownDays)-day cooldown" }
-                $age = if ($null -ne $pkg.AgeDays) { "$($pkg.AgeDays) days old" } else { "age unknown" }
-                Write-Host "    $($pkg.Name)  Installed: $($pkg.Current)  Latest: $($pkg.Latest)  ($age; $status)"
-            }
-
-            if ($actionable) {
-                $results.Updates += "ncu global packages"
-                $specs = $installablePackages | ForEach-Object { "$($_.Name)@$($_.Latest)" }
-                $results.GlobalNpmUpdateCommand = "npm install -g $($specs -join ' ') --loglevel=error"
-                if (!$SkipUpdate) {
-                    foreach ($pkg in $installablePackages) {
-                        Add-AvailableUpdate -Name "npm: $($pkg.Name)" -Command "npm install -g $($pkg.Name)@$($pkg.Latest) --loglevel=error" -Type 'npm-global-package' -Details "$($pkg.Current) -> $($pkg.Latest)"
-                    }
-                }
-            }
-        }
-    } catch {
-        Write-Warning "Unable to run ncu -g: $_"
-    }
-}
-
-# --- Azure CLI Extensions ---------------------------------------------------
-
-function Test-AzureExtensions {
-    param([string]$Progress)
-    $config = Get-ToolConfiguration -ToolName 'Azure CLI Extensions' -RequiredProperties @('UpdateType')
-    Write-Header "Checking Azure CLI Extensions" -Progress $Progress
-
-    if (-not (Test-CommandExists "az")) {
-        Write-Error "Azure CLI not installed, skipping extensions check"; return
-    }
-
-    try {
-        $jsonOutput = az extension list --output json 2>$null
-        if (-not $jsonOutput -or $jsonOutput -notmatch '^\s*\[') {
-            Write-Host "  No Azure CLI extensions installed or unable to retrieve list"; return
-        }
-        $extensions = @($jsonOutput | ConvertFrom-Json)
-        if ($null -eq $extensions -or $extensions.Count -eq 0) {
-            Write-Host "  No Azure CLI extensions installed"; return
-        }
-
-        Write-Success "Installed extensions:"
-        foreach ($ext in $extensions) {
-            Write-Host "  - $($ext.name): $($ext.version)"
-            $results.Tools["  az ext: $($ext.name)"] = @{ Installed = $ext.version; Latest = "" }
-        }
-        if ($SkipUpdate) { return }
-
-        Write-Host "  Checking for Azure CLI extension updates..."
-        $updatesAvailable = $false
-        foreach ($ext in $extensions) {
-            $versions = az extension list-versions --name $ext.name 2>$null | ConvertFrom-Json
-            $stable = $versions | ForEach-Object {
-                $cv = ($_.version -split '\s+')[0]
-                [PSCustomObject]@{ version = $cv }
-            } | Where-Object { Test-IsProductionVersion $_.version }
-            $latest = if ($config.ProductionReleasesOnly) {
-                $stable | Select-Object -Last 1
-            } else {
-                $versions | Select-Object -Last 1 | ForEach-Object { @{ version = ($_.version -split '\s+')[0] } }
-            }
-            if (-not $latest) { continue }
-
-            $results.Tools["  az ext: $($ext.name)"].Latest = $latest.version
-            $updateName = "Azure Extension: $($ext.name)"
-            $updateCommand = "az extension update --name $($ext.name) --only-show-errors"
-            if (Register-ToolUpdate -Name $updateName -InstalledVersion $ext.version -LatestVersion $latest.version -Command $updateCommand -Type 'az-extension') {
-                Write-Warning "  Extension '$($ext.name)' has update available: $($ext.version) -> $($latest.version)"
-                $updatesAvailable = $true
-            }
-        }
-        if (-not $updatesAvailable) { Write-Success "All Azure CLI extensions are up to date" }
-    } catch {
-        Write-Error "Failed to list Azure CLI extensions: $_"
-        $results.Errors += "Azure extensions check failed: $_"
-    }
-}
-
-# --- Python Install Manager: Windows AppX package behind py -----------------
-
-function Test-PythonInstallManager {
-    param([string]$Progress)
-    $toolName = "Python Install Manager (py)"
-    $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties @('PackageName', 'WingetId', 'UpdateCommand', 'UpdateType')
-    Write-Header "Checking $toolName" -Progress $Progress
-
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-        Write-Warning "$toolName check skipped: Windows only"
-        return
-    }
-
-    $package = Get-AppxPackage -Name $config.PackageName -ErrorAction SilentlyContinue |
-        Sort-Object Version -Descending |
-        Select-Object -First 1
-    if (-not $package) {
-        Write-Error "$toolName not installed"
-        Add-NotInstalledTool $toolName
-        return
-    }
-
-    $installedVersion = $package.Version.ToString()
-    Write-Success "$toolName installed: $installedVersion"
-    $results.Tools[$toolName] = @{ Installed = $installedVersion; Latest = "" }
-
-    if ($SkipUpdate) { return }
-
-    Write-Host "  Checking for $toolName updates..."
-    $latestVersion = Get-WingetLatestVersion -ToolName $toolName -PackageId $config.WingetId
-    if (-not (Set-LatestToolVersion -ToolNames $toolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'WinGet version')) { return }
-
-    if (Register-ToolUpdate -Name $toolName -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
-        Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"
-        Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-    } else {
-        Write-Success "$toolName is up to date with WinGet"
-    }
-}
-
-# --- Python: multiple installed versions via py launcher --------------------
-
-function Test-Python {
-    param([string]$Progress)
-    $config = Get-ToolConfiguration -ToolName 'Python' -RequiredProperties @('UpdateCommand', 'UpdateType')
-    Write-Header "Checking Python" -Progress $Progress
-
-    if (Test-CommandExists "py") {
-        Write-Success "Python Installation Manager (py) found"
-        try {
-            $installed = py list 2>&1
-            if ($installed) {
-                $installedVersions = ConvertFrom-PythonLauncherList -OutputLines $installed
-                Write-Host "  Installed Python versions:"
-                foreach ($version in $installedVersions) {
-                    $defaultLabel = if ($version.IsDefault) { ' (default)' } else { '' }
-                    Write-Host "    - Python $($version.Version)$defaultLabel"
-                    $results.Tools["Python $($version.Channel)"] = @{ Installed = $version.Version; Latest = "" }
-                }
-                if (-not $SkipUpdate) { Get-PythonUpdateViaPy -InstalledVersions $installedVersions }
-            }
-        } catch { Write-Warning "Unable to list Python versions via py: $_" }
-    } elseif (Test-CommandExists "python") {
-        $ver = (Get-CommandVersion "python" "--version") -replace 'Python ', '' | ForEach-Object { $_.Trim() }
-        Write-Success "Python installed: $ver"
-        $maj = ($ver -split '\.')[0..1] -join '.'
-        $results.Tools["Python $maj"] = @{ Installed = $ver; Latest = "" }
-        if (-not $SkipUpdate) { Get-PythonUpdateConventional -InstalledVersion $ver }
-    } elseif (Test-CommandExists "python3") {
-        $ver = (Get-CommandVersion "python3" "--version") -replace 'Python ', '' | ForEach-Object { $_.Trim() }
-        Write-Success "Python3 installed: $ver"
-        $maj = ($ver -split '\.')[0..1] -join '.'
-        $results.Tools["Python $maj"] = @{ Installed = $ver; Latest = "" }
-        if (-not $SkipUpdate) { Get-PythonUpdateConventional -InstalledVersion $ver }
-    } else {
-        Write-Error "Python not installed"; Add-NotInstalledTool "Python"
-    }
-}
-
-function ConvertFrom-PythonLauncherList {
-    param(
-        [Parameter(Mandatory)][array]$OutputLines,
-        [switch]$Online
-    )
-
-    @($OutputLines | ForEach-Object {
-        $line = $_.ToString()
-        if ($line -match '^\s*(?<Channel>\d+\.\d+)\[?-?\d*\]?\s+(?<Default>\*)?\s*Python\s+(?<Version>\d+\.\d+\.\d+)') {
-            [PSCustomObject]@{
-                Channel = $Matches.Channel
-                Version = $Matches.Version
-                IsDefault = [bool]$Matches.Default
-            }
-        } elseif ($line -match '^\s*-V:(?<Channel>\d+\.\d+)(?<Suffix>-\d+)?\s*(?<Default>\*)?') {
-            $version = if ($Online) {
-                $patch = if ($Matches.Suffix) { $Matches.Suffix -replace '-', '.' } else { '.0' }
-                "$($Matches.Channel)$patch"
-            } else {
-                "$($Matches.Channel)$($Matches.Suffix)"
-            }
-            [PSCustomObject]@{
-                Channel = $Matches.Channel
-                Version = $version
-                IsDefault = [bool]$Matches.Default
-            }
-        }
-    })
-}
-
-function Get-PythonLauncherUpdatePlan {
-    param(
-        [Parameter(Mandatory)][array]$InstalledVersions,
-        [Parameter(Mandatory)][array]$AvailableVersions
-    )
-
-    $installedByChannel = @{}
-    foreach ($version in $InstalledVersions) {
-        $installedByChannel[$version.Channel] = $version.Version
-    }
-    $latestByChannel = @{}
-    foreach ($version in $AvailableVersions) {
-        if (-not $latestByChannel.ContainsKey($version.Channel) -or [version]$version.Version -gt [version]$latestByChannel[$version.Channel]) {
-            $latestByChannel[$version.Channel] = $version.Version
-        }
-    }
-
-    $updates = @()
-    foreach ($channel in $installedByChannel.Keys) {
-        $installed = $installedByChannel[$channel] -replace '-', '.'
-        if ($installed -notmatch '^\d+\.\d+\.\d+$') { $installed = "$installed.0" }
-        if ($latestByChannel.ContainsKey($channel) -and [version]$latestByChannel[$channel] -gt [version]$installed) {
-            $updates += [PSCustomObject]@{
-                Channel = $channel
-                Installed = $installedByChannel[$channel]
-                Latest = $latestByChannel[$channel]
-            }
-        }
-    }
-
-    $highestInstalledChannel = @($installedByChannel.Keys | Sort-Object { [version]$_ } | Select-Object -Last 1)
-    $newerChannel = if ($highestInstalledChannel.Count -gt 0) {
-        $latestByChannel.Keys |
-            Where-Object { [version]$_ -gt [version]$highestInstalledChannel[0] } |
-            Sort-Object { [version]$_ } -Descending |
-            Select-Object -First 1
-    } else {
-        $null
-    }
-
-    [PSCustomObject]@{
-        InstalledByChannel = $installedByChannel
-        LatestByChannel = $latestByChannel
-        Updates = $updates
-        NewerChannel = $newerChannel
-    }
-}
-
-function Get-PythonUpdateViaPy {
-    param([Parameter(Mandatory)][array]$InstalledVersions)
-    Write-Host "  Checking for Python updates via py --list-online..."
-    try {
-        $online = py list --online 2>&1
-        if (-not $online) { return }
-        $availableVersions = ConvertFrom-PythonLauncherList -OutputLines $online -Online
-        $plan = Get-PythonLauncherUpdatePlan -InstalledVersions $InstalledVersions -AvailableVersions $availableVersions
-
-        $found = $false
-        foreach ($channel in $plan.InstalledByChannel.Keys) {
-            if ($plan.LatestByChannel.ContainsKey($channel)) { $results.Tools["Python $channel"].Latest = $plan.LatestByChannel[$channel] }
-        }
-        foreach ($update in $plan.Updates) {
-            Write-Warning "  Python $($update.Channel) has update available: $($update.Installed) -> $($update.Latest)"
-            $results.Updates += "Python $($update.Channel)"; $found = $true
-            Add-AvailableUpdate -Name "Python $($update.Channel)" -Command "py install $($update.Channel) --update --quiet" -Type 'py' -Details "$($update.Installed) -> $($update.Latest)"
-        }
-        if (-not $found) { Write-Success "All Python versions are up to date" }
-        if ($plan.NewerChannel) {
-            Write-Warning "  Newer Python major version available: $($plan.NewerChannel) (latest: $($plan.LatestByChannel[$plan.NewerChannel]))"
-        }
-    } catch { Write-Warning "  Could not check Python updates: $_" }
-}
-
-function Get-PythonUpdateConventional {
-    param([string]$InstalledVersion)
-    $config = $toolsConfig["Python"]
-    Write-Host "  Checking for Python updates..."
-    try {
-        $major = ($InstalledVersion -split '\.')[0..1] -join '.'
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
-            $latest = Get-WingetLatestVersion -ToolName "Python $major" -PackageId "Python.Python.$major"
-            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
-            if ($latest) {
-                $results.Tools["Python $major"].Latest = $latest
-            }
-        } else {
-            $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
-            $match = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
-            $latest = if ($match) { $match.latest } else { $null }
-            if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
-            if ($latest) { $results.Tools["Python $major"].Latest = $latest }
-        }
-        if ($latest) {
-            if ([version]$latest -gt [version]$InstalledVersion) {
-                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
-                Write-Warning "  Python $major has update available${sourceLabel}: $InstalledVersion -> $latest"
-                $results.Updates += "Python $major"
-                if (!$SkipUpdate) {
-                    Add-AvailableUpdate -Name "Python $major" -Command ($config.UpdateCommand -replace '\{version\}',$major) -Type $config.UpdateType -Details "$InstalledVersion -> $latest"
-                }
-            } else { Write-Success "Python $major is up to date" }
-        }
-        if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            $newerMajors = $releases | Where-Object { $_.eol -eq $false -and [double]$_.cycle -gt [double]$major } | Sort-Object { [double]$_.cycle } -Descending | Select-Object -First 1
-            if ($newerMajors) { Write-Warning "  Newer Python major version available: $($newerMajors.cycle) (latest: $($newerMajors.latest))" }
-        }
-    } catch { Write-Warning "  Could not check Python updates: $_" }
-}
-
-# --- PowerShell: reports both Windows PS and Core ---------------------------
-
-function Test-PowerShell {
-    param([string]$Progress)
-    $config = Get-ToolConfiguration -ToolName 'PowerShell' -RequiredProperties @('Command', 'ApiUrl', 'UpdateCommand', 'UpdateType')
-    Write-Header "Checking PowerShell" -Progress $Progress
-
-    $currentVersion = $PSVersionTable.PSVersion
-    Write-Success "Current PowerShell: $currentVersion"
-    $results.Tools["PowerShell"] = @{ Installed = $currentVersion.ToString(); Latest = "" }
-
-    if (Test-CommandExists "pwsh") {
-        $pwshVersion = (Get-CommandVersion "pwsh" "--version") -replace 'PowerShell ', ''
-        Write-Success "PowerShell Core installed: $pwshVersion"
-        $results.Tools["PowerShell Core"] = @{ Installed = $pwshVersion; Latest = "" }
-        if ($SkipUpdate) { return }
-
-        Write-Host "  Checking for PowerShell updates..."
-        try {
-            $latestVersion = if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
-                Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
-            } else {
-                $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
-                $releases.tag_name -replace 'v', ''
-            }
-            $latestToolNames = @('PowerShell')
-            if ($results.Tools['PowerShell Core']) { $latestToolNames += 'PowerShell Core' }
-            if (-not (Set-LatestToolVersion -ToolNames $latestToolNames -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
-
-            if (Register-ToolUpdate -Name 'PowerShell' -InstalledVersion $pwshVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
-                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
-                Write-Warning "  PowerShell has available updates${sourceLabel}: $pwshVersion -> $latestVersion"
-                Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-            } else { Write-Success "PowerShell is up to date" }
-        } catch { Write-Warning "  Could not fetch latest PowerShell version: $_" }
-    } else {
-        Write-Warning "PowerShell Core (pwsh) not installed"
-    }
-}
-
-# --- WSL: installed package vs latest allowed release -----------------------
-
-function Test-WSL {
-    param([string]$Progress)
-    $config = Get-ToolConfiguration -ToolName 'WSL' -RequiredProperties @('Command', 'VersionCommand', 'VersionParseRegex', 'ApiUrl', 'UpdateCommand', 'UpdateType')
-    Write-Header "Checking WSL" -Progress $Progress
-
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-        Write-Warning "WSL check skipped: Windows only"
-        return
-    }
-
-    if (-not (Test-CommandExists $config.Command)) {
-        Write-Error "WSL not installed"
-        Add-NotInstalledTool "WSL"
-        return
-    }
-
-    try { $versionOutput = Invoke-Expression "$($config.VersionCommand) 2>&1" | Out-String }
-    catch { $versionOutput = "" }
-
-    if (-not ($versionOutput -match $config.VersionParseRegex)) {
-        Write-Warning "Could not parse WSL version from wslc -v"
-        $results.Tools["WSL"] = @{ Installed = "unknown"; Latest = "" }
-        return
-    }
-
-    $installedVersion = ConvertTo-CanonicalSemanticVersion $Matches[1]
-    Write-Success "WSL installed: $installedVersion"
-    $results.Tools["WSL"] = @{ Installed = $installedVersion; Latest = "" }
-
-    if ($SkipUpdate) { return }
-
-    Write-Host "  Checking for WSL updates..."
-    $releases = Invoke-SafeApiRequest -Uri $config.ApiUrl
-    $allowedReleases = @($releases) | Where-Object {
-        -not $_.draft -and (-not $config.ProductionReleasesOnly -or (
-            -not $_.prerelease -and (Test-IsProductionVersion $_.tag_name)
-        ))
-    }
-    $versionedReleases = foreach ($release in $allowedReleases) {
-        $versionText = "$($release.tag_name)" -replace '^v', ''
-        $semanticVersion = $null
-        if ([version]::TryParse($versionText, [ref]$semanticVersion)) {
-            [PSCustomObject]@{
-                Release         = $release
-                SemanticVersion = $semanticVersion
-                VersionText     = $versionText
-            }
-        }
-    }
-    $latestVersionedRelease = $versionedReleases |
-        Sort-Object -Property @(
-            @{ Expression = { $_.SemanticVersion }; Descending = $true }
-            @{ Expression = { [DateTimeOffset]$_.Release.published_at }; Descending = $true }
-        ) |
-        Select-Object -First 1
-
-    if (-not $latestVersionedRelease) {
-        Write-Warning "  Could not determine latest semantic WSL release"
-        return
-    }
-
-    $latestRelease = $latestVersionedRelease.Release
-    $latestVersion = ConvertTo-CanonicalSemanticVersion $latestVersionedRelease.VersionText
-    $results.Tools["WSL"].Latest = $latestVersion
-
-    if (Register-ToolUpdate -Name 'WSL' -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
-        $releaseType = if ($latestRelease.prerelease) { "prerelease" } else { "release" }
-        Write-Warning "  WSL $releaseType available: $installedVersion -> $latestVersion"
-    } else {
-        Write-Success "WSL is up to date"
     }
 }
 
@@ -1877,8 +1290,8 @@ function Get-UpdateCommand {
             if ($null -eq $ageDays -or $ageDays -lt $script:NpmUpdateCooldownDays) { return "" }
             return $config.UpdateCommand.Replace("$($config.NpmPackageName)@latest", "$($config.NpmPackageName)@$Latest")
         }
-        if ($ToolName -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            return 'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force'
+        if ($config.WindowsUpdateCommand -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+            return $config.WindowsUpdateCommand
         }
         return $config.UpdateCommand
     }
@@ -2048,50 +1461,7 @@ function Invoke-ToolCommand {
     }
 }
 
-function Invoke-UvWindowsInstall {
-    $output = [System.Collections.Generic.List[string]]::new()
 
-    try {
-        if (-not (Test-CommandExists 'winget')) {
-            return @{ Output = 'winget is required to install uv on Windows.'; ExitCode = 1 }
-        }
-
-        $uvCommands = @(Get-Command uv -All -ErrorAction SilentlyContinue)
-        $uvPaths = @($uvCommands | ForEach-Object Source | Where-Object { $_ } | Select-Object -Unique)
-
-        if ($uvPaths -match '\\pipx\\' -and (Test-CommandExists 'pipx')) {
-            $pipxOutput = pipx uninstall uv 2>&1 | Out-String
-            if ($pipxOutput) { $output.Add($pipxOutput.Trim()) }
-        }
-        if ($uvPaths -match '\\.cargo\\bin\\' -and (Test-CommandExists 'cargo')) {
-            $cargoOutput = cargo uninstall uv 2>&1 | Out-String
-            if ($cargoOutput) { $output.Add($cargoOutput.Trim()) }
-        }
-
-        $uninstall = Invoke-ToolCommand -Command 'winget uninstall --id astral-sh.uv -e --silent --disable-interactivity' -Type 'winget'
-        if ($uninstall.Output) { $output.Add($uninstall.Output) }
-
-        foreach ($binDirectory in @(
-            (Join-Path $env:USERPROFILE '.local\bin'),
-            (Join-Path $env:USERPROFILE '.cargo\bin')
-        )) {
-            foreach ($binary in @('uv.exe', 'uvx.exe', 'uvw.exe')) {
-                $binaryPath = Join-Path $binDirectory $binary
-                if (Test-Path -LiteralPath $binaryPath) {
-                    Remove-Item -LiteralPath $binaryPath -Force -ErrorAction Stop
-                    $output.Add("Removed $binaryPath")
-                }
-            }
-        }
-
-        $install = Invoke-ToolCommand -Command 'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force' -Type 'winget'
-        if ($install.Output) { $output.Add($install.Output) }
-        return @{ Output = ($output -join "`n"); ExitCode = $install.ExitCode }
-    } catch {
-        $output.Add((Get-DetailedErrorMessage $_))
-        return @{ Output = ($output -join "`n"); ExitCode = 1 }
-    }
-}
 
 function Get-AvailableActions {
     param([switch]$RegistryOnly)
@@ -2133,7 +1503,7 @@ function Invoke-ActionCommand {
         return Set-RegistryConfiguration -RegistryKey $Action.RegistryKey -EnvironmentConfig $script:RegistryEnvironment
     }
     if ($Action.Name -eq 'uv' -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-        return Invoke-UvWindowsInstall
+        return Invoke-ToolEntryPoint -ToolId 'uv' -EntryPoint 'Invoke-ToolInstall'
     }
     if ($Action.Type -eq 'node-direct') {
         return Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Invoke-ToolUpdate' -Arguments @{ Version = $Action.Version }
@@ -2451,8 +1821,7 @@ function Get-ParallelCheckFunctionBlock {
         'Test-IsProductionVersion','Set-LatestToolVersion','Get-LatestProductionNpmVersion','Get-LatestMatureNpmRelease',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate','Get-WingetInstalledVersion','Get-WingetLatestVersion',
         'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates',
-        'Parse-NpmInstallCommand','ConvertFrom-NcuGlobalOutput','Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo',
-        'ConvertFrom-PythonLauncherList','Get-PythonLauncherUpdatePlan','Get-PythonUpdateViaPy','Get-PythonUpdateConventional'
+        'Get-GlobalNpmInstalledVersion','Get-NpmVersionReleaseInfo'
     )
     $functionNames += @($ToolsConfiguration.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
 

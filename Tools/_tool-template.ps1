@@ -13,11 +13,14 @@
 
     Public entry points use the same tool-agnostic names in every file:
     - Test-Tool - checker; accepts [string]$Progress.
-    - Refresh-ToolStatus - optional post-action inventory refresh.
+        - Refresh-ToolStatus - optional post-action inventory refresh; accepts
+            optional [string]$ToolName and may refresh one row or the whole inventory.
     - Invoke-ToolInstall - optional specialized installer.
     - Invoke-ToolUpdate - optional specialized updater.
     Keep platform-specific details behind these names, not in public names.
     Action parameters and results must match the main script's dispatcher.
+    A loaded Refresh-ToolStatus is used automatically; do not add a RefreshMethod
+    catalog field or a tool-specific refresh switch in the main script.
 
     Put public functions in '#region Public entry points' and private helpers in
     '#region Private helpers'. Private names may vary; prefer tool-qualified names
@@ -33,6 +36,8 @@
     Keep tool-specific parsers, release planning, checks, refresh handlers, and
     install/update routines together here. Keep shared functionality and dispatch
     in tool-checker.ps1. Do not duplicate shared helpers or create modules.
+    Cross-tool npm metadata and registry helpers remain shared. Prefer catalog
+    JSON properties, regexes, and platform command overrides for simple differences.
 
     Functions run in the main script or an isolated check worker. They use the
     existing toolsConfig, results, SkipUpdate, and script-scoped platform/timeout
@@ -78,7 +83,8 @@ function Test-Tool {
     Add needed helpers in the Private helpers region. Refresh and action routines are
     optional; preserve existing dispatch and approval gates in tool-checker.ps1.
     Add focused Pester coverage, including execution through a real check worker
-    with synthetic inputs and no real installs, updates, or registry repairs.
+    with synthetic inputs, this tool selected alone, and check-only coverage.
+    Never execute real installs, updates, or registry repairs in tests.
     #>
     throw [System.NotImplementedException]::new('Implement the tool-specific check before registering this file.')
 }

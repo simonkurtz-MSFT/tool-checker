@@ -134,7 +134,7 @@ Tools are catalog entries under the top-level `tools` object in [`tool-checker.j
 There are two kinds of checks:
 
 - `standard`: Uses the generic command, version parser, release API, and update-command framework. Most new command-line tools should use this type.
-- `custom`: Calls a named function for tools requiring specialized behavior, such as multiple installed SDK channels. Extracted implementations live in `Tools/<catalog-id>.ps1`; remaining implementations still live in [tool-checker.ps1](tool-checker.ps1).
+- `custom`: Calls a named function for tools requiring specialized behavior, such as multiple installed SDK channels. Extracted implementations live in the `Tools/` file explicitly named by the catalog's `ToolFile` field; remaining implementations still live in [tool-checker.ps1](tool-checker.ps1).
 
 ### Add a standard tool
 
@@ -221,6 +221,7 @@ Use a custom entry only when the standard framework cannot model the check:
       "enabled": true,
       "CheckType": "custom",
       "CustomFunction": "Test-Tool",
+      "ToolFile": "example-sdk.ps1",
       "Command": "example"
     }
   }
@@ -246,7 +247,7 @@ function Test-Tool {
 }
 ```
 
-Custom checker functions must accept a `Progress` string. After catalog selection, Tool Checker registers functions from existing `Tools/<catalog-id>.ps1` files for selected, enabled tools, in catalog-ID order, then validates configured checks. Unselected, disabled, uncatalogued, and template files are not loaded. Workers receive the same per-tool definition registry, including private helpers. `Invoke-ToolEntryPoint` dispatches by catalog ID in a local call scope, so every file can use `Test-Tool`, `Refresh-ToolStatus`, `Invoke-ToolInstall`, and `Invoke-ToolUpdate` without name collisions. Files must define functions only and follow the public naming and private-helper region conventions in [Tools/_tool-template.ps1](Tools/_tool-template.ps1).
+Custom checker functions must accept a `Progress` string. After catalog selection, Tool Checker registers functions only from declared `ToolFile` files for selected, enabled tools, in catalog-ID order, then validates configured checks. `ToolFile` is a .ps1 filename directly under `Tools/`, not a path or the template. Omit it when no specialized file is needed; invalid filenames and missing declared files fail startup. Filenames are never inferred from catalog IDs. Unselected, disabled, undeclared, and template files are not loaded. Workers receive the same per-tool definition registry, including private helpers. `Invoke-ToolEntryPoint` dispatches by catalog ID in a local call scope, so every file can use `Test-Tool`, `Refresh-ToolStatus`, `Invoke-ToolInstall`, and `Invoke-ToolUpdate` without name collisions. Files must define functions only and follow the public naming and private-helper region conventions in [Tools/_tool-template.ps1](Tools/_tool-template.ps1).
 
 If normal semantic version comparison applies, call `Register-ToolUpdate`; it adds a newer version to both the summary and actionable update collections. For specialized flows that manage summary state separately, call `Add-AvailableUpdate` with `Name`, `Command`, `Type`, and optional `Details` values. Specialized actions can also supply `RegistryKey` for registry alignment or `Version` for a version-specific installer.
 

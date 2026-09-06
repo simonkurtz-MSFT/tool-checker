@@ -4,7 +4,9 @@
     Template for tool-specific behavior. Not a runtime tool file.
 
 .DESCRIPTION
-    Copy to Tools/<catalog-id>.ps1, using the exact key in tool-checker.json.
+    Copy to a .ps1 file directly under Tools/ and set the catalog ToolFile to its
+    filename (for example, "ToolFile": "example-sdk.ps1"). Prefer <catalog-id>.ps1
+    for clarity, but the filename is explicitly configured, never inferred.
     Replace Example CLI with the catalog Name; keep public function names unchanged.
     Set CustomFunction to Test-Tool for a custom catalog entry.
     Standard entries need a file only when they have specialized behavior.
@@ -36,8 +38,10 @@
     existing toolsConfig, results, SkipUpdate, and script-scoped platform/timeout
     settings. Do not initialize shared state in this file.
 
-    After catalog selection, the main script loads only existing files for
+    After catalog selection, the main script loads only declared ToolFile files for
     selected, enabled tools in catalog-ID order into a per-tool definition registry.
+    Omit ToolFile when no specialized file is needed. Invalid filenames and missing
+    declared files fail startup. Registry keys remain catalog IDs, not filenames.
     This template and unrelated or disabled tool files are never loaded. Workers
     receive the same registry, including private helpers, and use the same dispatcher.
     Tool-local helpers need no dependency-list entry. Do not rely on file paths in

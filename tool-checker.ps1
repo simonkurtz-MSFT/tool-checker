@@ -240,10 +240,16 @@ function Get-ToolDefinitionFiles {
     )
 
     foreach ($config in $ToolsConfiguration.Values | Where-Object { $_.Enabled } | Sort-Object Id) {
-        $toolPath = Join-Path $Directory "$($config.Id).ps1"
-        if (Test-Path -LiteralPath $toolPath -PathType Leaf) {
-            Get-Item -LiteralPath $toolPath
+        if (-not $config.Contains('ToolFile')) { continue }
+        if ($config.ToolFile -isnot [string] -or $config.ToolFile -notmatch '^[a-z0-9][a-z0-9._-]*\.ps1$') {
+            throw "Tool '$($config.Id)' requires ToolFile to be a .ps1 filename directly under Tools/."
         }
+        $toolPath = Join-Path $Directory $config.ToolFile
+        if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+            throw "Tool file '$($config.ToolFile)' configured for '$($config.Id)' was not found in Tools/."
+        }
+        $toolFile = Get-Item -LiteralPath $toolPath
+        [PSCustomObject]@{ Id = $config.Id; Name = $toolFile.Name; FullName = $toolFile.FullName }
     }
 }
 
@@ -255,7 +261,7 @@ foreach ($toolDefinitionFile in $script:ToolDefinitionFiles) {
     foreach ($definition in $toolAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] }) {
         $definitions[$definition.Name] = $definition.Extent.Text
     }
-    $script:ToolDefinitions[$toolDefinitionFile.BaseName] = $definitions
+    $script:ToolDefinitions[$toolDefinitionFile.Id] = $definitions
 }
 
 function Invoke-ToolEntryPoint {

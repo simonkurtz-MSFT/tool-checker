@@ -465,22 +465,23 @@ Describe 'Azure Developer CLI package version' {
 }
 
 Describe 'Tool definition loading' {
-    It 'resolves only enabled selected catalog files and ignores unrelated files' {
+    It 'resolves only explicitly declared enabled tool files without inferring filenames from IDs' {
         $directory = Join-Path $TestDrive 'tool-definitions'
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
         foreach ($fileName in @('nodejs.ps1', 'git.ps1', 'unselected.ps1', '_tool-template.ps1')) {
             Set-Content -LiteralPath (Join-Path $directory $fileName) -Value "throw 'Must not execute during discovery'"
         }
         $configuration = [ordered]@{
-            NodeJS = @{ Id = 'nodejs'; Enabled = $true }
-            Git = @{ Id = 'git'; Enabled = $false }
-            Standard = @{ Id = 'standard'; Enabled = $true }
+            NodeJS = @{ Id = 'different-id'; Enabled = $true; ToolFile = 'nodejs.ps1' }
+            Git = @{ Id = 'git'; Enabled = $false; ToolFile = 'missing.ps1' }
+            Standard = @{ Id = 'unselected'; Enabled = $true }
         }
 
         $files = @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $directory)
 
         $files.Count | Should Be 1
         $files[0].Name | Should Be 'nodejs.ps1'
+        $files[0].Id | Should Be 'different-id'
         $configuration.NodeJS.Enabled = $false
         @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $directory).Count | Should Be 0
     }
@@ -489,6 +490,63 @@ Describe 'Tool definition loading' {
         $configuration = @{ Git = @{ Id = 'git'; Enabled = $true } }
 
         @(Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory (Join-Path $TestDrive 'absent')).Count | Should Be 0
+    }
+
+    It 'rejects missing declared files instead of silently falling back' {
+        $configuration = @{ Probe = @{ Id = 'probe'; Enabled = $true; ToolFile = 'missing.ps1' } }
+
+        { Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $TestDrive } |
+            Should Throw "Tool file 'missing.ps1' configured for 'probe' was not found in Tools/."
+    }
+
+    It 'rejects invalid paths and the template as declared tool filenames' {
+        foreach ($fileName in @('', $null, '../nodejs.ps1', '..\nodejs.ps1', 'C:\nodejs.ps1', 'nested/nodejs.ps1', '_tool-template.ps1', 'nodejs.psm1', @('nodejs.ps1'))) {
+            $configuration = @{ Probe = @{ Id = 'probe'; Enabled = $true; ToolFile = $fileName } }
+
+            { Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $TestDrive } |
+                Should Throw "Tool 'probe' requires ToolFile to be a .ps1 filename directly under Tools/."
+        }
+    }
+
+    It 'registers and dispatches by catalog ID when the declared filename differs' {
+        $directory = Join-Path $TestDrive 'explicit-file-catalog'
+        $toolDirectory = Join-Path $directory 'Tools'
+        New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $scriptPath -Destination $directory
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Tools/nodejs.ps1') -Destination (Join-Path $toolDirectory 'node-runtime.ps1')
+        $catalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
+        $catalog.tools['probe-node'] = $catalog.tools['nodejs']
+        $catalog.tools.Remove('nodejs') | Out-Null
+        $catalog.tools['probe-node'].ToolFile = 'node-runtime.ps1'
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $directory 'tool-checker.json')
+        $selectionFile = Join-Path $directory 'selection.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=probe-node'
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile)
+                . $path -EnvFile $envFile -SkipUpdate
+                Assert-ToolConfigurations
+                function Test-CommandExists { $true }
+                function Get-CommandVersion { 'v22.1.0' }
+                Invoke-ToolEntryPoint -ToolId 'probe-node' -EntryPoint 'Test-Tool' -Arguments @{ Progress = '1/1' }
+                [PSCustomObject]@{
+                    RegistryIds = @($script:ToolDefinitions.Keys)
+                    LoadedFile = $script:ToolDefinitionFiles[0].Name
+                    Installed = $results.Tools['NodeJS'].Installed
+                }
+            }).AddArgument((Join-Path $directory 'tool-checker.ps1')).AddArgument($selectionFile)
+            $observed = @($session.Invoke())
+
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].RegistryIds.Count | Should Be 1
+            $observed[0].RegistryIds[0] | Should Be 'probe-node'
+            $observed[0].LoadedFile | Should Be 'node-runtime.ps1'
+            $observed[0].Installed | Should Be 'v22.1.0'
+        } finally {
+            $session.Dispose()
+        }
     }
 
     It 'does not load specialized tools into the main session or workers when only Git is selected' {

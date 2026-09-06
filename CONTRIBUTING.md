@@ -30,7 +30,8 @@ the tool, such as a tool that manages several installed release channels.
 5. Set `ProductionReleasesOnly` deliberately. Keep it enabled unless users are
    expected to track prerelease versions.
 6. Add or update focused Pester coverage. Put new custom checks in
-   `Tools/<catalog-id>.ps1`, starting from the tool-specific template below.
+   a file directly under `Tools/` and declare its filename with `ToolFile`,
+   starting from the tool-specific template below.
 7. Update the catalog ID list or other affected documentation in
    [README.md](README.md).
 
@@ -41,16 +42,20 @@ version that Tool Checker can compare consistently.
 ## Tool-specific file template
 
 Use [Tools/_tool-template.ps1](Tools/_tool-template.ps1) when extracting or adding
-tool-unique behavior. Name the implementation `Tools/<catalog-id>.ps1`, matching
-the exact catalog key. Keep specialized checks, parsing, refresh handlers, and
+tool-unique behavior. Prefer `Tools/<catalog-id>.ps1` and explicitly set
+`"ToolFile": "<catalog-id>.ps1"` in its catalog entry. Filenames may differ from
+catalog IDs; the loader never infers them. Keep specialized checks, parsing, refresh handlers, and
 action routines together; keep general functionality in
 [tool-checker.ps1](tool-checker.ps1). Standard entries without specialized
 behavior do not need a tool file.
 
 The template is scaffolding, not a registered tool. After catalog selection and
-defaults, the main script registers functions from existing `Tools/<catalog-id>.ps1` files
-for selected, enabled entries, in catalog-ID order. Unselected, disabled,
-uncatalogued, and template files are not loaded. Standard tools without a file
+defaults, the main script registers functions only from declared `ToolFile` files
+for selected, enabled entries, in catalog-ID order. `ToolFile` must be a .ps1
+filename directly under `Tools/`, not a path or the template. Invalid filenames
+and missing declared files fail startup. Registry keys remain catalog IDs.
+Unselected, disabled, undeclared, and template files are not loaded. Omit
+`ToolFile` when no specialized file is needed. Standard tools without a file
 continue through the shared framework. Files must define functions only.
 Parallel workers receive the same per-tool definition registry, so
 tool-local helpers do not need separate dependency-list entries. Shared worker

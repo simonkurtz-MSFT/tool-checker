@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# .NET SDK inventory and channel-aware update plans. All installed SDKs remain
+# visible; private per-version state and row coverage are owned by this tool.
 #region Private helpers
 function ConvertFrom-DotNetSDKList {
     param([Parameter(Mandatory)][array]$OutputLines)
@@ -12,6 +14,8 @@ function ConvertFrom-DotNetSDKList {
 }
 
 function Get-DotNetSDKInventory {
+    # A newer installed SDK can cover older rows in the same major; compute that
+    # once here so the generic renderer does not need .NET-specific comparisons.
     param(
         [Parameter(Mandatory)][array]$SdkRecords,
         [hashtable]$LatestSdkByChannel = @{},
@@ -45,7 +49,7 @@ function Get-DotNetSDKInventory {
         foreach ($version in $sorted) {
             $record = $SdkRecords | Where-Object Version -eq $version | Select-Object -First 1
             $dotNetSDKs[$version] = @{ Installed = $version; Latest = $latest; Path = $record.Path; HighestInstalled = $highest }
-            $tools[".NET SDK $version"] = @{ Installed = $version; Latest = $latest; HighestInstalled = $highest }
+            $tools[".NET SDK $version"] = @{ ToolId = 'dotnet-sdk'; ItemId = $version; Installed = $version; Latest = $latest; HighestInstalled = $highest; Covered = $latest -and [version]$highest -ge [version]$latest }
         }
     }
 
@@ -53,6 +57,8 @@ function Get-DotNetSDKInventory {
 }
 
 function Get-DotNetSDKReleasePlan {
+    # Separate servicing channels from newer-major announcements; do not promote
+    # uninstalled preview channels into suggested new-major upgrades.
     param(
         [Parameter(Mandatory)][array]$InstalledVersions,
         [Parameter(Mandatory)]$ReleasesIndex,
@@ -117,7 +123,7 @@ function Test-Tool {
         Write-Success "Installed .NET SDKs:"
         foreach ($record in $sdkRecords) { Write-Host "  - $($record.Version)" }
         $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords
-        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { (Get-ToolState 'dotnet-sdk')[$entry.Key] = $entry.Value }
         foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
 
         if ($SkipUpdate) { return }
@@ -154,10 +160,10 @@ function Test-Tool {
         }
 
         $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel -LatestSdkByMajor $latestSdkByMajor
-        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+        foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { (Get-ToolState 'dotnet-sdk')[$entry.Key] = $entry.Value }
         foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
 
-        # Newer major versions
+        # New-major suggestions on Windows require a version available in WinGet.
         $maxInstalledMajor = $releasePlan.MaxInstalledMajor
         $newerMajorVersions = @{}
         $newerMajors = @($releasePlan.NewerMajors)
@@ -176,7 +182,7 @@ function Test-Tool {
         if ($results.Updates -match '\.NET SDK') {
             foreach ($maj in $byMajor.Keys) {
                 $highest = $byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1
-                $latest  = $results.DotNetSDKs[$highest].Latest
+                $latest  = (Get-ToolState 'dotnet-sdk')[$highest].Latest
                 if ($latest -and $latest -ne "-" -and [version]$latest -gt [version]$highest) {
                     Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade Microsoft.DotNet.SDK.$maj --silent" -Type 'winget' -Details "$highest -> $latest"
                 }
@@ -207,7 +213,7 @@ function Refresh-ToolStatus {
     # and newly-installed patch releases show up.
     $staleKeys = @($results.Tools.Keys | Where-Object { $_ -like ".NET SDK*" })
     foreach ($k in $staleKeys) { $results.Tools.Remove($k) | Out-Null }
-    $results.DotNetSDKs.Clear()
+    (Get-ToolState 'dotnet-sdk').Clear()
 
     # Re-fetch latest-per-channel so Latest / HighestInstalled are accurate
     # in the summary table after an upgrade (fixes blank Latest column when
@@ -225,7 +231,7 @@ function Refresh-ToolStatus {
     }
 
     $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel
-    foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { $results.DotNetSDKs[$entry.Key] = $entry.Value }
+    foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { (Get-ToolState 'dotnet-sdk')[$entry.Key] = $entry.Value }
     foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
     $byMajor = $inventory.ByMajor
 
@@ -245,7 +251,7 @@ function Refresh-ToolStatus {
         $maj  = ($from -split '\.')[0]
         if (-not $byMajor[$maj]) { return $true }
         $hi   = $byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1
-        $lat  = $results.DotNetSDKs[$hi].Latest
+        $lat  = (Get-ToolState 'dotnet-sdk')[$hi].Latest
         -not ($lat -and [version]$hi -ge [version]$lat)
     })
 }

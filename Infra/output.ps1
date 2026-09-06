@@ -1,3 +1,23 @@
+# Console palette and rendering only. Loading this file defines helpers without
+# changing caller state; bootstrap explicitly initializes colors before rendering.
+function Initialize-ConsoleColors {
+    # Target the immediate caller, whether bootstrap runs normally or is dot-sourced.
+    # Workers receive a snapshot of these variables and do not initialize them again.
+    $palette = @{
+        ColorReset = "`e[0m"
+        ColorGreen = "`e[32m"
+        ColorYellow = "`e[33m"
+        ColorRed = "`e[31m"
+        ColorCyan = "`e[36m"
+        ColorBlue = "`e[34m"
+        ColorOrange = "`e[38;5;208m"
+    }
+    foreach ($color in $palette.GetEnumerator()) {
+        Set-Variable -Name $color.Key -Value $color.Value -Scope 1
+    }
+}
+
+# Warning/error helpers intentionally write to the host, not PowerShell error streams.
 function Write-Header  { param([string]$Text, [string]$Progress = "")
     if ($Progress) { Write-Host "`n$ColorBlue► [$Progress] $Text$ColorReset" }
     else           { Write-Host "`n$ColorBlue► $Text$ColorReset" }
@@ -23,7 +43,7 @@ function Get-ApplicationBannerLines {
 function Show-UpdateLegend {
     if ($results.Updates.Count -eq 0) { return }
 
-    Write-Host "  npm release cooldown: $script:NpmUpdateCooldownDays full days"
+    Write-Host "  npm release cooldown: $script:ReleaseCooldownDays full days"
     Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
 }
 
@@ -36,16 +56,8 @@ function Show-ResultsTable {
         else { $_.Latest.Length }
     } | Measure-Object -Maximum).Maximum
     $ageLabels = @($results.Tools.Values | Where-Object { $null -ne $_.AgeDays } | ForEach-Object { "$($_.AgeDays)d" })
-    $ageLabels += @($results.GlobalNpmPackageUpdates | Where-Object { $null -ne $_.AgeDays } | ForEach-Object { "$($_.AgeDays)d" })
     $maxAge = if ($ageLabels.Count -gt 0) { ($ageLabels | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum } else { 0 }
     if ($maxAge -lt 3) { $maxAge = 3 }
-
-    if ($results.GlobalNpmPackageUpdates.Count -gt 0) {
-        $pn = ($results.GlobalNpmPackageUpdates | ForEach-Object { ("  "+$_.Name).Length } | Measure-Object -Maximum).Maximum
-        $pi = ($results.GlobalNpmPackageUpdates | ForEach-Object { $(if ($_.Installed) { $_.Installed } elseif ($_.Current) { $_.Current } else { "-" }).Length } | Measure-Object -Maximum).Maximum
-        $pl = ($results.GlobalNpmPackageUpdates | ForEach-Object { $(if ($_.Latest) { $_.Latest } else { "-" }).Length } | Measure-Object -Maximum).Maximum
-        if ($pn -gt $maxName) { $maxName = $pn }; if ($pi -gt $maxInst) { $maxInst = $pi }; if ($pl -gt $maxLat) { $maxLat = $pl }
-    }
 
     $cmds   = $results.Tools.GetEnumerator() | ForEach-Object { Get-UpdateCommand -ToolName $_.Key -Installed $_.Value.Installed -Latest $_.Value.Latest }
     $maxUpd = ($cmds | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
@@ -67,45 +79,32 @@ function Show-ResultsTable {
     Write-Host "$ColorCyan$hdr$ColorReset"
     Write-Host ("  {0}  {1}  {2}  {3}  {4}  {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxLat),("-"*$maxAge),("-"*$maxUpd),("-"*$maxUrl))
 
-    # Sort: Azure CLI + extensions grouped, .NET SDKs descending, Python descending
-    $sorted = $results.Tools.GetEnumerator() | Sort-Object { Get-ToolSortKey $_.Key }
+    # Catalog sort metadata keeps related rows together without product-name dispatch.
+    $sorted = $results.Tools.GetEnumerator() | Sort-Object {
+        $config = Get-OwnedConfiguration -ToolId (Get-ResultToolId -Name $_.Key)
+        Get-ToolSortKey -ToolName $_.Key -Configuration $config -Row $_.Value
+    }
 
     $sorted | ForEach-Object {
         $inst = $_.Value.Installed
         $installedUnknown = [string]::IsNullOrWhiteSpace($inst) -or $inst -in @('unknown', 'Unable to retrieve version')
         $latestUnknown = -not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Value.Latest)
         $lat = if ($latestUnknown) { "unknown" } elseif ($_.Value.Latest) { $_.Value.Latest } else { "-" }
-        $currentOrNewer = -not $latestUnknown -and $lat -ne "-" -and (Compare-SemanticVersions $inst $lat) -ge 0
+        $currentOrNewer = -not $latestUnknown -and $lat -ne "-" -and (Compare-OwnedToolVersions -Version1 $inst -Version2 $lat -ToolName $_.Key) -ge 0
         $age  = if (-not $currentOrNewer -and $null -ne $_.Value.AgeDays) { "$($_.Value.AgeDays)d" } else { "-" }
         $cmd  = Get-UpdateCommand -ToolName $_.Key -Installed $inst -Latest $_.Value.Latest
         # Only show release notes for tools with a pending update/install
         $url  = if ($cmd -or $_.Key -in $actionableNames) { Get-ReleaseNotesUrl -ToolName $_.Key } else { "" }
-        $hi   = $_.Value.HighestInstalled
-        $covered = -not $latestUnknown -and $hi -and [version]$hi -ge [version]$lat
+        $covered = $_.Value.Covered
         $clr  = if ($_.Key -in $results.UpdateFailed) { $ColorRed }
             elseif ($_.Value.CheckTimedOut) { $ColorRed }
             elseif ($installedUnknown -or $latestUnknown) { $ColorYellow }
             elseif ($lat -eq "-" -or $currentOrNewer -or $covered) { $ColorGreen }
-            elseif ($_.Key -in $results.MaturityBlockedUpdates.Name) { $ColorOrange }
+            elseif ($_.Key -in $results.MaturityBlockedUpdates.Name -or ($_.Value.ContainsKey('Installable') -and -not $_.Value.Installable)) { $ColorOrange }
                 else { $ColorYellow }
         $row  = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $_.Key,$inst,$lat,$age,$cmd,$url).TrimEnd()
         Write-Host "$clr$row$ColorReset"
 
-        # Inline ncu global package sub-rows
-        if ($_.Key -eq "ncu" -and $results.GlobalNpmPackageUpdates.Count -gt 0) {
-            foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-                $pn = "  $($pkg.Name)"
-                $pi = if ($pkg.Installed) { $pkg.Installed } elseif ($pkg.Current) { $pkg.Current } else { "-" }
-                $pl = if ($pkg.Latest) { $pkg.Latest } else { "-" }
-                $packageCurrentOrNewer = $pl -ne "-" -and $pi -ne "?" -and (Compare-SemanticVersions $pi $pl) -ge 0
-                $pa = if (-not $packageCurrentOrNewer -and $null -ne $pkg.AgeDays) { "$($pkg.AgeDays)d" } else { "-" }
-                    $pc = if ($pi -eq $pl) { $ColorGreen }
-                        elseif (-not $pkg.Installable) { $ColorOrange }
-                        else { $ColorYellow }
-                $row = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $pn,$pi,$pl,$pa,"","").TrimEnd()
-                Write-Host "$pc$row$ColorReset"
-            }
-        }
     }
     Write-Host ""
 }
@@ -173,17 +172,17 @@ function Show-ResultsSummary {
         }
     }
     if ($AvailableUpdateNames.Count -gt 0) {
-        Write-Host "`n$ColorYellow⚠ Updates Available ($($AvailableUpdateNames.Count)):$ColorReset"
+        Write-Host "`n$ColorYellow⚠  Updates Available ($($AvailableUpdateNames.Count)):$ColorReset"
         $AvailableUpdateNames | ForEach-Object { Write-Host "  - $_" }
     }
     if ($results.MaturityBlockedUpdates.Count -gt 0) {
-        Write-Host "`n$ColorOrange⚠ Updates Not Yet Available ($($results.MaturityBlockedUpdates.Count)):$ColorReset"
+        Write-Host "`n$ColorOrange⚠  Updates Not Yet Available ($($results.MaturityBlockedUpdates.Count)):$ColorReset"
         $results.MaturityBlockedUpdates | ForEach-Object {
             Write-Host "  - $($_.Name): release is $($_.AgeDays)d old; available at $($_.RequiredAgeDays)d"
         }
     }
     if ($results.Errors.Count -gt 0) {
-        Write-Host "`n$ColorRed⚠ Errors ($($results.Errors.Count)):$ColorReset"
+        Write-Host "`n$ColorRed⚠  Errors ($($results.Errors.Count)):$ColorReset"
         $results.Errors | ForEach-Object { Write-Host "  - $_" }
     }
     Write-Host "`n$ColorCyan═══════════════════════════════════════$ColorReset`n"

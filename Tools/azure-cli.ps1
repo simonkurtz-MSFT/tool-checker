@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Refresh Azure CLI's installed version from its JSON output after an approved action.
+# Initial checks stay catalog-driven; the latest known release is not overwritten here.
 #region Public entry points
 function Refresh-ToolStatus {
     param([string]$ToolName)

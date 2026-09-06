@@ -1,3 +1,6 @@
+# Core regression suite for configuration, releases, rendering, dispatch, and approval.
+# Dot-source bootstrap with an absent env file; individual tests supply mocked or
+# synthetic external operations rather than running the real inventory/install workflow.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
 $testEnvFile = Join-Path ([System.IO.Path]::GetTempPath()) "tool-checker-tests-$([guid]::NewGuid()).env"
 . $scriptPath -EnvFile $testEnvFile
@@ -178,8 +181,7 @@ Describe 'Result state' {
         $first = New-ToolCheckResults
         $second = New-ToolCheckResults
         $expectedKeys = @(
-            'AvailableUpdates', 'DotNetSDKs', 'Errors', 'GlobalNpmPackageUpdates',
-            'GlobalNpmUpdateCommand', 'MaturityBlockedUpdates', 'NotInstalled',
+            'AvailableUpdates', 'Errors', 'ToolState', 'MaturityBlockedUpdates', 'NotInstalled',
             'RegistryChecks', 'Tools', 'UpdateFailed', 'Updates'
         ) | Sort-Object
 
@@ -189,7 +191,7 @@ Describe 'Result state' {
 
         $second.Tools.Count | Should Be 0
         $second.Errors.Count | Should Be 0
-        $second.GlobalNpmUpdateCommand | Should Be 'ncu -g -u --loglevel=error'
+        $second.ToolState.Count | Should Be 0
     }
 }
 
@@ -358,7 +360,11 @@ Describe 'Update command resolution' {
     }
 
     It 'pins an npm update to the checked version' {
-        $results.Tools['ncu'] = @{ Installed = '20.0.0'; Latest = '21.0.0'; AgeDays = $script:NpmUpdateCooldownDays }
+        $results.Tools['ncu'] = @{ Installed = '20.0.0'; Latest = '21.0.0'; AgeDays = $script:ReleaseCooldownDays }
+        Register-ReleasePlan -ToolName 'ncu' -InstalledVersion '20.0.0' -Plan @{
+            Latest = '21.0.0'; Installable = $true; VersionLabel = 'latest version'
+            Command = 'npm install -g npm-check-updates@21.0.0 --loglevel=error'; Type = 'npm-global'
+        }
 
         Get-UpdateCommand -ToolName 'ncu' -Installed '20.0.0' -Latest '21.0.0' |
             Should Be 'npm install -g npm-check-updates@21.0.0 --loglevel=error'
@@ -456,6 +462,29 @@ Describe 'Azure Developer CLI package version' {
 
         Get-InstalledVersionFromOutput -ToolName 'Azure Developer CLI' -Output 'azd version 1.33.0' |
             Should Be '1.33.0'
+    }
+
+    It 'does not offer an MSI encoding-only update after the reported inventory failure' -Skip:(-not $IsWindows) {
+        Mock winget.exe { $global:LASTEXITCODE = -2147020496; 'Inventory failed' }
+
+        Test-StandardTool -ToolName 'Azure Developer CLI'
+
+        $results.Tools['Azure Developer CLI'].Installed | Should Be '1.33.0'
+        $results.Tools['Azure Developer CLI'].Latest | Should Be '1.33.100'
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+        (Get-UpdateCommand -ToolName 'Azure Developer CLI' -Installed '1.33.0' -Latest '1.33.100') | Should Be ''
+        (Compare-OwnedToolVersions -ToolName 'Azure Developer CLI' -Version1 '1.33.0' -Version2 '1.33.100') | Should Be 0
+    }
+
+    It 'preserves a genuine CLI patch update after inventory failure' -Skip:(-not $IsWindows) {
+        Mock winget.exe { $global:LASTEXITCODE = -2147020496; 'Inventory failed' }
+        Mock Get-WingetLatestVersion { '1.33.200' }
+
+        Test-StandardTool -ToolName 'Azure Developer CLI'
+
+        $results.AvailableUpdates.Count | Should Be 1
+        $results.AvailableUpdates[0].Details | Should Be '1.33.0 -> 1.33.200'
     }
 
     It 'includes the installed-package lookup in parallel checks' {
@@ -664,7 +693,7 @@ Describe 'Tool definition loading' {
                 })
                 $region.Count | Should Be 1
                 if ($region[0].Groups[1].Value -eq 'Public entry points') {
-                    $definition.Name | Should Match '^(Test-Tool|Refresh-ToolStatus|Invoke-Tool(Install|Update))$'
+                    $definition.Name | Should Match '^(Test-Tool|Refresh-ToolStatus|Invoke-Tool(Install|Update)|Get-ToolOutcome|Compare-ToolVersions)$'
                 }
             }
         }
@@ -860,8 +889,8 @@ Describe '.NET SDK tool integration' {
 
         Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
 
-        $results.DotNetSDKs.Count | Should Be 2
-        $results.DotNetSDKs['8.0.100'].HighestInstalled | Should Be '8.0.301'
+        (Get-ToolState 'dotnet-sdk').Count | Should Be 2
+        (Get-ToolState 'dotnet-sdk')['8.0.100'].HighestInstalled | Should Be '8.0.301'
         $results.Tools['.NET SDK 8.0.100'].Latest | Should Be '8.0.410'
         $results.Tools['.NET SDK 8.0.301'].Latest | Should Be '8.0.410'
         $results.Updates -contains '.NET SDK: 8.0.301 -> 8.0.410' | Should Be $true
@@ -887,7 +916,7 @@ Describe '.NET SDK tool integration' {
 
         Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
 
-        $results.DotNetSDKs.Count | Should Be 1
+        (Get-ToolState 'dotnet-sdk').Count | Should Be 1
         $results.Tools['.NET SDK 8.0.301'].Installed | Should Be '8.0.301'
         $results.Tools['.NET SDK 8.0.301'].Latest | Should Be ''
         $results.Updates.Count | Should Be 0
@@ -906,9 +935,9 @@ Describe '.NET SDK tool integration' {
 
         foreach ($toolName in @('.NET SDK', '.NET SDK 8.0.301')) {
             $results = New-ToolCheckResults
-            $results.Tools['.NET SDK 8.0.301'] = @{ Installed = '8.0.301'; Latest = '8.0.410' }
+            $results.Tools['.NET SDK 8.0.301'] = @{ ToolId = 'dotnet-sdk'; Installed = '8.0.301'; Latest = '8.0.410' }
             $results.Tools['NodeJS'] = @{ Installed = '22.1.0'; Latest = '22.1.1' }
-            $results.DotNetSDKs['8.0.301'] = @{ Installed = '8.0.301'; Latest = '8.0.410' }
+            (Get-ToolState 'dotnet-sdk')['8.0.301'] = @{ Installed = '8.0.301'; Latest = '8.0.410' }
             $results.Updates = @('.NET SDK: 8.0.301 -> 8.0.410', '.NET SDK: Major version 9 available', 'NodeJS')
             $results.AvailableUpdates = @(
                 @{ Name = '.NET SDK 8.0.301' },
@@ -919,8 +948,8 @@ Describe '.NET SDK tool integration' {
             Refresh-ToolVersion -ToolName $toolName | Should Be $true
 
             $results.Tools.ContainsKey('.NET SDK 8.0.301') | Should Be $false
-            $results.DotNetSDKs.ContainsKey('8.0.301') | Should Be $false
-            $results.DotNetSDKs['8.0.410'].HighestInstalled | Should Be '8.0.410'
+            (Get-ToolState 'dotnet-sdk').ContainsKey('8.0.301') | Should Be $false
+            (Get-ToolState 'dotnet-sdk')['8.0.410'].HighestInstalled | Should Be '8.0.410'
             $results.Tools['.NET SDK 8.0.410'].Latest | Should Be '8.0.410'
             $results.Tools['NodeJS'].Installed | Should Be '22.1.0'
             $results.Updates.Count | Should Be 2
@@ -936,10 +965,11 @@ Describe '.NET SDK tool integration' {
         function dotnet { '8.0.410 [C:\dotnet\sdk]' }
         Mock Test-CommandExists { $true }
         Mock Invoke-RestMethod { throw 'Synthetic offline response' }
+        $results.Tools['.NET SDK 8.0.301'] = @{ ToolId = 'dotnet-sdk'; Installed = '8.0.301'; Latest = '8.0.410' }
 
         Refresh-ToolVersion -ToolName '.NET SDK 8.0.301' | Should Be $true
 
-        $results.DotNetSDKs.Count | Should Be 1
+        (Get-ToolState 'dotnet-sdk').Count | Should Be 1
         $results.Tools['.NET SDK 8.0.410'].Installed | Should Be '8.0.410'
         $results.Tools['.NET SDK 8.0.410'].Latest | Should Be ''
     }
@@ -1104,7 +1134,7 @@ Describe 'Action execution' {
 
     It 'dispatches direct Node updates through the verified installer' {
         Mock Invoke-ToolEntryPoint { @{ Output = 'done'; ExitCode = 0 } }
-        $action = @{ Name = 'NodeJS'; Command = 'Node.js MSI'; Type = 'node-direct'; Version = '26.8.1' }
+        $action = @{ Name = 'NodeJS'; ToolId = 'nodejs'; Command = 'Node.js MSI'; Type = 'node-direct'; Executor = 'tool'; EntryPoint = 'Invoke-ToolUpdate'; Arguments = @{ Version = '26.8.1' }; ExecutionMode = 'CurrentSession' }
 
         $execution = Invoke-ActionCommand -Action $action
 
@@ -1121,7 +1151,7 @@ Describe 'Action execution' {
     }
 
     It 'classifies a WinGet no-update response as a retryable failure' {
-        $action = @{ Name = 'Example CLI'; Command = 'winget upgrade Example.CLI'; Type = 'winget' }
+        $action = @{ Name = 'Example CLI'; Command = 'winget upgrade Example.CLI'; Type = 'winget'; OutcomePackageManager = 'winget.ps1' }
 
         Complete-UpdateExecution -Action $action -Execution @{ Output = 'No applicable upgrade found'; ExitCode = 1 } | Should Be $false
         $results.UpdateFailed[0] | Should Be 'Example CLI'
@@ -1145,7 +1175,7 @@ Describe 'Action execution' {
         $results.NotInstalled = @(@{ Name = 'Missing CLI' })
         $toolsConfig['Missing CLI'] = @{ Command = 'missing-cli' }
         Mock Test-CommandExists { $false }
-        $action = @{ Name = 'Missing CLI'; Command = 'winget install Missing.CLI'; Type = 'install' }
+        $action = @{ Name = 'Missing CLI'; Command = 'winget install Missing.CLI'; Type = 'install'; OutcomePackageManager = 'winget.ps1' }
 
         Complete-InstallExecution -Action $action -Execution @{ Output = 'No applicable upgrade found'; ExitCode = 1 } | Should Be $false
 
@@ -1185,7 +1215,7 @@ Describe 'Action execution' {
     It 'uses shared dispatch and completion for direct force-mode updates' {
         Mock Invoke-ActionCommand { @{ Output = 'done'; ExitCode = 0 } }
         Mock Complete-UpdateExecution { $true }
-        $update = @{ Name = 'NodeJS'; Command = 'Node.js MSI'; Type = 'node-direct'; Version = '26.8.1' }
+        $update = @{ Name = 'NodeJS'; ToolId = 'nodejs'; Command = 'Node.js MSI'; Type = 'node-direct'; Executor = 'tool'; EntryPoint = 'Invoke-ToolUpdate'; Arguments = @{ Version = '26.8.1' }; ExecutionMode = 'CurrentSession' }
 
         Invoke-ParallelUpdates -Updates @($update)
 
@@ -1237,49 +1267,47 @@ Describe 'Parallel check orchestration' {
 
     It 'merges a completed check result into shared state' {
         $results.Tools = @{}
-        $results.DotNetSDKs = @{}
+        $results.ToolState['dotnet-sdk'] = @{}
         $results.NotInstalled = @()
         $results.Updates = @()
         $results.Errors = @()
         $results.UpdateFailed = @()
         $results.AvailableUpdates = @()
         $results.MaturityBlockedUpdates = @()
-        $results.GlobalNpmPackageUpdates = @()
-        $results.GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
+        (Get-ToolState 'npm-global-packages').Packages = @()
+        (Get-ToolState 'npm-global-packages').UpdateCommand = 'ncu -g -u --loglevel=error'
         $checkResult = @{
             Output = @()
             Tools = @{ 'Example CLI' = @{ Installed = '1.0.0'; Latest = '1.1.0' } }
-            DotNetSDKs = @{ '10.0.100' = @{ Major = '10' } }
+            ToolState = @{ 'dotnet-sdk' = @{ '10.0.100' = @{ Major = '10' } }; 'npm-global-packages' = @{ Packages = @(); UpdateCommand = 'npm update command' } }
             NotInstalled = @('Missing CLI')
             Updates = @('Example CLI')
             Errors = @()
             UpdateFailed = @()
             AvailableUpdates = @(@{ Name = 'Example CLI' })
             MaturityBlockedUpdates = @()
-            GlobalNpmPackageUpdates = @()
-            GlobalNpmUpdateCommand = 'npm update command'
         }
 
         Merge-ParallelCheckResult -CheckResult $checkResult
 
         $results.Tools['Example CLI'].Installed | Should Be '1.0.0'
-        $results.DotNetSDKs.ContainsKey('10.0.100') | Should Be $true
+        (Get-ToolState 'dotnet-sdk').ContainsKey('10.0.100') | Should Be $true
         $results.Updates[0] | Should Be 'Example CLI'
         $results.AvailableUpdates[0].Name | Should Be 'Example CLI'
-        $results.GlobalNpmUpdateCommand | Should Be 'npm update command'
+        (Get-ToolState 'npm-global-packages').UpdateCommand | Should Be 'npm update command'
     }
 
     It 'runs and merges a network-free check through the runspace pool' {
         $results.Tools = @{}
-        $results.DotNetSDKs = @{}
+        $results.ToolState['dotnet-sdk'] = @{}
         $results.NotInstalled = @()
         $results.Updates = @()
         $results.Errors = @()
         $results.UpdateFailed = @()
         $results.AvailableUpdates = @()
         $results.MaturityBlockedUpdates = @()
-        $results.GlobalNpmPackageUpdates = @()
-        $results.GlobalNpmUpdateCommand = 'ncu -g -u --loglevel=error'
+        (Get-ToolState 'npm-global-packages').Packages = @()
+        (Get-ToolState 'npm-global-packages').UpdateCommand = 'ncu -g -u --loglevel=error'
         $checks = @(
             @{
                 Name = 'Synthetic CLI'
@@ -1348,6 +1376,7 @@ Describe 'Cooldown configuration' {
         Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Infra') -Destination $cooldownDirectory -Recurse -Force
         $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
+        $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')
     }
 
     It 'uses catalog <CatalogDays> and runtime <OverrideDays> consistently in the main session and workers' -TestCases @(
@@ -1374,7 +1403,7 @@ Describe 'Cooldown configuration' {
                     }
                     $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion '1.0.0' -MaximumVersion '1.1.0'
                     $results.Tools['Cooldown probe'] = @{
-                        Days = $script:NpmUpdateCooldownDays
+                        Days = $script:ReleaseCooldownDays
                         Installable = $null -ne $release -and $release.Installable
                     }
                 }
@@ -1452,7 +1481,7 @@ Describe 'npm release selection' {
     }
 
     It 'requires eight full days before a release completes the cooldown' {
-        $script:NpmUpdateCooldownDays | Should Be 8
+        $script:ReleaseCooldownDays | Should Be 8
         $apiData = [PSCustomObject]@{
             versions = [PSCustomObject]@{
                 '1.2.0' = @{}

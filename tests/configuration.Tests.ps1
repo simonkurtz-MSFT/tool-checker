@@ -1,3 +1,5 @@
+# Configuration loading/snapshot contracts using temporary catalog and env fixtures.
+# Isolated sessions verify that readers do not load tools or replace caller state.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
 $configurationPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Infra/configuration.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "configuration-tests-$([guid]::NewGuid()).env")
@@ -15,12 +17,34 @@ Describe 'Configuration infrastructure' {
         @(& { . $configurationPath } *>&1).Count | Should Be 0
     }
 
-    It 'fails clearly for missing infrastructure while Version remains independent' {
-        $appRoot = Join-Path $TestDrive 'missing-configuration'
+    It 'fails clearly for missing <Infrastructure> infrastructure while Version remains independent' -TestCases @(
+        @{ Infrastructure = 'configuration' }
+        @{ Infrastructure = 'output' }
+        @{ Infrastructure = 'results' }
+        @{ Infrastructure = 'runtime' }
+        @{ Infrastructure = 'versions' }
+        @{ Infrastructure = 'checks' }
+        @{ Infrastructure = 'actions' }
+        @{ Infrastructure = 'parallel' }
+        @{ Infrastructure = 'package-managers' }
+        @{ Infrastructure = 'registry' }
+    ) {
+        param($Infrastructure)
+
+        $appRoot = Join-Path $TestDrive "missing-$Infrastructure"
         $null = New-Item -ItemType Directory -Path $appRoot
         Copy-Item $scriptPath -Destination $appRoot
+        Copy-Item (Join-Path (Split-Path $scriptPath) 'Infra') -Destination $appRoot -Recurse
+        $missingPath = Join-Path $appRoot "Infra/$Infrastructure.ps1"
+        Remove-Item -LiteralPath $missingPath
         $copiedScript = Join-Path $appRoot 'tool-checker.ps1'
-        { . $copiedScript -EnvFile (Join-Path $appRoot 'missing.env') } | Should Throw 'Configuration infrastructure file not found'
+        $message = try {
+            & { . $copiedScript -EnvFile (Join-Path $appRoot 'missing.env') }
+        } catch { $_.Exception.Message }
+        $label = (Get-Culture).TextInfo.ToTitleCase($Infrastructure)
+        $loadedScriptRoot = Split-Path (Get-Command -Name $copiedScript).ScriptBlock.File
+        $expectedPath = Join-Path $loadedScriptRoot "Infra/$Infrastructure.ps1"
+        $message | Should Be "$label infrastructure file not found: $expectedPath"
         (& $copiedScript -Version) | Should Be $script:ToolCheckerVersion
     }
 
@@ -130,11 +154,11 @@ Describe 'Configuration snapshots' {
         $beforeTools = ConvertTo-Json $toolsConfig -Depth 10 -Compress
         $beforeEnvironment = ConvertTo-Json $script:RegistryEnvironment -Depth 10 -Compress
         $beforeDefinitions = ConvertTo-Json $script:ToolDefinitions -Depth 5 -Compress
-        $beforeCooldown = $script:NpmUpdateCooldownDays
+        $beforeCooldown = $script:ReleaseCooldownDays
         $null = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -HasCooldownOverride $true -CooldownDays 3
         (ConvertTo-Json $toolsConfig -Depth 10 -Compress) | Should Be $beforeTools
         (ConvertTo-Json $script:RegistryEnvironment -Depth 10 -Compress) | Should Be $beforeEnvironment
         (ConvertTo-Json $script:ToolDefinitions -Depth 5 -Compress) | Should Be $beforeDefinitions
-        $script:NpmUpdateCooldownDays | Should Be $beforeCooldown
+        $script:ReleaseCooldownDays | Should Be $beforeCooldown
     }
 }

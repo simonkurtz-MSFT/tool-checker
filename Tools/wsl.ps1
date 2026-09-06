@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Windows-only WSL inventory and GitHub release selection. Normalize packaging
+# suffixes and plan updates through shared helpers; the checker never runs wsl --update.
 #region Public entry points
 function Test-Tool {
     param([string]$Progress)
@@ -50,6 +52,7 @@ function Test-Tool {
             }
         }
     }
+    # Prefer the highest version, not the most recently published older servicing release.
     $latestVersionedRelease = $versionedReleases |
         Sort-Object -Property @(
             @{ Expression = { $_.SemanticVersion }; Descending = $true }

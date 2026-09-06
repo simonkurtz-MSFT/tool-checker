@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Enumerate installed az extensions as separate rows and plan per-extension updates.
+# Dispatch assigns this tool's ownership; no extension is changed during checking.
 #region Public entry points
 function Test-Tool {
     param([string]$Progress)
@@ -35,6 +37,7 @@ function Test-Tool {
                 $cv = ($_.version -split '\s+')[0]
                 [PSCustomObject]@{ version = $cv }
             } | Where-Object { Test-IsProductionVersion $_.version }
+            # list-versions is consumed oldest-first; strip annotations before comparison.
             $latest = if ($config.ProductionReleasesOnly) {
                 $stable | Select-Object -Last 1
             } else {
@@ -43,7 +46,7 @@ function Test-Tool {
             if (-not $latest) { continue }
 
             $results.Tools["  az ext: $($ext.name)"].Latest = $latest.version
-            $updateName = "Azure Extension: $($ext.name)"
+            $updateName = "  az ext: $($ext.name)"
             $updateCommand = "az extension update --name $($ext.name) --only-show-errors"
             if (Register-ToolUpdate -Name $updateName -InstalledVersion $ext.version -LatestVersion $latest.version -Command $updateCommand -Type 'az-extension') {
                 Write-Warning "  Extension '$($ext.name)' has update available: $($ext.version) -> $($latest.version)"

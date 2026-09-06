@@ -1,7 +1,17 @@
 #Requires -Version 7.0
 
+# uv-specific failure diagnostics and approved Windows reinstall behavior.
+# Standard version checking stays catalog-driven; loading this file changes nothing.
 #region Public entry points
+function Get-ToolOutcome {
+    param([object]$Action, [int]$ExitCode, [string]$OutputText)
+    $reason = if ($OutputText -match 'being used by another process|Access is denied|os error 32|failed to replace|failed to rename') { 'uv.exe is in use' } else { "'uv self update' failed" }
+    @{ Status = 'Failed'; Message = "Failed: $($Action.Name) - $reason | Command: $($Action.Command) | Exit code: $ExitCode" }
+}
+
 function Invoke-ToolInstall {
+    # This approved action removes detected pipx/cargo installs and known user-bin
+    # copies before installing through WinGet, preventing stale executables on PATH.
     $output = [System.Collections.Generic.List[string]]::new()
 
     try {
@@ -21,7 +31,7 @@ function Invoke-ToolInstall {
             if ($cargoOutput) { $output.Add($cargoOutput.Trim()) }
         }
 
-        $uninstall = Invoke-ToolCommand -Command 'winget uninstall --id astral-sh.uv -e --silent --disable-interactivity' -Type 'winget'
+        $uninstall = Invoke-WingetCommand -Command 'winget uninstall --id astral-sh.uv -e --silent --disable-interactivity' -Type 'winget'
         if ($uninstall.Output) { $output.Add($uninstall.Output) }
 
         foreach ($binDirectory in @(
@@ -37,7 +47,7 @@ function Invoke-ToolInstall {
             }
         }
 
-        $install = Invoke-ToolCommand -Command 'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force' -Type 'winget'
+        $install = Invoke-WingetCommand -Command 'winget install --id astral-sh.uv -e --source winget --silent --disable-interactivity --force' -Type 'winget'
         if ($install.Output) { $output.Add($install.Output) }
         return @{ Output = ($output -join "`n"); ExitCode = $install.ExitCode }
     } catch {

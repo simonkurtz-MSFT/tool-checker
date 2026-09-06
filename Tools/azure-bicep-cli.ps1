@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Refresh the Bicep CLI managed by az, not a standalone bicep executable.
+# Parse the catalog regex and update Installed only, preserving the checked Latest.
 #region Public entry points
 function Refresh-ToolStatus {
     param([string]$ToolName)

@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Python runtime inventory, separate from the install-manager package itself.
+# Prefer py-managed channels; fall back to python/python3 and platform release sources.
 #region Public entry points
 function Refresh-ToolStatus {
     param([string]$ToolName)
@@ -53,6 +55,8 @@ function Test-Tool {
 
 #region Private helpers
 function ConvertFrom-PythonLauncherList {
+    # Accept both descriptive manager rows and legacy -V: rows. Online suffixes
+    # become comparable patch versions; installed suffixes are preserved for display.
     param(
         [Parameter(Mandatory)][array]$OutputLines,
         [switch]$Online
@@ -83,6 +87,7 @@ function ConvertFrom-PythonLauncherList {
 }
 
 function Get-PythonLauncherUpdatePlan {
+    # Patch installed channels independently; a newer channel is advisory, not an install.
     param(
         [Parameter(Mandatory)][array]$InstalledVersions,
         [Parameter(Mandatory)][array]$AvailableVersions

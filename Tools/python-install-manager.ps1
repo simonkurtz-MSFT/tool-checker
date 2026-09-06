@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Check the Windows Python Install Manager Appx package, not its managed runtimes.
+# Use package versions for the WinGet comparison; runtime inventory lives in python.ps1.
 #region Public entry points
 function Test-Tool {
     param([string]$Progress)

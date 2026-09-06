@@ -1,3 +1,5 @@
+# Specialized tool integration: select tools individually and exercise real workers
+# with synthetic commands/API responses, including check-only and refreshed-row behavior.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
 
 Describe 'Extracted tool workers' {
@@ -25,6 +27,7 @@ Describe 'Extracted tool workers' {
                 . $path -EnvFile $selectionFile -SkipUpdate:$checkOnly
                 $checks = @(@{
                     Name = 'Synthetic tool'
+                    # Define fakes inside the worker; parent-session Pester mocks do not cross runspaces.
                     Block = {
                         function Test-CommandExists { $true }
                         function Get-CommandVersion { 'PowerShell 1.0.0' }
@@ -95,7 +98,7 @@ Describe 'Extracted tool workers' {
                 $result.AvailableUpdates.Count | Should Be 0
             } else {
                 if ($Row) { $result.Tools[$Row].Installed | Should Be $Installed }
-                else { $result.GlobalNpmPackageUpdates[0].Current | Should Be $Installed }
+                else { $result.ToolState['npm-global-packages'].Packages[0].Current | Should Be $Installed }
                 if (-not $CheckOnly -and $result.AvailableUpdates.Count -ne 1) {
                     Write-Host ($session.Streams.Information | Out-String)
                 }
@@ -158,17 +161,18 @@ Describe 'Extracted refresh and install handlers' {
         Mock Test-CommandExists { $true }
         function py { }
         Mock py { '3.12[-64] Python 3.12.2' }
-        $results.Tools['Python 3.12'] = @{ Installed = '3.12.1'; Latest = '3.12.2' }
+        $results.Tools['Python 3.12'] = @{ ToolId = 'python'; Installed = '3.12.1'; Latest = '3.12.2' }
         Refresh-ToolVersion -ToolName 'Python 3.12' | Should Be $true
         $results.Tools['Python 3.12'].Installed | Should Be '3.12.2'
     }
 
     It 'refreshes a global package through its owning tool' {
         Mock Get-GlobalNpmInstalledVersion { '2.0.0' }
-        $results.GlobalNpmPackageUpdates = @(@{ Name = 'example'; Current = '1.0.0'; Latest = '2.0.0' })
+        (Get-ToolState 'npm-global-packages').Packages = @(@{ Name = 'example'; Current = '1.0.0'; Latest = '2.0.0' })
         $results.Updates = @('ncu global packages', 'Other CLI')
+        $results.AvailableUpdates = @(@{ Name = 'npm: example'; ToolId = 'npm-global-packages' })
         Refresh-ToolVersion -ToolName 'npm: example' | Should Be $true
-        $results.GlobalNpmPackageUpdates[0].Current | Should Be '2.0.0'
+        (Get-ToolState 'npm-global-packages').Packages[0].Current | Should Be '2.0.0'
         $results.Updates.Count | Should Be 1
         $results.Updates[0] | Should Be 'Other CLI'
     }

@@ -1,3 +1,5 @@
+# Registry inspection, repair, and endpoint-resolution contracts. External commands
+# are mocked and file repairs target TestDrive, never the user's registry settings.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
 $registryPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Infra/registry.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "registry-tests-$([guid]::NewGuid()).env")
@@ -14,7 +16,7 @@ Describe 'Registry infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($registryPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 13
+        $ast.EndBlock.Statements.Count | Should Be 14
         (Get-Command Test-RegistryConfiguration).ScriptBlock.File | Should Be $registryPath
         (Get-Command Set-NpmRegistryApiUrls).ScriptBlock.File | Should Be $registryPath
         Assert-MockCalled Invoke-RegistryCommand 0 -Scope It
@@ -42,7 +44,7 @@ Describe 'Registry infrastructure' {
         }
     }
 
-    It 'reports all configured backends without repairing them' {
+    It 'reports all configured registries without repairing them' {
         Mock Test-CommandExists { $true }
         Mock Invoke-RegistryCommand { [PSCustomObject]@{ Output = 'https://old.example'; ExitCode = 0 } }
         Mock Get-PythonCommand { [PSCustomObject]@{ Command = 'py'; Prefix = @('-V:3', '-m', 'pip') } }

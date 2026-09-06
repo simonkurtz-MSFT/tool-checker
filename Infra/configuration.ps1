@@ -1,30 +1,17 @@
+# Catalog/env parsing, selection, defaults, and validation. Readers return snapshots
+# without loading tools or publishing shared state; bootstrap owns those later steps.
 function Get-ToolSortKey {
-    param([string]$ToolName)
-
-    if ($ToolName -eq "Azure CLI") { return "Azure CLI|0|0" }
-    if ($ToolName -eq "Azure CLI Extensions") { return "Azure CLI|1|Azure CLI Extensions" }
-    if ($ToolName -match "^\s*az ext:") { return "Azure CLI|1|$ToolName" }
-    if ($ToolName -match "^\.NET SDK ([\d.]+)") {
-        $version = [version]$Matches[1]
-        return ".NET SDK|0|{0:D10}.{1:D10}.{2:D10}" -f (
+    param([string]$ToolName, [object]$Configuration, [object]$Row)
+    $group = if ($Configuration.SortGroup) { $Configuration.SortGroup } else { $ToolName }
+    $order = if ($Configuration.SortOrder) { $Configuration.SortOrder } else { 0 }
+    $version = $null
+    # Invert padded numeric components to sort versions descending within a text key.
+    if ($Configuration.SortVersionsDescending -and [version]::TryParse("$($Row.Installed)", [ref]$version)) {
+        return "$group|$order|{0:D10}.{1:D10}.{2:D10}" -f (
             [int]::MaxValue - $version.Major
-        ), (
-            [int]::MaxValue - $version.Minor
-        ), (
-            [int]::MaxValue - $version.Build
-        )
+        ), ([int]::MaxValue - $version.Minor), ([int]::MaxValue - [Math]::Max(0, $version.Build))
     }
-    if ($ToolName -match "^Python ([\d.]+)") {
-        $parts = $Matches[1] -split '\.'
-        $major = if ($parts.Count -gt 0) { [int]$parts[0] } else { 0 }
-        $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
-        return "Python|0|{0:D10}.{1:D10}" -f (
-            [int]::MaxValue - $major
-        ), (
-            [int]::MaxValue - $minor
-        )
-    }
-    "$ToolName|0|0"
+    "$group|$order|$ToolName"
 }
 
 function Get-ToolCatalogSelection {
@@ -48,7 +35,7 @@ function Get-ToolCatalogSelection {
         $catalogToolIds += $_.Name
         $catalogToolNames += $_.Value.Name
         [PSCustomObject]@{ Id = $_.Name; Name = $_.Value.Name; Configuration = $_.Value }
-    } | Sort-Object { Get-ToolSortKey $_.Name })
+    } | Sort-Object { Get-ToolSortKey -ToolName $_.Name -Configuration $_.Configuration })
 
     $unknownToolIds = @($RequestedToolIds | Where-Object { $_ -notin $catalogToolIds })
     if ($unknownToolIds) {
@@ -62,6 +49,7 @@ function Get-ToolCatalogSelection {
 }
 
 function Read-DotEnvFile {
+    # Parse optional assignments as data; never evaluate shell expressions or set env vars.
     param([string]$Path)
 
     $values = [ordered]@{}
@@ -99,6 +87,7 @@ function Read-ToolCheckerConfiguration {
     $toolsConfig = [ordered]@{}
     $toolsJson = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
     $catalogCooldownDays = $toolsJson.settings.CooldownDays
+    # Validate the catalog even with an override; explicit presence makes zero meaningful.
     if (($catalogCooldownDays -isnot [int] -and $catalogCooldownDays -isnot [long]) -or
         $catalogCooldownDays -lt 0 -or $catalogCooldownDays -gt [int]::MaxValue) {
         throw 'Catalog settings.CooldownDays must be a nonnegative integer no greater than 2147483647.'
@@ -129,6 +118,7 @@ function Read-ToolCheckerConfiguration {
             }
         }
         $toolEntry['Id'] = $catalogEntry.Id
+        # Default only missing keys so an explicit false value survives configuration loading.
         if (-not $toolEntry.ContainsKey('ProductionReleasesOnly')) {
             $toolEntry['ProductionReleasesOnly'] = $true
         }
@@ -168,17 +158,7 @@ function Get-ToolConfiguration {
 }
 
 function Assert-ToolConfigurations {
-    $customRequiredProperties = @{
-        'NodeJS' = @('Command', 'ApiUrl')
-        'Global npm packages' = @()
-        'Azure CLI Extensions' = @('Command')
-        '.NET SDK' = @('Command', 'ApiUrl')
-        'Python Install Manager (py)' = @('Command', 'PackageName', 'WingetId')
-        'Python' = @('Command', 'ApiUrl')
-        'PowerShell' = @('Command', 'ApiUrl')
-        'WSL' = @('Command', 'VersionCommand', 'VersionParseRegex', 'ApiUrl')
-    }
-
+    # Run after selected definitions are registered so custom entry points can be verified.
     foreach ($toolName in $toolsConfig.Keys) {
         $config = $toolsConfig[$toolName]
         if (-not $config.Enabled) { continue }
@@ -194,9 +174,7 @@ function Assert-ToolConfigurations {
             }
         } else {
             $requiredProperties += @('CustomFunction')
-            if ($customRequiredProperties.ContainsKey($toolName)) {
-                $requiredProperties += $customRequiredProperties[$toolName]
-            }
+            $requiredProperties += @($config.RequiredProperties | Where-Object { $_ })
         }
 
         $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties $requiredProperties

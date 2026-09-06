@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Report both the running host and pwsh on PATH; they can be different installations.
+# Compare the installed pwsh version to WinGet on Windows or the configured release API.
 #region Public entry points
 function Test-Tool {
     param([string]$Progress)

@@ -1,3 +1,12 @@
+# Registry policy inspection, approved repairs, and npm metadata endpoint resolution.
+# Loading is definition-only; initialization and every read/write operation are explicit.
+function Initialize-RegistryContext {
+    # Dot-sourced bootstrap can initialize display state without probing local registries.
+    param([switch]$ResolveEndpoints)
+    $script:NpmRegistryResolution = @{ Source = 'tool-checker.json'; Url = $null; Details = $null }
+    if ($ResolveEndpoints) { Set-NpmRegistryApiUrls }
+}
+
 #Requires -Version 7.0
 
 function ConvertTo-NormalizedRegistryUrl {
@@ -7,6 +16,7 @@ function ConvertTo-NormalizedRegistryUrl {
 }
 
 function Protect-RegistryUrl {
+    # Hide URL user-info in display text without changing the actual configured endpoint.
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return '(not configured)' }
     try {
@@ -83,6 +93,7 @@ function Set-UvDefaultIndex {
             New-Item -ItemType Directory -Path $configDirectory -Force -ErrorAction Stop | Out-Null
         }
 
+        # Replace matching index assignments while retaining other lines and comments.
         $setting = "index-url = $($IndexUrl | ConvertTo-Json -Compress)"
         $lines = if (Test-Path -LiteralPath $configPath) { @(Get-Content -LiteralPath $configPath) } else { @() }
         $settingWritten = $false
@@ -148,6 +159,7 @@ function Add-RegistryCheck {
         Status = $status
         Details = $Details
     }
+    # Drift is always reportable; only update-enabled runs may offer a repair action.
     if ($status -eq 'Misaligned' -and -not $SkipUpdate) {
         $actionDetails = "$(Protect-RegistryUrl $Current) -> $(Protect-RegistryUrl $Expected)"
         if ($Details) { $actionDetails = "$Details; $actionDetails" }
@@ -224,6 +236,7 @@ function Test-RegistryConfiguration {
 }
 
 function Set-RegistryConfiguration {
+    # Write boundary: invoked only for a registry action explicitly selected in the menu.
     param([string]$RegistryKey, [System.Collections.IDictionary]$EnvironmentConfig)
 
     switch ($RegistryKey) {
@@ -261,6 +274,8 @@ function Set-RegistryConfiguration {
 }
 
 function Set-NpmRegistryApiUrls {
+    # Follow the machine/user npm registry for metadata reads, retaining catalog URLs
+    # as fallback. This updates runtime endpoints, not package-manager configuration.
     $npmConfigs = @($toolsConfig.GetEnumerator() | Where-Object {
         $_.Value.VersionExtractor -eq 'npmDistTagLatest' -and $_.Value.NpmPackageName -and $_.Value.ApiUrl
     })

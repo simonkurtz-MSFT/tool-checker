@@ -1,13 +1,21 @@
 #Requires -Version 7.0
 
+# Global-package inventory from npm-check-updates, with per-package owned rows
+# and cooldown-pinned actions. Packages covered by selected dedicated checks are excluded.
 #region Public entry points
 function Refresh-ToolStatus {
     param([string]$ToolName)
 
-    if ($results.GlobalNpmPackageUpdates.Count -eq 0) { return }
-    foreach ($pkg in $results.GlobalNpmPackageUpdates) {
+    if ((Get-ToolState 'npm-global-packages').Packages.Count -eq 0) { return }
+    foreach ($pkg in (Get-ToolState 'npm-global-packages').Packages) {
         $v = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
-        if ($v) { $pkg.Current = $v; $pkg.Installed = $v; $pkg.Latest = $v }
+        if ($v) {
+            $pkg.Current = $v
+            $pkg.Installed = $v
+            # Worker serialization can detach visible rows from private package state.
+            $row = $results.Tools["npm: $($pkg.Name)"]
+            if ($row) { $row.Current = $v; $row.Installed = $v }
+        }
     }
     $results.Updates = @($results.Updates | Where-Object { $_ -ne "ncu global packages" })
 }
@@ -26,7 +34,7 @@ function Test-Tool {
         Write-Host "  Running ncu -g to check all global package updates..."
         $output       = ncu -g 2>&1
         $outputString = $output -join "`n"
-        $results.GlobalNpmPackageUpdates = @()
+        (Get-ToolState 'npm-global-packages').Packages = @()
 
         if ($LASTEXITCODE -ne 0 -and $outputString -match 'EALLOWREMOTE') {
             $message = 'ncu could not inspect a global package installed from a remote source. Reinstall that package by registry name, then retry.'
@@ -36,14 +44,14 @@ function Test-Tool {
         }
 
         $parsedOutput = ConvertFrom-NcuGlobalOutput -OutputLines @($output)
-        $results.GlobalNpmPackageUpdates = @($parsedOutput.Packages)
+        (Get-ToolState 'npm-global-packages').Packages = @($parsedOutput.Packages)
         if ($parsedOutput.InstallCommand) {
-            $results.GlobalNpmUpdateCommand = $parsedOutput.InstallCommand
-            $extracted = Parse-NpmInstallCommand $results.GlobalNpmUpdateCommand
-            if ($extracted.Count -gt 0 -and $results.GlobalNpmPackageUpdates.Count -eq 0) {
+            (Get-ToolState 'npm-global-packages').UpdateCommand = $parsedOutput.InstallCommand
+            $extracted = Parse-NpmInstallCommand (Get-ToolState 'npm-global-packages').UpdateCommand
+            if ($extracted.Count -gt 0 -and (Get-ToolState 'npm-global-packages').Packages.Count -eq 0) {
                 foreach ($pkg in $extracted) {
                     $iv = Get-GlobalNpmInstalledVersion -PackageName $pkg.Name
-                    $results.GlobalNpmPackageUpdates += @{
+                    (Get-ToolState 'npm-global-packages').Packages += @{
                         Name = $pkg.Name; Current = $(if ($iv) { $iv } else { "?" }); Latest = $pkg.Version
                     }
                 }
@@ -54,11 +62,11 @@ function Test-Tool {
         $managedNpmPackageNames = @($toolsConfig.Values | Where-Object {
             $_.VersionExtractor -eq 'npmDistTagLatest' -and $_.NpmPackageName
         } | ForEach-Object { $_.NpmPackageName })
-        $results.GlobalNpmPackageUpdates = @($results.GlobalNpmPackageUpdates | Where-Object {
+        (Get-ToolState 'npm-global-packages').Packages = @((Get-ToolState 'npm-global-packages').Packages | Where-Object {
             $_.Name -notin $managedNpmPackageNames
         })
 
-        foreach ($pkg in $results.GlobalNpmPackageUpdates) {
+        foreach ($pkg in (Get-ToolState 'npm-global-packages').Packages) {
             $productionReleasesOnly = $config.ProductionReleasesOnly
             $metadata = Invoke-SafeApiRequest -Uri "$((npm config get registry).TrimEnd('/'))/$([Uri]::EscapeDataString($pkg.Name))"
             if ($productionReleasesOnly -and -not (Test-IsProductionVersion $pkg.Latest)) {
@@ -79,22 +87,28 @@ function Test-Tool {
                 $results.MaturityBlockedUpdates += @{
                     Name = $pkg.Name
                     AgeDays = $release.AgeDays
-                    RequiredAgeDays = $script:NpmUpdateCooldownDays
+                    RequiredAgeDays = $script:ReleaseCooldownDays
                 }
             }
         }
 
-        $installablePackages = @($results.GlobalNpmPackageUpdates | Where-Object {
+        $installablePackages = @((Get-ToolState 'npm-global-packages').Packages | Where-Object {
             $_.Latest -and $_.Latest -ne "-" -and $_.Current -ne $_.Latest -and $_.Installable
         })
         $actionable = $installablePackages.Count -gt 0
+        foreach ($package in (Get-ToolState 'npm-global-packages').Packages) {
+            $package.ToolId = 'npm-global-packages'
+            $package.ItemId = $package.Name
+            $package.Installed = $package.Current
+            $results.Tools["npm: $($package.Name)"] = $package
+        }
 
         if ($outputString -match "All global packages are up-to-date") {
             Write-Success "All global npm packages are up to date"
-        } elseif ($results.GlobalNpmPackageUpdates.Count -gt 0) {
+        } elseif ((Get-ToolState 'npm-global-packages').Packages.Count -gt 0) {
             Write-Warning "Global package updates available:"
-            foreach ($pkg in $results.GlobalNpmPackageUpdates) {
-                $status = if ($pkg.Installable) { "installable" } else { "FYI; $($script:NpmUpdateCooldownDays)-day cooldown" }
+            foreach ($pkg in (Get-ToolState 'npm-global-packages').Packages) {
+                $status = if ($pkg.Installable) { "installable" } else { "FYI; $($script:ReleaseCooldownDays)-day cooldown" }
                 $age = if ($null -ne $pkg.AgeDays) { "$($pkg.AgeDays) days old" } else { "age unknown" }
                 Write-Host "    $($pkg.Name)  Installed: $($pkg.Current)  Latest: $($pkg.Latest)  ($age; $status)"
             }
@@ -102,7 +116,7 @@ function Test-Tool {
             if ($actionable) {
                 $results.Updates += "ncu global packages"
                 $specs = $installablePackages | ForEach-Object { "$($_.Name)@$($_.Latest)" }
-                $results.GlobalNpmUpdateCommand = "npm install -g $($specs -join ' ') --loglevel=error"
+                (Get-ToolState 'npm-global-packages').UpdateCommand = "npm install -g $($specs -join ' ') --loglevel=error"
                 if (!$SkipUpdate) {
                     foreach ($pkg in $installablePackages) {
                         Add-AvailableUpdate -Name "npm: $($pkg.Name)" -Command "npm install -g $($pkg.Name)@$($pkg.Latest) --loglevel=error" -Type 'npm-global-package' -Details "$($pkg.Current) -> $($pkg.Latest)"
@@ -118,6 +132,8 @@ function Test-Tool {
 
 #region Private helpers
 function Parse-NpmInstallCommand {
+    # ncu may emit only an install suggestion; recover package/version pairs as data.
+    # That suggested command is not executed; eligible pinned actions are built above.
     param([string]$Command)
     $packages = @()
     if ($Command -match 'install\s+(.+?)(?:\s+--loglevel|$)') {
@@ -131,6 +147,7 @@ function Parse-NpmInstallCommand {
 }
 
 function ConvertFrom-NcuGlobalOutput {
+    # Support both the human-readable update table and its fallback install suggestion.
     param([Parameter(Mandatory)][array]$OutputLines)
 
     $packages = @()

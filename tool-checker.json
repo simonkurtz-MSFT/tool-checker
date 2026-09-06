@@ -4,6 +4,10 @@
   },
   "tools": {
     "nodejs": {
+      "RequiredProperties": ["Command", "ApiUrl"],
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
       "Name": "NodeJS",
       "enabled": true,
       "CheckType": "custom",
@@ -24,6 +28,11 @@
       }
     },
     "npm-check-updates": {
+      "InstallOutcomePackageManager": "npm.ps1",
+      "UpdateOutcomePackageManager": "npm.ps1",
+      "PackageManagerFiles": ["npm.ps1"],
+      "ReleasePackageManager": "npm.ps1",
+      "ApiVersionPackageManager": "npm.ps1",
       "Name": "ncu",
       "enabled": true,
       "CheckType": "standard",
@@ -45,6 +54,8 @@
       }
     },
     "npm-global-packages": {
+      "UpdateOutcomePackageManager": "npm.ps1",
+      "PackageManagerFiles": ["npm.ps1"],
       "Name": "Global npm packages",
       "enabled": true,
       "CheckType": "custom",
@@ -56,6 +67,11 @@
       "ReleaseNotesUrl": ""
     },
     "pnpm": {
+      "InstallOutcomePackageManager": "npm.ps1",
+      "UpdateOutcomePackageManager": "npm.ps1",
+      "PackageManagerFiles": ["npm.ps1"],
+      "ReleasePackageManager": "npm.ps1",
+      "ApiVersionPackageManager": "npm.ps1",
       "ToolFile": "pnpm.ps1",
       "Name": "pnpm",
       "enabled": true,
@@ -78,6 +94,7 @@
       }
     },
     "deno": {
+      "WindowsPackageManagerFiles": ["winget.ps1"],
       "Name": "Deno",
       "enabled": true,
       "CheckType": "standard",
@@ -97,6 +114,16 @@
       }
     },
     "uv": {
+      "WindowsInstallExecutor": "tool",
+      "WindowsInstallEntryPoint": "Invoke-ToolInstall",
+      "WindowsInstallExecutionMode": "CurrentSession",
+      "WindowsInstallOutcomePackageManager": "winget.ps1",
+      "WindowsUpdateExecutor": "tool",
+      "WindowsUpdateEntryPoint": "Invoke-ToolInstall",
+      "WindowsUpdateExecutionMode": "CurrentSession",
+      "WindowsUpdateOutcomePackageManager": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
       "ToolFile": "uv.ps1",
       "Name": "uv",
       "enabled": true,
@@ -119,6 +146,10 @@
       }
     },
     "azure-cli": {
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
       "ToolFile": "azure-cli.ps1",
       "Name": "Azure CLI",
       "enabled": true,
@@ -142,6 +173,12 @@
       }
     },
     "azure-dev-cli": {
+      "ToolFile": "azure-dev-cli.ps1",
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
+      "WindowsInstalledVersionPackageManager": "winget.ps1",
       "Name": "Azure Developer CLI",
       "enabled": true,
       "CheckType": "standard",
@@ -149,7 +186,6 @@
       "Command": "azd",
       "VersionFlag": "version",
       "VersionParseRegex": "azd version\\s+([0-9]+(?:\\.[0-9]+){1,3})",
-      "PreferWingetInstalledVersion": true,
       "ApiVersionRegex": "^azure-dev-cli_(.+)$",
       "WingetId": "Microsoft.Azd",
       "UpdateType": "winget",
@@ -164,6 +200,9 @@
       }
     },
     "azure-cli-extensions": {
+      "RequiredProperties": ["Command"],
+      "SortGroup": "Azure CLI",
+      "SortOrder": 1,
       "Name": "Azure CLI Extensions",
       "enabled": true,
       "CheckType": "custom",
@@ -198,6 +237,12 @@
       }
     },
     "dotnet-sdk": {
+      "RequiredProperties": ["Command", "ApiUrl"],
+      "SortGroup": ".NET SDK",
+      "SortVersionsDescending": true,
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
       "Name": ".NET SDK",
       "enabled": true,
       "CheckType": "custom",
@@ -217,6 +262,10 @@
       }
     },
     "python-install-manager": {
+      "RequiredProperties": ["Command", "PackageName", "WingetId"],
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
       "Name": "Python Install Manager (py)",
       "enabled": true,
       "CheckType": "custom",
@@ -235,6 +284,9 @@
       }
     },
     "python": {
+      "RequiredProperties": ["Command", "ApiUrl"],
+      "SortGroup": "Python",
+      "SortVersionsDescending": true,
       "Name": "Python",
       "enabled": true,
       "CheckType": "custom",
@@ -254,6 +306,10 @@
       }
     },
     "git": {
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
       "Name": "Git",
       "enabled": true,
       "CheckType": "standard",
@@ -274,6 +330,10 @@
       }
     },
     "github-cli": {
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
       "Name": "GitHub CLI",
       "enabled": true,
       "CheckType": "standard",
@@ -294,6 +354,11 @@
       }
     },
     "github-copilot-cli": {
+      "InstallOutcomePackageManager": "npm.ps1",
+      "UpdateOutcomePackageManager": "npm.ps1",
+      "PackageManagerFiles": ["npm.ps1"],
+      "ReleasePackageManager": "npm.ps1",
+      "ApiVersionPackageManager": "npm.ps1",
       "Name": "GitHub Copilot CLI",
       "enabled": true,
       "CheckType": "standard",
@@ -315,6 +380,10 @@
       }
     },
     "ripgrep": {
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsReleasePackageManager": "winget.ps1",
+      "WindowsInstallExecutor": "winget.ps1",
+      "WindowsUpdateExecutor": "winget.ps1",
       "Name": "ripgrep",
       "enabled": true,
       "CheckType": "standard",
@@ -335,6 +404,7 @@
       }
     },
     "wsl": {
+      "RequiredProperties": ["Command", "VersionCommand", "VersionParseRegex", "ApiUrl"],
       "Name": "WSL",
       "enabled": true,
       "CheckType": "custom",
@@ -350,6 +420,9 @@
       "ApiUrl": "https://api.github.com/repos/microsoft/WSL/releases?per_page=100"
     },
     "powershell": {
+      "RequiredProperties": ["Command", "ApiUrl"],
+      "WindowsPackageManagerFiles": ["winget.ps1"],
+      "WindowsUpdateExecutor": "winget.ps1",
       "Name": "PowerShell",
       "enabled": true,
       "CheckType": "custom",

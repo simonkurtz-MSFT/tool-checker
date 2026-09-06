@@ -1,5 +1,7 @@
 #Requires -Version 7.0
 
+# Node.js current-major servicing and LTS/current-major announcements. When WinGet
+# lags upstream, an approved action can use the verified official Windows MSI.
 #region Private helpers
 function Get-NodeReleasePlan {
     param(
@@ -19,6 +21,8 @@ function Get-NodeReleasePlan {
     $currentMajor = [int]$currentParts[0]
     $currentMinor = if ($currentParts.Count -gt 1) { [int]$currentParts[1] } else { 0 }
     $currentPatch = if ($currentParts.Count -gt 2) { [int]$currentParts[2] } else { 0 }
+    # The distribution index is newest-first; retain separate current, LTS, and
+    # installed-major targets rather than treating every newer major as a patch.
     $latestLTS = $allowedReleases | Where-Object { $_.lts } | Select-Object -First 1
     $latestCurrent = $allowedReleases | Select-Object -First 1
     $latestInCurrentMajor = $allowedReleases | Where-Object {
@@ -131,7 +135,7 @@ function Test-Tool {
             } else {
                 $catalogVersion = if ($wingetLatestVersion) { "v$wingetLatestVersion" } else { 'unknown' }
                 Write-Warning "  NodeJS v$latestInMajor is available upstream but not yet in WinGet (catalog: $catalogVersion); using the official installer."
-                Add-AvailableUpdate -Name 'NodeJS' -Command "Official Node.js MSI v$latestInMajor (silent; UAC elevation)" -Type 'node-direct' -Version $latestInMajor -Details "v$currentVersion -> v$latestInMajor"
+                Add-AvailableUpdate -Name 'NodeJS' -Command "Official Node.js MSI v$latestInMajor (silent; UAC elevation)" -Type 'node-direct' -Version $latestInMajor -Details "v$currentVersion -> v$latestInMajor" -Executor 'tool' -ExecutionMode 'CurrentSession' -Arguments @{ Version = $latestInMajor }
             }
         }
     } catch {
@@ -141,6 +145,8 @@ function Test-Tool {
 }
 
 function Invoke-ToolUpdate {
+    # Runs only through an approved CurrentSession action because MSI may need UAC.
+    # Verify the published checksum before execution; retain logs on installer failure.
     param([string]$Version)
 
     $isAdministrator = Test-IsAdministrator

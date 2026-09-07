@@ -231,7 +231,7 @@ function Test-RegistryConfiguration {
         Write-Host "  $color$($check.Name): $($check.Status)$ColorReset"
         Write-Host "    Current  : $(Protect-RegistryUrl $check.Current)"
         Write-Host "    Expected : $(Protect-RegistryUrl $check.Expected)"
-        if ($check.Details) { Write-Host "    Detail  : $($check.Details)" }
+        if ($check.Details) { Write-Host "    Detail   : $($check.Details)" }
     }
 }
 

@@ -50,7 +50,7 @@ Describe 'Version comparison contracts' {
 
     It 'runs azd alone in a real check worker and preserves comparison sources on merge' {
         $toolsConfig = @{ 'Azure Developer CLI' = $toolsConfig['Azure Developer CLI'] }
-        $script:ToolDefinitions = Read-DefinitionRegistry -Files @(Get-ToolDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path (Split-Path $scriptPath) 'Tools'))
+        $script:ToolDefinitions = Read-DefinitionRegistry -Files @(Get-ToolDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path (Split-Path $scriptPath) 'tools'))
         $script:ToolDefinitions.Count | Should Be 1
         Invoke-ParallelChecks -Total 1 -TimeoutSec 10 -Checks @(@{
             Name = 'Azure Developer CLI'

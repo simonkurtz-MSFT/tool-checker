@@ -30,7 +30,7 @@ the tool, such as a tool that manages several installed release channels.
 5. Set `ProductionReleasesOnly` deliberately. Keep it enabled unless users are
    expected to track prerelease versions.
 6. Add or update focused Pester coverage. Put new custom checks in
-   a file directly under `Tools/` and declare its filename with `ToolFile`,
+   a file directly under `tools/` and declare its filename with `ToolFile`,
    starting from the tool-specific template below.
 7. Update the catalog ID list or other affected documentation in
    [README.md](README.md).
@@ -46,15 +46,15 @@ or tool-file constants. The runtime `-CooldownDays` override takes precedence;
 reuse the resolved `$script:ReleaseCooldownDays` in tool and worker checks.
 Cover catalog values, overrides (including zero), and worker propagation in tests.
 
-Use [Tools/_tool-template.ps1](Tools/_tool-template.ps1) when extracting or adding
-tool-unique behavior. Prefer `Tools/<catalog-id>.ps1` and explicitly set
+Use [tools/_tool-template.ps1](tools/_tool-template.ps1) when extracting or adding
+tool-unique behavior. Prefer `tools/<catalog-id>.ps1` and explicitly set
 `"ToolFile": "<catalog-id>.ps1"` in its catalog entry. Filenames may differ from
 catalog IDs; the loader never infers them. Keep specialized checks, parsing, refresh handlers, and
 action routines together; keep orchestration in
 [tool-checker.ps1](tool-checker.ps1) and shared registry behavior in
-[Infra/registry.ps1](Infra/registry.ps1). Shared console rendering belongs in
-[Infra/output.ps1](Infra/output.ps1), and configuration handling belongs in
-[Infra/configuration.ps1](Infra/configuration.ps1). Standard entries without specialized
+[infra/registry.ps1](infra/registry.ps1). Shared console rendering belongs in
+[infra/output.ps1](infra/output.ps1), and configuration handling belongs in
+[infra/configuration.ps1](infra/configuration.ps1). Standard entries without specialized
 behavior do not need a tool file.
 
 Give each script a concise purpose comment. Explain non-obvious parsing assumptions,
@@ -66,7 +66,7 @@ reference rather than adding comments to strict JSON.
 The template is scaffolding, not a registered tool. After catalog selection and
 defaults, the main script registers functions only from declared `ToolFile` files
 for selected, enabled entries, in catalog-ID order. `ToolFile` must be a .ps1
-filename directly under `Tools/`, not a path or the template. Invalid filenames
+filename directly under `tools/`, not a path or the template. Invalid filenames
 and missing declared files fail startup. Registry keys remain catalog IDs.
 Unselected, disabled, undeclared, and template files are not loaded. Omit
 `ToolFile` when no specialized file is needed. Standard tools without a file
@@ -95,7 +95,7 @@ leak into the caller. Helpers remain accessible within the tool call, but other
 tools must not call them. Shared state is initialized by the entry point;
 tool isolation does not require PowerShell modules.
 
-Shared version rules live in [Infra/versions.ps1](Infra/versions.ps1). Use
+Shared version rules live in [infra/versions.ps1](infra/versions.ps1). Use
 `Test-UpdateAvailable -ToolName ...` or `Compare-OwnedToolVersions -ToolName ...`
 for update decisions; these select the owner's optional `Compare-ToolVersions`
 override before the default `Compare-SemanticVersions`. The public override accepts
@@ -127,7 +127,7 @@ whole inventory. Dynamic SDK, Python, and npm rows route to their owning tool.
 No `RefreshMethod` field or named-handler switch is needed. Specialized actions
 remain behind the shared dispatcher and approval gates.
 
-Keep cross-tool npm release metadata helpers in [Infra/PackageManagers/npm.ps1](Infra/PackageManagers/npm.ps1), declared through
+Keep cross-tool npm release metadata helpers in [infra/PackageManagers/npm.ps1](infra/PackageManagers/npm.ps1), declared through
 `PackageManagerFiles`. In particular, a pnpm-only selection must not depend on the global npm tool file.
 Use catalog JSON properties, regexes, and platform command overrides for simple
 differences instead of adding tool-name branches to the standard framework.
@@ -142,7 +142,7 @@ to the implementation, catalog, and tests.
 
 ## Configuration infrastructure
 
-[Infra/configuration.ps1](Infra/configuration.ps1) owns catalog and dotenv reading,
+[infra/configuration.ps1](infra/configuration.ps1) owns catalog and dotenv reading,
 selection, sorting, optional defaults, cooldown resolution, configuration lookup,
 and startup validation. `Get-ToolSortKey` is also shared with table rendering.
 The main script explicitly dot-sources this function-only file via `$PSScriptRoot`
@@ -162,7 +162,7 @@ selection, cooldown, tool-loading, and real-runspace tests.
 
 ## Registry infrastructure
 
-[Infra/registry.ps1](Infra/registry.ps1) owns registry policy checks, approved
+[infra/registry.ps1](infra/registry.ps1) owns registry policy checks, approved
 repairs for npm/pnpm/pip/uv/NuGet, npm metadata endpoint resolution, and repair
 result reporting. It includes the supporting Python interpreter, uv configuration,
 NuGet source, URL normalization, and credential-masking helpers.
@@ -173,7 +173,7 @@ catalog entries, folder scanning, or tool-dispatch entry points for infrastructu
 Loading the file must not perform checks, requests, writes, or prompts.
 
 Configuration reader invocation and shared state initialization remain in the entry point;
-action menus and approval gates live in `Infra/actions.ps1`, with workers in `Infra/parallel.ps1`. Registry repairs still
+action menus and approval gates live in `infra/actions.ps1`, with workers in `infra/parallel.ps1`. Registry repairs still
 require explicit approval with `-Force`; `-SkipUpdate` reports drift only.
 Registry policy is independent of tool selection. Workers continue receiving
 resolved tool configuration through the existing shared worker setup.
@@ -184,7 +184,7 @@ to `TestDrive`; never modify the developer's real package-manager configuration.
 
 ## Output infrastructure
 
-[Infra/output.ps1](Infra/output.ps1) owns the shared message helpers, banner,
+[infra/output.ps1](infra/output.ps1) owns the shared message helpers, banner,
 startup information, registry metadata display, progress heading, results table,
 legend, and summary. It renders existing state without changing results or running
 checks, updates, or prompts. Update eligibility and action approval remain in the
@@ -199,7 +199,7 @@ calls it explicitly to set the immediate caller's color variables; loading the f
 alone must not initialize or overwrite them. Shared result state remains in bootstrap.
 
 `Get-ParallelCheckFunctionBlock` explicitly reads the output and configuration files
-alongside the main source and selects only allowlisted worker helpers. Do not scan `Infra/` or
+alongside the main source and selects only allowlisted worker helpers. Do not scan `infra/` or
 send table/summary rendering to workers. The worker's `Write-Host` capture override
 remains in worker setup, using a snapshot of initialized colors rather than calling
 the initializer again. Validate with [tests/output.Tests.ps1](tests/output.Tests.ps1)
@@ -209,10 +209,10 @@ fixtures must include all required infrastructure files.
 ## Runtime and package manager contracts
 
 The entry point contains bootstrap and workflow orchestration only. Keep generic
-definition loading and tool dispatch in `Infra/runtime.ps1`, result ownership in
-`Infra/results.ps1`, checking and release-plan consumption in `Infra/checks.ps1`,
-action planning/execution in `Infra/actions.ps1`, and check workers in
-`Infra/parallel.ps1`. Infrastructure is loaded from an explicit list, never scanned.
+definition loading and tool dispatch in `infra/runtime.ps1`, result ownership in
+`infra/results.ps1`, checking and release-plan consumption in `infra/checks.ps1`,
+action planning/execution in `infra/actions.ps1`, and check workers in
+`infra/parallel.ps1`. Infrastructure is loaded from an explicit list, never scanned.
 
 Check-worker resources must be tracked as soon as they are created, before setup
 or invocation can fail. Keep pool opening, worker startup, and result collection
@@ -224,8 +224,8 @@ timeout, startup, collection, and cleanup failures with synthetic workers in
 
 Declare shared dependencies with `PackageManagerFiles` and `WindowsPackageManagerFiles`.
 Use filenames such as `npm.ps1` and `winget.ps1`, resolved directly under
-`Infra/PackageManagers/`; paths and directory scanning are not supported.
-[Infra/package-managers.ps1](Infra/package-managers.ps1) loads only selected dependencies and dispatches local operation
+`infra/PackageManagers/`; paths and directory scanning are not supported.
+[infra/package-managers.ps1](infra/package-managers.ps1) loads only selected dependencies and dispatches local operation
 names such as `Get-ReleasePlan-PackageManager`, `Invoke-Command-PackageManager`, and
 `Get-ExecutionOutcome-PackageManager`. Package manager helpers are shared; operation entry points
 stay local. Release plans carry the checked version, eligibility, blocking reason,

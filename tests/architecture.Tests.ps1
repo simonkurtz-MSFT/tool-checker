@@ -21,7 +21,7 @@ Describe 'Generic architecture contracts' {
             Selected = @{ Enabled = $true; PackageManagerFiles = @('npm.ps1','npm.ps1') }
             Disabled = @{ Enabled = $false; PackageManagerFiles = @('missing.ps1') }
         }
-        $files = @(Get-PackageManagerDefinitionFiles -ToolsConfiguration $config -Directory (Join-Path (Split-Path $scriptPath) 'Infra/PackageManagers'))
+        $files = @(Get-PackageManagerDefinitionFiles -ToolsConfiguration $config -Directory (Join-Path (Split-Path $scriptPath) 'infra/PackageManagers'))
         $files.Count | Should Be 1
         $files[0].Id | Should Be 'npm.ps1'
         $config.Selected.PackageManagerFiles = @('../npm.ps1')
@@ -105,7 +105,7 @@ Describe 'Generic architecture contracts' {
     }
 
     It 'does not flatten compound commands in the WinGet executor' {
-        . (Join-Path (Split-Path $scriptPath) 'Infra/PackageManagers/winget.ps1')
+        . (Join-Path (Split-Path $scriptPath) 'infra/PackageManagers/winget.ps1')
         $message = try { Invoke-WingetCommand 'winget install Example; Write-Output unexpected' } catch { $_.Exception.Message }
         $message | Should Match 'Expected a single winget command'
         $message = try { Invoke-WingetCommand 'winget list | Out-String' } catch { $_.Exception.Message }
@@ -122,7 +122,7 @@ Describe 'Generic architecture contracts' {
 
     It 'resolves catalog operations only from each tools declared dependencies' {
         foreach ($config in $toolsConfig.Values) {
-            $files = @(Get-PackageManagerDefinitionFiles -ToolsConfiguration @{ Tool = $config } -Directory (Join-Path (Split-Path $scriptPath) 'Infra/PackageManagers'))
+            $files = @(Get-PackageManagerDefinitionFiles -ToolsConfiguration @{ Tool = $config } -Directory (Join-Path (Split-Path $scriptPath) 'infra/PackageManagers'))
             $registry = Read-DefinitionRegistry -Files $files
             foreach ($operation in @('Release','ApiVersion','InstalledVersion')) {
                 $packageManager = Get-ConfiguredPackageManager -Configuration $config -Operation $operation
@@ -145,7 +145,7 @@ Describe 'Generic architecture contracts' {
     It 'keeps generic infrastructure and package manager files definition-only' {
         foreach ($name in @('runtime','versions','checks','results','actions','parallel','package-managers','PackageManagers/npm','PackageManagers/winget')) {
             $errors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Split-Path $scriptPath) "Infra/$name.ps1"), [ref]$null, [ref]$errors)
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Split-Path $scriptPath) "infra/$name.ps1"), [ref]$null, [ref]$errors)
             $errors.Count | Should Be 0
             @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
         }

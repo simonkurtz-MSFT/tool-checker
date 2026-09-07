@@ -527,7 +527,7 @@ Describe 'Tool definition loading' {
         $configuration = @{ Probe = @{ Id = 'probe'; Enabled = $true; ToolFile = 'missing.ps1' } }
 
         { Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $TestDrive } |
-            Should Throw "Tool file 'missing.ps1' configured for 'probe' was not found in Tools/."
+            Should Throw "Tool file 'missing.ps1' configured for 'probe' was not found in tools/."
     }
 
     It 'rejects invalid paths and the template as declared tool filenames' {
@@ -535,17 +535,17 @@ Describe 'Tool definition loading' {
             $configuration = @{ Probe = @{ Id = 'probe'; Enabled = $true; ToolFile = $fileName } }
 
             { Get-ToolDefinitionFiles -ToolsConfiguration $configuration -Directory $TestDrive } |
-                Should Throw "Tool 'probe' requires ToolFile to be a .ps1 filename directly under Tools/."
+                Should Throw "Tool 'probe' requires ToolFile to be a .ps1 filename directly under tools/."
         }
     }
 
     It 'registers and dispatches by catalog ID when the declared filename differs' {
         $directory = Join-Path $TestDrive 'explicit-file-catalog'
-        $toolDirectory = Join-Path $directory 'Tools'
+        $toolDirectory = Join-Path $directory 'tools'
         New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $directory
-        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Infra') -Destination $directory -Recurse -Force
-        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Tools/nodejs.ps1') -Destination (Join-Path $toolDirectory 'node-runtime.ps1')
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'infra') -Destination $directory -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'tools/nodejs.ps1') -Destination (Join-Path $toolDirectory 'node-runtime.ps1')
         $catalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $catalog.tools['probe-node'] = $catalog.tools['nodejs']
         $catalog.tools.Remove('nodejs') | Out-Null
@@ -669,7 +669,7 @@ Describe 'Tool definition loading' {
     }
 
     It 'keeps all tool files including the template definition-only and syntactically valid' {
-        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'Tools'
+        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'tools'
         foreach ($toolFile in Get-ChildItem -LiteralPath $toolDirectory -Filter '*.ps1' -File) {
             $parseErrors = $null
             $toolAst = [System.Management.Automation.Language.Parser]::ParseFile($toolFile.FullName, [ref]$null, [ref]$parseErrors)
@@ -681,7 +681,7 @@ Describe 'Tool definition loading' {
     }
 
     It 'marks every tool function public or private and standardizes public names' {
-        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'Tools'
+        $toolDirectory = Join-Path (Split-Path -Parent $scriptPath) 'tools'
         foreach ($toolFile in Get-ChildItem -LiteralPath $toolDirectory -Filter '*.ps1' -File) {
             $content = Get-Content -LiteralPath $toolFile.FullName -Raw
             $regions = [regex]::Matches($content, '(?ms)^#region (Public entry points|Private helpers)\r?\n(.*?)^#endregion')
@@ -770,7 +770,7 @@ Describe 'Tool definition loading' {
 
 Describe 'Node release planning' {
     BeforeEach {
-        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/nodejs.ps1')
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools/nodejs.ps1')
     }
 
     It 'filters prereleases and classifies the latest patch in the installed major' {
@@ -803,7 +803,7 @@ Describe 'Node release planning' {
 
 Describe 'Global npm output parsing' {
     BeforeEach {
-        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/npm-global-packages.ps1')
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools/npm-global-packages.ps1')
     }
 
     It 'parses scoped update rows and normalizes the bulk install command' {
@@ -978,7 +978,7 @@ Describe '.NET SDK tool integration' {
 
 Describe '.NET SDK release planning' {
     BeforeEach {
-        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/dotnet-sdk.ps1')
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools/dotnet-sdk.ps1')
     }
 
     It 'parses SDK list output and annotates every row from its channel' {
@@ -1041,7 +1041,7 @@ Describe '.NET SDK release planning' {
 
 Describe 'Python launcher planning' {
     BeforeEach {
-        . (Join-Path (Split-Path -Parent $scriptPath) 'Tools/python.ps1')
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools/python.ps1')
     }
 
     It 'parses current and legacy installed-list formats' {
@@ -1374,7 +1374,7 @@ Describe 'Cooldown configuration' {
         $cooldownDirectory = Join-Path $TestDrive 'cooldown-catalog'
         New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
-        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'Infra') -Destination $cooldownDirectory -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'infra') -Destination $cooldownDirectory -Recurse -Force
         $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
         $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')

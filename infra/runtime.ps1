@@ -33,11 +33,11 @@ function Get-ToolDefinitionFiles {
     foreach ($config in $ToolsConfiguration.Values | Where-Object { $_.Enabled } | Sort-Object Id) {
         if (-not $config.Contains('ToolFile')) { continue }
         if ($config.ToolFile -isnot [string] -or $config.ToolFile -notmatch '^[a-z0-9][a-z0-9._-]*\.ps1$') {
-            throw "Tool '$($config.Id)' requires ToolFile to be a .ps1 filename directly under Tools/."
+            throw "Tool '$($config.Id)' requires ToolFile to be a .ps1 filename directly under tools/."
         }
         $toolPath = Join-Path $Directory $config.ToolFile
         if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
-            throw "Tool file '$($config.ToolFile)' configured for '$($config.Id)' was not found in Tools/."
+            throw "Tool file '$($config.ToolFile)' configured for '$($config.Id)' was not found in tools/."
         }
         $toolFile = Get-Item -LiteralPath $toolPath
         [PSCustomObject]@{ Id = $config.Id; Name = $toolFile.Name; FullName = $toolFile.FullName }

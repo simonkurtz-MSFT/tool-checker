@@ -4,7 +4,7 @@
     Template for tool-specific behavior. Not a runtime tool file.
 
 .DESCRIPTION
-    Copy to a .ps1 file directly under Tools/ and set the catalog ToolFile to its
+    Copy to a .ps1 file directly under tools/ and set the catalog ToolFile to its
     filename (for example, "ToolFile": "example-sdk.ps1"). Prefer <catalog-id>.ps1
     for clarity, but the filename is explicitly configured, never inferred.
     Replace Example CLI with the catalog Name; keep public function names unchanged.
@@ -24,7 +24,7 @@
         - Get-ToolOutcome - optional failure diagnostic; accepts Action, ExitCode,
             and OutputText and returns a Message/Status object or nothing.
     Keep platform-specific details behind these names, not in public names.
-    Action parameters and results must match Infra/actions.ps1's dispatcher.
+    Action parameters and results must match infra/actions.ps1's dispatcher.
     A loaded Refresh-ToolStatus is used automatically; do not add a RefreshMethod
     catalog field or a tool-specific refresh switch in the main script.
 
@@ -44,22 +44,22 @@
     discovery must exclude _tool-template.ps1.
 
     Keep tool-specific parsers, release planning, checks, refresh handlers, and
-    install/update routines together here. Keep dispatch in Infra/runtime.ps1;
+    install/update routines together here. Keep dispatch in infra/runtime.ps1;
     shared registry checks, repairs, and endpoint resolution live in
-    Infra/registry.ps1, loaded independently of tool selection.
-    Shared console rendering and Initialize-ConsoleColors live in Infra/output.ps1.
+    infra/registry.ps1, loaded independently of tool selection.
+    Shared console rendering and Initialize-ConsoleColors live in infra/output.ps1.
     Main explicitly initializes the caller's palette; workers receive color snapshots.
     Configuration parsing, defaults, selection, and lookup live in
-    Infra/configuration.ps1. Main assigns resolved state and registers tool files.
+    infra/configuration.ps1. Main assigns resolved state and registers tool files.
     Do not duplicate shared helpers or create modules.
-    Shared version rules live in Infra/versions.ps1. Use Test-UpdateAvailable with
+    Shared version rules live in infra/versions.ps1. Use Test-UpdateAvailable with
     ToolName (or Compare-OwnedToolVersions) for owner-aware update decisions.
     Standard checks record InstalledVersionSource/LatestVersionSource in ToolState:
     command, api, or a package-manager filename. Overrides must not fetch data,
     mutate state, or execute actions; the same rule drives planning and rendering.
-    Cross-tool npm release metadata helpers live in Infra/PackageManagers/npm.ps1.
+    Cross-tool npm release metadata helpers live in infra/PackageManagers/npm.ps1.
     Declare PackageManagerFiles and WindowsPackageManagerFiles explicitly;
-    Infra/package-managers.ps1 resolves only selected dependencies. Prefer catalog
+    infra/package-managers.ps1 resolves only selected dependencies. Prefer catalog
     JSON properties, regexes, and platform command overrides for simple differences.
 
     Functions run in the main script or an isolated check worker. They use the
@@ -79,7 +79,7 @@
     tool functions. Shared worker helpers in explicit infrastructure sources
     still require an entry in Get-ParallelCheckFunctionBlock, which explicitly
     reads these sources. Workers reuse resolved configuration, not its readers.
-    Keep files directly under Tools/.
+    Keep files directly under tools/.
 
     Store private inventory with Get-ToolState -ToolId '<catalog-id>'. Rows carry
     ToolId and optional ItemId; dispatch stamps newly created unowned rows.
@@ -117,7 +117,7 @@ function Test-Tool {
     - Detect and report only; never install, update, or repair during a check.
 
     Add needed helpers in the Private helpers region. Refresh and action routines are
-    optional; preserve existing dispatch and approval gates in Infra/actions.ps1.
+    optional; preserve existing dispatch and approval gates in infra/actions.ps1.
     Add focused Pester coverage, including execution through a real check worker
     with synthetic inputs, this tool selected alone, and check-only coverage.
     Never execute real installs, updates, or registry repairs in tests.

@@ -1,7 +1,7 @@
 # Registry inspection, repair, and endpoint-resolution contracts. External commands
 # are mocked and file repairs target TestDrive, never the user's registry settings.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-$registryPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Infra/registry.ps1'
+$registryPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'infra/registry.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "registry-tests-$([guid]::NewGuid()).env")
 
 Describe 'Registry infrastructure' {

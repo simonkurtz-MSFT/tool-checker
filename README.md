@@ -30,7 +30,7 @@ The following screenshots show Tool Checker `1.2.0` validating registry policy a
 - [PowerShell 7 or later](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
 - Internet access to query release APIs and package registries
 - The package managers used by your configured install and update commands, such as WinGet, npm, or `apt`
-- [tool-checker.ps1](tool-checker.ps1), [tool-checker.json](tool-checker.json), and the bundled `Tools/` and `Infra/` directories kept together
+- [tool-checker.ps1](tool-checker.ps1), [tool-checker.json](tool-checker.json), and the bundled `tools/` and `infra/` directories kept together
 - An optional `.env` tool-selection and registry policy based on [`.env.example`](.env.example)
 
 The script does not require installation or additional PowerShell modules.
@@ -138,12 +138,12 @@ Before regenerating a lock, verify that the proxy exposes all metadata required 
 Registry alignment is intentionally approval-gated. In a normal run, each misaligned registry appears as an `Align ... registry` action. `-SkipUpdate` reports drift without offering a repair. `-Force` may apply tool updates automatically, but registry repairs still require an explicit action-menu selection.
 
 Shared registry checks, repairs, and npm endpoint resolution live in
-[Infra/registry.ps1](Infra/registry.ps1). The main script loads this file explicitly,
+[infra/registry.ps1](infra/registry.ps1). The main script loads this file explicitly,
 independently of tool selection; loading alone does not perform checks or repairs.
 
 ## Configuration
 
-[Infra/configuration.ps1](Infra/configuration.ps1) handles catalog and dotenv
+[infra/configuration.ps1](infra/configuration.ps1) handles catalog and dotenv
 reading, tool selection, defaults, cooldown resolution, sorting, and validation.
 The main script loads it explicitly, assigns the resolved configuration, and then
 registers only selected, enabled tool files. Parallel workers reuse that resolved
@@ -154,11 +154,11 @@ Tools are catalog entries under the top-level `tools` object in [`tool-checker.j
 There are two kinds of checks:
 
 - `standard`: Uses the generic command, version parser, release API, and update-command framework. Most new command-line tools should use this type.
-- `custom`: Calls `Test-Tool` in the `Tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. The entry point only loads dependencies, initializes state, and coordinates the workflow. Generic checks, actions, workers, and results live in `Infra/`; tool-specific behavior stays in `Tools/`.
+- `custom`: Calls `Test-Tool` in the `tools/` file explicitly named by the catalog's `ToolFile` field for specialized behavior, such as multiple installed SDK channels. The entry point only loads dependencies, initializes state, and coordinates the workflow. Generic checks, actions, workers, and results live in `infra/`; tool-specific behavior stays in `tools/`.
 
-Shared package-manager behavior lives in [Infra/PackageManagers/npm.ps1](Infra/PackageManagers/npm.ps1) and
-[Infra/PackageManagers/winget.ps1](Infra/PackageManagers/winget.ps1).
-[Infra/package-managers.ps1](Infra/package-managers.ps1) loads only dependencies explicitly declared by
+Shared package-manager behavior lives in [infra/PackageManagers/npm.ps1](infra/PackageManagers/npm.ps1) and
+[infra/PackageManagers/winget.ps1](infra/PackageManagers/winget.ps1).
+[infra/package-managers.ps1](infra/package-managers.ps1) loads only dependencies explicitly declared by
 selected, enabled tools. Release decisions and execution routing are
 configured independently; neither display names nor command text select a package manager.
 Both the interactive menu and Force mode consume the same owned action plans.
@@ -227,8 +227,8 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `WindowsUpdateCommand`                                        | No                    | Windows-only override for `UpdateCommand`.                                                                                                  |
 | `InstallCommands`                                             | No                    | Platform-specific commands offered when the tool is missing.                                                                                |
 | `ReleaseNotesUrl`                                             | No                    | Link displayed when an update is actionable.                                                                                                |
-| `ToolFile`                                                    | No for standard tools | Explicit filename under `Tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                                     |
-| `PackageManagerFiles`, `WindowsPackageManagerFiles`           | No                    | Explicit filenames under `Infra/PackageManagers/`, loaded only for selected tools and applicable platforms.                                 |
+| `ToolFile`                                                    | No for standard tools | Explicit filename under `tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                                     |
+| `PackageManagerFiles`, `WindowsPackageManagerFiles`           | No                    | Explicit filenames under `infra/PackageManagers/`, loaded only for selected tools and applicable platforms.                                 |
 | `ReleasePackageManager`, `ApiVersionPackageManager`           | No                    | Package manager for release planning or API version extraction; each supports a `Windows` prefix override.                                  |
 | `InstallExecutor`, `UpdateExecutor`                           | No                    | `command` (default), `tool`, or a declared package manager filename. Supports `Windows` prefix overrides.                                   |
 | `InstallEntryPoint`, `UpdateEntryPoint`                       | For tool executor     | Generic tool entry point to invoke. Supports `Windows` prefix overrides.                                                                    |
@@ -283,7 +283,7 @@ Use a custom entry only when the standard framework cannot model the check:
 }
 ```
 
-Start from [Tools/_tool-template.ps1](Tools/_tool-template.ps1) and add the corresponding function to `Tools/example-sdk.ps1`:
+Start from [tools/_tool-template.ps1](tools/_tool-template.ps1) and add the corresponding function to `tools/example-sdk.ps1`:
 
 ```powershell
 function Test-Tool {
@@ -302,7 +302,7 @@ function Test-Tool {
 }
 ```
 
-Custom checker functions must accept a `Progress` string. After catalog selection, Tool Checker registers functions only from declared `ToolFile` files for selected, enabled tools, in catalog-ID order, then validates configured checks. `ToolFile` is a .ps1 filename directly under `Tools/`, not a path or the template. Omit it when no specialized file is needed; invalid filenames and missing declared files fail startup. Filenames are never inferred from catalog IDs. Unselected, disabled, undeclared, and template files are not loaded. Workers receive the same per-tool definition registry, including private helpers. `Invoke-ToolEntryPoint` dispatches by catalog ID in a local call scope, so every file can use `Test-Tool`, `Refresh-ToolStatus`, `Invoke-ToolInstall`, and `Invoke-ToolUpdate` without name collisions. Files must define functions only and follow the public naming and private-helper region conventions in [Tools/_tool-template.ps1](Tools/_tool-template.ps1).
+Custom checker functions must accept a `Progress` string. After catalog selection, Tool Checker registers functions only from declared `ToolFile` files for selected, enabled tools, in catalog-ID order, then validates configured checks. `ToolFile` is a .ps1 filename directly under `tools/`, not a path or the template. Omit it when no specialized file is needed; invalid filenames and missing declared files fail startup. Filenames are never inferred from catalog IDs. Unselected, disabled, undeclared, and template files are not loaded. Workers receive the same per-tool definition registry, including private helpers. `Invoke-ToolEntryPoint` dispatches by catalog ID in a local call scope, so every file can use `Test-Tool`, `Refresh-ToolStatus`, `Invoke-ToolInstall`, and `Invoke-ToolUpdate` without name collisions. Files must define functions only and follow the public naming and private-helper region conventions in [tools/_tool-template.ps1](tools/_tool-template.ps1).
 
 If normal semantic version comparison applies, call `Register-ToolUpdate`; it adds a newer version to both the summary and actionable update collections. For specialized flows that manage summary state separately, call `Add-AvailableUpdate` with `Name`, `Command`, `Type`, and optional `Details` values. Specialized actions can also supply `RegistryKey` for registry alignment or `Version` for a version-specific installer.
 
@@ -319,7 +319,7 @@ Release APIs and package catalogs can disagree temporarily. For most Windows too
 
 On Windows, Azure Developer CLI uses its installed WinGet package version for inventory and post-update verification when available. If the package lookup fails, inventory retains the CLI-reported version. Its tool-specific comparison then applies the [upstream stable MSI encoding](https://github.com/Azure/azure-dev/blob/main/eng/scripts/Get-MsiVersion.ps1): MSI patch = `(CLI patch + 1) * 100`. Thus CLI `1.33.0` and WinGet `1.33.100` compare as equivalent, while WinGet `1.33.200` still represents a newer CLI patch. Package-to-package and CLI-to-API comparisons remain unchanged. This fallback cannot identify installer-only revisions that are not represented in the CLI version; successful WinGet inventory remains preferred.
 
-Shared version checks live in [Infra/versions.ps1](Infra/versions.ps1). A selected tool file can expose the optional `Compare-ToolVersions` entry point to override default semantic comparison without adding tool-name branches to infrastructure. The same policy governs update planning, commands, and table status; see [CONTRIBUTING.md](CONTRIBUTING.md) for the contract.
+Shared version checks live in [infra/versions.ps1](infra/versions.ps1). A selected tool file can expose the optional `Compare-ToolVersions` entry point to override default semantic comparison without adding tool-name branches to infrastructure. The same policy governs update planning, commands, and table status; see [CONTRIBUTING.md](CONTRIBUTING.md) for the contract.
 
 On Windows, uv installs and updates use one non-interactive WinGet path. Before installing, Tool Checker removes a registered WinGet copy, detected pipx or Cargo copies, and leftover `uv`, `uvx`, and `uvw` binaries from the current user's `.local\bin` and `.cargo\bin` directories. It then performs a clean WinGet install. This standardizes future updates without deleting uv's cache, managed Python installations, or installed tools. On Linux, uv continues to use Astral's standalone installer and `uv self update`.
 

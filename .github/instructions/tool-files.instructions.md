@@ -1,25 +1,25 @@
 ---
 description: "Maintain tool-specific PowerShell files, shared configuration, registry and output infrastructure, and their loading boundaries."
-applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
+applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
 ---
 
 # Tool-specific files
 
 - Keep only bootstrap and workflow orchestration in `tool-checker.ps1`. Extract tool-unique
-  behavior into a flat `Tools/` file explicitly named by the catalog's `ToolFile`.
+  behavior into a flat `tools/` file explicitly named by the catalog's `ToolFile`.
   Prefer `<catalog-id>.ps1` for clarity, but never infer filenames from IDs.
   Shared registry checks, repairs, and endpoint resolution belong in
-  `Infra/registry.ps1`; shared console rendering belongs in `Infra/output.ps1`.
+  `infra/registry.ps1`; shared console rendering belongs in `infra/output.ps1`.
   Catalog/env parsing, selection, defaults, sorting, lookup, and validation belong
-  in `Infra/configuration.ps1`.
+  in `infra/configuration.ps1`.
   Generic dispatch, checking, actions, results, and workers belong in the explicit
   runtime/checks/actions/results/parallel infrastructure files. Do not introduce a
   public/private module hierarchy or tool-name switches in generic infrastructure.
 - Prefer JSON-only standard entries. Create a tool file only for specialized
-  behavior, using `Tools/_tool-template.ps1` as the starting point.
+  behavior, using `tools/_tool-template.ps1` as the starting point.
   Keep simple parser and platform-command differences in catalog properties.
-  Cross-tool package-manager decisions and helpers belong in `Infra/PackageManagers/`.
-  `Infra/package-managers.ps1` resolves only selected PackageManagerFiles and
+  Cross-tool package-manager decisions and helpers belong in `infra/PackageManagers/`.
+  `infra/package-managers.ps1` resolves only selected PackageManagerFiles and
   WindowsPackageManagerFiles. Accept filenames only, not paths or folder scans.
   Dispatch `*-PackageManager` operations locally; share only named helpers.
 - Explicitly dot-source the fixed generic infrastructure list via `$PSScriptRoot`, independently
@@ -57,7 +57,7 @@ applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests
   report success when its unfinished checker is invoked.
 - Resolve `ToolFile` only for selected, enabled catalog entries after selection
   and defaults. Omitted fields mean no file; invalid filenames or missing declared
-  files fail startup. Accept only .ps1 filenames directly under Tools/, excluding
+  files fail startup. Accept only .ps1 filenames directly under tools/, excluding
   the template. Load in catalog-ID order and key the registry by ID, not filename;
   never scan for undeclared files. Workers use the same registry, including private helpers.
 - Follow the template's public entry-point names and Public entry points / Private
@@ -68,7 +68,7 @@ applyTo: "Tools/**/*.ps1,Infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests
 - A loaded `Refresh-ToolStatus` is selected automatically, with optional
   `[string]$ToolName`; it may refresh one row or the whole tool inventory.
   Do not reintroduce `RefreshMethod` fields or a named-handler switch.
-- Shared version policy belongs in `Infra/versions.ps1`. Optional public
+- Shared version policy belongs in `infra/versions.ps1`. Optional public
   `Compare-ToolVersions` accepts Version1, Version2, Version1Source, Version2Source
   strings and returns exactly one integer (-1/0/1). Keep overrides pure; use
   Compare-SemanticVersions for ordinary cases, avoiding recursive dispatch.

@@ -1,7 +1,7 @@
 # Configuration loading/snapshot contracts using temporary catalog and env fixtures.
 # Isolated sessions verify that readers do not load tools or replace caller state.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-$configurationPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Infra/configuration.ps1'
+$configurationPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'infra/configuration.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "configuration-tests-$([guid]::NewGuid()).env")
 
 Describe 'Configuration infrastructure' {
@@ -34,8 +34,8 @@ Describe 'Configuration infrastructure' {
         $appRoot = Join-Path $TestDrive "missing-$Infrastructure"
         $null = New-Item -ItemType Directory -Path $appRoot
         Copy-Item $scriptPath -Destination $appRoot
-        Copy-Item (Join-Path (Split-Path $scriptPath) 'Infra') -Destination $appRoot -Recurse
-        $missingPath = Join-Path $appRoot "Infra/$Infrastructure.ps1"
+        Copy-Item (Join-Path (Split-Path $scriptPath) 'infra') -Destination $appRoot -Recurse
+        $missingPath = Join-Path $appRoot "infra/$Infrastructure.ps1"
         Remove-Item -LiteralPath $missingPath
         $copiedScript = Join-Path $appRoot 'tool-checker.ps1'
         $message = try {
@@ -43,7 +43,7 @@ Describe 'Configuration infrastructure' {
         } catch { $_.Exception.Message }
         $label = (Get-Culture).TextInfo.ToTitleCase($Infrastructure)
         $loadedScriptRoot = Split-Path (Get-Command -Name $copiedScript).ScriptBlock.File
-        $expectedPath = Join-Path $loadedScriptRoot "Infra/$Infrastructure.ps1"
+        $expectedPath = Join-Path $loadedScriptRoot "infra/$Infrastructure.ps1"
         $message | Should Be "$label infrastructure file not found: $expectedPath"
         (& $copiedScript -Version) | Should Be $script:ToolCheckerVersion
     }

@@ -30,7 +30,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '2.0.0'
+$script:ToolCheckerVersion = '2.0.1'
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 if ($Version) {
@@ -44,7 +44,7 @@ if (-not $script:IsDotSourced) {
 
 # Load the fixed, definition-only infrastructure independently of tool selection.
 foreach ($infrastructure in @('configuration','output','results','runtime','versions','checks','actions','parallel','package-managers','registry')) {
-    $path = Join-Path $PSScriptRoot "Infra/$infrastructure.ps1"
+    $path = Join-Path $PSScriptRoot "infra/$infrastructure.ps1"
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         $label = (Get-Culture).TextInfo.ToTitleCase($infrastructure)
         throw "$label infrastructure file not found: $path"
@@ -72,9 +72,9 @@ $script:RegistryEnvironment = $configuration.RegistryEnvironment
 $script:ReleaseCooldownDays = $configuration.CooldownDays
 
 # Register selected dependencies, exposing helpers but keeping operation names local.
-$script:ToolDefinitionFiles = @(Get-ToolDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'Tools'))
+$script:ToolDefinitionFiles = @(Get-ToolDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'tools'))
 $script:ToolDefinitions = Read-DefinitionRegistry -Files $script:ToolDefinitionFiles
-$script:PackageManagerDefinitions = Read-DefinitionRegistry -Files @(Get-PackageManagerDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'Infra/PackageManagers'))
+$script:PackageManagerDefinitions = Read-DefinitionRegistry -Files @(Get-PackageManagerDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'infra/PackageManagers'))
 foreach ($definitions in $script:PackageManagerDefinitions.Values) {
     $sharedDefinitions = @($definitions.Keys | Where-Object { $_ -notlike '*-PackageManager' } | ForEach-Object { $definitions[$_] })
     . ([scriptblock]::Create(($sharedDefinitions -join "`n`n")))

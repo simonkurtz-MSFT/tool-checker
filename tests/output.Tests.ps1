@@ -1,7 +1,7 @@
 # Output contracts: definition-only loading, caller-scoped colors, read-only
 # rendering, and host-message capture in synthetic workers without external checks.
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-$outputPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Infra/output.ps1'
+$outputPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'infra/output.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "output-tests-$([guid]::NewGuid()).env")
 
 Describe 'Output infrastructure' {
@@ -31,7 +31,7 @@ Describe 'Output infrastructure' {
             $observed = @($session.Invoke())[0]
             $observed.StartupError | Should Match 'Configuration infrastructure file not found'
             $observed.AfterNormal | Should Be 1
-            $observed.Version | Should Be '2.0.0'
+            $observed.Version | Should Be $script:ToolCheckerVersion
             $observed.AfterVersion | Should Be 1
             $observed.AfterDotSource | Should Be 1
         } finally {
@@ -108,9 +108,9 @@ Describe 'Output infrastructure' {
         $null = New-Item -ItemType Directory -Path $appRoot
         Copy-Item $scriptPath -Destination $appRoot
         Copy-Item (Join-Path (Split-Path $scriptPath) 'tool-checker.json') -Destination $appRoot
-        $infraRoot = Join-Path $appRoot 'Infra'
+        $infraRoot = Join-Path $appRoot 'infra'
         $null = New-Item -ItemType Directory -Path $infraRoot
-        Copy-Item (Join-Path (Split-Path $scriptPath) 'Infra/configuration.ps1') -Destination $infraRoot
+        Copy-Item (Join-Path (Split-Path $scriptPath) 'infra/configuration.ps1') -Destination $infraRoot
         $selectionFile = Join-Path $appRoot 'git.env'
         Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
         { . (Join-Path $appRoot 'tool-checker.ps1') -EnvFile $selectionFile } | Should Throw 'Output infrastructure file not found'

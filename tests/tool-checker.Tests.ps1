@@ -89,7 +89,7 @@ Describe 'Tool configuration' {
 }
 
 Describe 'pnpm version refresh' {
-    It 'reports the updated global package instead of an older command version' {
+    It 'reports the active command instead of a newer shadowed global package' {
         $previousTools = $results.Tools.Clone()
         $results.Tools['pnpm'] = @{ Installed = '10.0.0'; Latest = '10.1.0' }
         Mock Get-GlobalNpmInstalledVersion { '10.1.0' } -ParameterFilter { $PackageName -eq 'pnpm' }
@@ -99,15 +99,16 @@ Describe 'pnpm version refresh' {
         try {
             Refresh-ToolVersion -ToolName 'pnpm' | Should Be $true
 
-            $results.Tools['pnpm'].Installed | Should Be '10.1.0'
-            Assert-MockCalled Get-GlobalNpmInstalledVersion 1 -ParameterFilter { $PackageName -eq 'pnpm' }
-            Assert-MockCalled Get-CommandVersion 0
+            $results.Tools['pnpm'].Installed | Should Be '10.0.0'
+            $results.Tools['pnpm'].Latest | Should Be '10.1.0'
+            Assert-MockCalled Get-GlobalNpmInstalledVersion -Times 0 -Exactly -Scope It
+            Assert-MockCalled Get-CommandVersion -Times 1 -Exactly -Scope It
         } finally {
             $results.Tools = $previousTools
         }
     }
 
-    It 'falls back to the command version when global npm metadata is unavailable' {
+    It 'reports the updated command when global npm metadata is unavailable' {
         $previousTools = $results.Tools.Clone()
         $results.Tools['pnpm'] = @{ Installed = '10.0.0'; Latest = '10.1.0' }
         Mock Get-GlobalNpmInstalledVersion { $null } -ParameterFilter { $PackageName -eq 'pnpm' }
@@ -118,7 +119,7 @@ Describe 'pnpm version refresh' {
             Refresh-ToolVersion -ToolName 'pnpm' | Should Be $true
 
             $results.Tools['pnpm'].Installed | Should Be '10.1.0'
-            Assert-MockCalled Get-CommandVersion 1 -ParameterFilter { $Command -eq 'pnpm' }
+            Assert-MockCalled Get-CommandVersion -Times 1 -Exactly -Scope It -ParameterFilter { $Command -eq 'pnpm' }
         } finally {
             $results.Tools = $previousTools
         }

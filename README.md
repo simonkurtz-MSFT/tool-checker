@@ -83,6 +83,12 @@ Examples:
 
 Tool Checker executes the commands shown in the summary or action menu. Review [`tool-checker.json`](tool-checker.json) before using interactive actions or `-Force`, especially on a shared or managed machine.
 
+For pnpm, an active command directly under `PNPM_HOME` or `PNPM_HOME/bin` is updated
+with `pnpm self-update <version>`, pinned to the cooldown-eligible release. Other
+locations use the configured global npm update. Inventory and post-update refresh
+report the active `pnpm --version`, since a separate npm-installed copy may be
+shadowed on `PATH`.
+
 ### Tests
 
 The characterization tests require Pester and run without invoking tool checks or update actions:

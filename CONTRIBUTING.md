@@ -111,9 +111,15 @@ Raw package sorting may still call `Compare-SemanticVersions` directly.
 
 All custom checks now live in their catalog-declared tool files: Node.js, .NET
 SDK, Python, Python Install Manager, global npm packages, Azure CLI extensions,
-PowerShell, and WSL. Azure CLI, Bicep, and pnpm have refresh-only files; uv has its
+pnpm, PowerShell, and WSL. Azure CLI and Bicep have refresh-only files; uv has its
 Windows installer. Azure Developer CLI has a source-aware version comparison file.
 Tools handled entirely by catalog data need no file.
+
+pnpm reuses the standard npm release plan, then selects a pinned `pnpm self-update`
+when the active command is directly under `PNPM_HOME` or its `bin` directory.
+Other locations retain the npm update command. Refresh reads the active command,
+not a potentially shadowed npm-global package. Cover these paths, cooldown
+blocking, and check-only behavior in synthetic selected-only workers.
 
 `Refresh-ToolVersion` calls a loaded `Refresh-ToolStatus` automatically, passing
 the optional `[string]$ToolName` parameter. A handler may refresh one row or its

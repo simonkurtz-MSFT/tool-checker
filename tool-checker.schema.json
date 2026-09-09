@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tool Checker Catalog",
+  "description": "Tool catalog and shared settings. File existence, unique display names, declared dependencies, and custom RequiredProperties are validated by the runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["settings", "tools"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative path or URL to this catalog's JSON Schema.",
+      "format": "uri-reference"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CooldownDays"],
+      "properties": {
+        "CooldownDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "default": 8,
+          "description": "Release cooldown in days. The runtime -CooldownDays option overrides this value, including with zero."
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Entries keyed by stable lowercase catalog IDs, independent of display names and filenames.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": { "$ref": "#/definitions/tool" }
+      }
+    }
+  },
+  "definitions": {
+    "nonBlankString": { "type": "string", "pattern": "\\S" },
+    "uri": { "type": "string", "minLength": 1, "format": "uri" },
+    "packageManagerFile": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*\\.ps1$",
+      "description": "Filename directly under infra/PackageManagers/, not a path. Must be declared in the applicable package-manager file list."
+    },
+    "packageManagerFiles": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/packageManagerFile" }
+    },
+    "executor": {
+      "description": "command runs the configured command; tool dispatches the configured entry point; a package-manager filename dispatches its executor.",
+      "default": "command",
+      "anyOf": [
+        { "enum": ["command", "tool"] },
+        { "$ref": "#/definitions/packageManagerFile" }
+      ]
+    },
+    "actionEntryPoint": {
+      "type": "string",
+      "enum": ["Invoke-ToolInstall", "Invoke-ToolUpdate"],
+      "description": "Tool-local action entry point; the selected ToolFile must define it."
+    },
+    "executionMode": {
+      "type": "string",
+      "enum": ["Job", "CurrentSession"],
+      "default": "Job"
+    },
+    "updateCommand": {
+      "$ref": "#/definitions/nonBlankString",
+      "description": "Update command. {latest} expands to the checked release during planning; custom checkers may resolve their own placeholders."
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Name"],
+      "properties": {
+        "Name": {
+          "$ref": "#/definitions/nonBlankString",
+          "description": "Unique human-readable display name. Uniqueness across entries is checked at runtime."
+        },
+        "enabled": { "type": "boolean", "default": true, "description": "Whether the selected tool is checked and its definitions loaded." },
+        "CheckType": { "type": "string", "enum": ["standard", "custom"] },
+        "ProductionReleasesOnly": { "type": "boolean", "default": true },
+        "CustomFunction": {
+          "$ref": "#/definitions/nonBlankString",
+          "description": "Custom checker function. Use Test-Tool when declaring a ToolFile."
+        },
+        "ToolFile": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*\\.ps1$",
+          "description": "Explicit filename directly under tools/, not a path or _tool-template.ps1. Omit when no specialized behavior is needed."
+        },
+        "RequiredProperties": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/nonBlankString" },
+          "description": "Additional nonblank properties required by the custom checker. Presence is checked at runtime."
+        },
+        "SortGroup": { "$ref": "#/definitions/nonBlankString" },
+        "SortOrder": { "type": "integer", "default": 0 },
+        "SortVersionsDescending": { "type": "boolean", "default": false },
+        "Command": { "$ref": "#/definitions/nonBlankString" },
+        "VersionFlag": { "$ref": "#/definitions/nonBlankString" },
+        "VersionCommand": { "$ref": "#/definitions/nonBlankString" },
+        "VersionParseRegex": { "type": "string", "description": "PowerShell/.NET regex with the installed version in capture group 1." },
+        "ParseEntireVersionOutput": { "type": "boolean", "default": false },
+        "VersionExtractor": { "type": "string", "enum": ["jsonProperty", "npmDistTagLatest"] },
+        "VersionProperty": { "$ref": "#/definitions/nonBlankString" },
+        "ApiUrl": { "$ref": "#/definitions/uri" },
+        "ApiVersionProperty": { "$ref": "#/definitions/nonBlankString", "description": "Dot-separated property path in the API response." },
+        "ApiVersionRegex": { "type": "string", "description": "PowerShell/.NET regex with the API tag version in capture group 1." },
+        "UpdateParseRegex": { "type": "string", "description": "PowerShell/.NET regex extracting an available release from version-command output." },
+        "NpmPackageName": { "$ref": "#/definitions/nonBlankString" },
+        "PackageName": { "$ref": "#/definitions/nonBlankString" },
+        "WingetId": { "$ref": "#/definitions/nonBlankString" },
+        "UpdateType": { "$ref": "#/definitions/nonBlankString", "description": "Owner-defined update classification, not a fixed list of tool names." },
+        "UpdateCommand": { "$ref": "#/definitions/updateCommand" },
+        "WindowsUpdateCommand": { "$ref": "#/definitions/updateCommand" },
+        "ReleaseNotesUrl": {
+          "anyOf": [{ "const": "" }, { "$ref": "#/definitions/uri" }],
+          "description": "Release notes URL, or an empty string when unavailable."
+        },
+        "InstallCommands": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Non-interactive commands by supported platform. Omit unsupported platforms.",
+          "properties": {
+            "Windows (amd64)": { "$ref": "#/definitions/nonBlankString" },
+            "Windows (arm64)": { "$ref": "#/definitions/nonBlankString" },
+            "Linux (amd64)": { "$ref": "#/definitions/nonBlankString" },
+            "Linux (arm64)": { "$ref": "#/definitions/nonBlankString" }
+          }
+        },
+        "PackageManagerFiles": { "$ref": "#/definitions/packageManagerFiles" },
+        "WindowsPackageManagerFiles": { "$ref": "#/definitions/packageManagerFiles" },
+        "ReleasePackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsReleasePackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "ApiVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsApiVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "InstalledVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsInstalledVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "InstallExecutor": { "$ref": "#/definitions/executor" },
+        "WindowsInstallExecutor": { "$ref": "#/definitions/executor" },
+        "UpdateExecutor": { "$ref": "#/definitions/executor" },
+        "WindowsUpdateExecutor": { "$ref": "#/definitions/executor" },
+        "InstallEntryPoint": { "$ref": "#/definitions/actionEntryPoint" },
+        "WindowsInstallEntryPoint": { "$ref": "#/definitions/actionEntryPoint" },
+        "UpdateEntryPoint": { "$ref": "#/definitions/actionEntryPoint" },
+        "WindowsUpdateEntryPoint": { "$ref": "#/definitions/actionEntryPoint" },
+        "InstallExecutionMode": { "$ref": "#/definitions/executionMode" },
+        "WindowsInstallExecutionMode": { "$ref": "#/definitions/executionMode" },
+        "UpdateExecutionMode": { "$ref": "#/definitions/executionMode" },
+        "WindowsUpdateExecutionMode": { "$ref": "#/definitions/executionMode" },
+        "InstallOutcomePackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsInstallOutcomePackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "UpdateOutcomePackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsUpdateOutcomePackageManager": { "$ref": "#/definitions/packageManagerFile" }
+      },
+      "allOf": [
+        {
+          "if": { "not": { "required": ["enabled"], "properties": { "enabled": { "const": false } } } },
+          "then": {
+            "required": ["CheckType", "UpdateType", "UpdateCommand"],
+            "allOf": [
+              {
+                "if": { "required": ["CheckType"], "properties": { "CheckType": { "const": "standard" } } },
+                "then": {
+                  "required": ["Command", "ApiUrl"],
+                  "anyOf": [{ "required": ["VersionFlag"] }, { "required": ["VersionCommand"] }]
+                }
+              },
+              {
+                "if": { "required": ["CheckType"], "properties": { "CheckType": { "const": "custom" } } },
+                "then": {
+                  "required": ["CustomFunction"],
+                  "if": { "required": ["ToolFile"] },
+                  "then": { "properties": { "CustomFunction": { "const": "Test-Tool" } } }
+                }
+              },
+              {
+                "if": { "required": ["VersionExtractor"], "properties": { "VersionExtractor": { "const": "jsonProperty" } } },
+                "then": { "required": ["VersionProperty"] }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

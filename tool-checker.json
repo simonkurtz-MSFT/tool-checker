@@ -1,4 +1,5 @@
 {
+  "$schema": "./tool-checker.schema.json",
   "settings": {
     "CooldownDays": 8
   },

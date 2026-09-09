@@ -1,6 +1,6 @@
 ---
 description: "Maintain tool-specific PowerShell files, shared configuration, registry and output infrastructure, and their loading boundaries."
-applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests/**/*.ps1,CONTRIBUTING.md"
+applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-checker.schema.json,tests/**/*.ps1,CONTRIBUTING.md"
 ---
 
 # Tool-specific files
@@ -18,6 +18,10 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests
 - Prefer JSON-only standard entries. Create a tool file only for specialized
   behavior, using `tools/_tool-template.ps1` as the starting point.
   Keep simple parser and platform-command differences in catalog properties.
+  Keep catalog field changes aligned with tool-checker.schema.json and
+  tests/schema.Tests.ps1; preserve the relative $schema reference and exact field
+  casing. Schema validation is an editor/test gate, not a startup dependency;
+  retain runtime checks for files, dependencies, and entry points.
   Cross-tool package-manager decisions and helpers belong in `infra/PackageManagers/`.
   `infra/package-managers.ps1` resolves only selected PackageManagerFiles and
   WindowsPackageManagerFiles. Accept filenames only, not paths or folder scans.

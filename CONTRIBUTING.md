@@ -39,6 +39,31 @@ When proposing a tool, include sanitized examples of its installed-version
 output and upstream release response. The configured parser must extract a
 version that Tool Checker can compare consistently.
 
+### Catalog schema
+
+[tool-checker.schema.json](tool-checker.schema.json) defines the catalog's authoring
+contract. The catalog's relative `$schema` reference enables VS Code completion,
+hover descriptions, and validation without additional editor configuration.
+Keep the catalog strict JSON and update the schema and
+[tests/schema.Tests.ps1](tests/schema.Tests.ps1) whenever adding or changing fields.
+Unknown properties are rejected to catch spelling mistakes; new custom-tool
+properties must be declared in the schema as well.
+
+Validate locally with PowerShell's built-in validator:
+
+```powershell
+Get-Content ./tool-checker.json -Raw | Test-Json -SchemaFile ./tool-checker.schema.json
+Invoke-Pester ./tests/schema.Tests.ps1
+```
+
+The schema validates structure, types, supported values, filenames, and check-type
+requirements. Defaults are annotations; the configuration reader still applies them.
+It does not load definitions or execute commands. Runtime validation remains responsible
+for file existence, unique display names, declared package-manager dependencies,
+custom `RequiredProperties`, and available entry points. Schema validation is an
+editor/test gate, not a new startup dependency. JSON property names use the exact
+catalog casing, including lowercase `enabled`.
+
 ## Tool-specific file template
 
 Keep the npm cooldown default in catalog `settings.CooldownDays`, not in script

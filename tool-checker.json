@@ -227,7 +227,7 @@
       "VersionParseRegex": "Bicep CLI version\\s+(\\S+)",
       "UpdateParseRegex": "A new Bicep release is available:\\s+v(\\d+(?:\\.\\d+){1,3})",
       "UpdateType": "az-command",
-      "UpdateCommand": "az bicep upgrade --only-show-errors",
+      "UpdateCommand": "az bicep install --version v{latest} --only-show-errors",
       "ReleaseNotesUrl": "https://github.com/Azure/bicep/releases",
       "ApiUrl": "https://api.github.com/repos/Azure/bicep/releases/latest",
       "InstallCommands": {

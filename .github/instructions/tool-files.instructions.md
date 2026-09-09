@@ -81,6 +81,8 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tests
 - Resolve Executor, EntryPoint, Arguments, ExecutionMode, and OutcomePackageManager before
   returning action plans from checks. Catalog defaults support Windows overrides;
   explicit action metadata wins. Menu and Force paths use the same dispatcher.
+  Expand `{latest}` in configured update commands while planning so execution uses the
+  same checked release shown in the action.
   Generic executors return Output/ExitCode; optional Get-ToolOutcome interprets
   failures. Keep eligibility decisions in the owning tool or package manager, not rendering.
 - Worker definitions come from explicit source files and selected registries,

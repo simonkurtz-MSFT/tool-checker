@@ -249,6 +249,9 @@ process. Otherwise use `command` or a declared package manager filename. Install
 catalog metadata supports `Windows` overrides. `Type` is not an executor selector.
 WinGet package manager commands must be single commands; compound shell scripts use the
 generic command executor. Specialized executors return `Output` and `ExitCode`.
+Configured update commands may include `{latest}`; action planning replaces it with the
+checked release version so execution installs the same version shown to the user.
+
 Optional `Get-ToolOutcome(Action, ExitCode, OutputText)` returns a diagnostic
 `Message` and `Status` without changing approval policy.
 

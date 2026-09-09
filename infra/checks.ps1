@@ -359,10 +359,12 @@ function Get-UpdateCommand {
         if ($ToolName -ne $k) { continue }
         $config = $toolsConfig[$k]
         if ($config.ReleasePackageManager) { return '' }
-        if ($config.WindowsUpdateCommand -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            return $config.WindowsUpdateCommand
+        $command = if ($config.WindowsUpdateCommand -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+            $config.WindowsUpdateCommand
+        } else {
+            $config.UpdateCommand
         }
-        return $config.UpdateCommand
+        return $command.Replace('{latest}', $Latest)
     }
 
     ""

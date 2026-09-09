@@ -393,7 +393,7 @@ Describe 'Standard tool update flow' {
         $results.MaturityBlockedUpdates = @()
     }
 
-    It 'registers a self-reported update with its configured command' {
+    It 'pins a self-reported Bicep update to the reported version' {
         Get-StandardToolUpdates `
             -ToolName 'Azure Bicep CLI' `
             -InstalledVersion '0.45.0' `
@@ -401,7 +401,7 @@ Describe 'Standard tool update flow' {
 
         $results.Tools['Azure Bicep CLI'].Latest | Should Be '0.46.1'
         $results.Updates[0] | Should Be 'Azure Bicep CLI'
-        $results.AvailableUpdates[0].Command | Should Be $toolsConfig['Azure Bicep CLI'].UpdateCommand
+        $results.AvailableUpdates[0].Command | Should Be 'az bicep install --version v0.46.1 --only-show-errors'
     }
 }
 

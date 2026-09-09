@@ -1,7 +1,8 @@
 # Output contracts: definition-only loading, caller-scoped colors, read-only
 # rendering, and host-message capture in synthetic workers without external checks.
-$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-$outputPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'infra/output.ps1'
+$repositoryPath = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$scriptPath = Join-Path $repositoryPath 'tool-checker.ps1'
+$outputPath = Join-Path $repositoryPath 'infra/output.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "output-tests-$([guid]::NewGuid()).env")
 
 Describe 'Output infrastructure' {

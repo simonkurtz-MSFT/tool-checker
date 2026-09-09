@@ -45,7 +45,7 @@ version that Tool Checker can compare consistently.
 contract. The catalog's relative `$schema` reference enables VS Code completion,
 hover descriptions, and validation without additional editor configuration.
 Keep the catalog strict JSON and update the schema and
-[tests/schema.Tests.ps1](tests/schema.Tests.ps1) whenever adding or changing fields.
+[infra/tests/schema.Tests.ps1](infra/tests/schema.Tests.ps1) whenever adding or changing fields.
 Unknown properties are rejected to catch spelling mistakes; new custom-tool
 properties must be declared in the schema as well.
 
@@ -53,7 +53,7 @@ Validate locally with PowerShell's built-in validator:
 
 ```powershell
 Get-Content ./tool-checker.json -Raw | Test-Json -SchemaFile ./tool-checker.schema.json
-Invoke-Pester ./tests/schema.Tests.ps1
+Invoke-Pester ./infra/tests/schema.Tests.ps1
 ```
 
 The schema validates structure, types, supported values, filenames, and check-type
@@ -160,6 +160,11 @@ Test changes with focused Pester coverage and synthetic real-runspace checks;
 test each specialized checker selected alone and in check-only mode. Never execute
 real installs, updates, or registry repairs in tests.
 
+Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
+`infra/tests/<package-manager>.Tests.ps1`. Every specialized checker must cover selected-alone
+and check-only execution in its owning suite; keep generic loader and dispatch contracts
+in `infra/tests/`.
+
 When conventions, helper contracts, loading, or validation practices change,
 update the template and this guidance in the same change. The corresponding
 [tool-file instructions](.github/instructions/tool-files.instructions.md) apply
@@ -182,7 +187,7 @@ false values, and the catalog's cooldown validation even when overridden.
 Keep the `-Version` early return independent of infrastructure and configuration.
 Workers receive the resolved state and allowlisted `Get-ToolConfiguration` helper;
 they must not reread configuration. Validate these boundaries with
-[tests/configuration.Tests.ps1](tests/configuration.Tests.ps1) and the existing
+[infra/tests/configuration.Tests.ps1](infra/tests/configuration.Tests.ps1) and the existing
 selection, cooldown, tool-loading, and real-runspace tests.
 
 ## Registry infrastructure
@@ -203,7 +208,7 @@ require explicit approval with `-Force`; `-SkipUpdate` reports drift only.
 Registry policy is independent of tool selection. Workers continue receiving
 resolved tool configuration through the existing shared worker setup.
 
-Validate changes with [tests/registry.Tests.ps1](tests/registry.Tests.ps1) and the
+Validate changes with [infra/tests/registry.Tests.ps1](infra/tests/registry.Tests.ps1) and the
 existing action/force-mode tests. Mock external commands and redirect uv writes
 to `TestDrive`; never modify the developer's real package-manager configuration.
 
@@ -227,7 +232,7 @@ alone must not initialize or overwrite them. Shared result state remains in boot
 alongside the main source and selects only allowlisted worker helpers. Do not scan `infra/` or
 send table/summary rendering to workers. The worker's `Write-Host` capture override
 remains in worker setup, using a snapshot of initialized colors rather than calling
-the initializer again. Validate with [tests/output.Tests.ps1](tests/output.Tests.ps1)
+the initializer again. Validate with [infra/tests/output.Tests.ps1](infra/tests/output.Tests.ps1)
 and the existing banner, legend, action, and parallel-check tests. Copied-application
 fixtures must include all required infrastructure files.
 
@@ -245,7 +250,7 @@ inside guaranteed cleanup. Stop and dispose outstanding workers, close and dispo
 the pool, and restore the cursor even on exceptions. A cleanup failure must not
 skip remaining resources or replace the original operation error. Validate success,
 timeout, startup, collection, and cleanup failures with synthetic workers in
-[tests/parallel.Tests.ps1](tests/parallel.Tests.ps1).
+[infra/tests/parallel.Tests.ps1](infra/tests/parallel.Tests.ps1).
 
 Declare shared dependencies with `PackageManagerFiles` and `WindowsPackageManagerFiles`.
 Use filenames such as `npm.ps1` and `winget.ps1`, resolved directly under
@@ -283,7 +288,7 @@ Optional `Get-ToolOutcome(Action, ExitCode, OutputText)` returns a diagnostic
 Interactive and Force paths share dispatch and completion. Jobs receive selected
 definition registries and allowlisted helpers extracted from explicit source files,
 not live `Get-Command` bodies that can contain mocks. Test contracts in
-[tests/architecture.Tests.ps1](tests/architecture.Tests.ps1), including synthetic
+[infra/tests/architecture.Tests.ps1](infra/tests/architecture.Tests.ps1), including synthetic
 background dispatch, selected dependency isolation, owned refresh, and menu metadata.
 
 ## Validate your change
@@ -291,7 +296,7 @@ background dispatch, selected dependency isolation, owned refresh, and menu meta
 Run the automated tests from the repository root:
 
 ```powershell
-Invoke-Pester ./tests
+Invoke-Pester -Script @('./infra/tests', './tools/tests')
 ```
 
 Confirm that the catalog remains valid JSON:

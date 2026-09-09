@@ -34,7 +34,7 @@
 <!-- List the exact commands run and their results. -->
 
 - [ ] `tool-checker.json` parses successfully.
-- [ ] `Invoke-Pester ./tests` passes.
+- [ ] `Invoke-Pester -Script @('./infra/tests', './tools/tests')` passes.
 - [ ] A targeted `-SkipUpdate` inventory reports the expected versions.
 - [ ] Install and update commands are non-interactive.
 - [ ] Commands are verified on each claimed platform, or exceptions are noted.

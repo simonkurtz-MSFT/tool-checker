@@ -1,5 +1,5 @@
 # Validate catalog authoring rules without running checks, loading tool files, or accessing the network.
-$repositoryPath = Split-Path -Parent $PSScriptRoot
+$repositoryPath = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $schemaPath = Join-Path $repositoryPath 'tool-checker.schema.json'
 $catalogPath = Join-Path $repositoryPath 'tool-checker.json'
 

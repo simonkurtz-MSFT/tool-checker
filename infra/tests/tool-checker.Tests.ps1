@@ -1,7 +1,7 @@
 # Core regression suite for configuration, releases, rendering, dispatch, and approval.
 # Dot-source bootstrap with an absent env file; individual tests supply mocked or
 # synthetic external operations rather than running the real inventory/install workflow.
-$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 $testEnvFile = Join-Path ([System.IO.Path]::GetTempPath()) "tool-checker-tests-$([guid]::NewGuid()).env"
 . $scriptPath -EnvFile $testEnvFile
 $toolsJson = Get-Content (Join-Path (Split-Path $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json

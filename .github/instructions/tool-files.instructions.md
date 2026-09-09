@@ -1,6 +1,6 @@
 ---
 description: "Maintain tool-specific PowerShell files, shared configuration, registry and output infrastructure, and their loading boundaries."
-applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-checker.schema.json,tests/**/*.ps1,CONTRIBUTING.md"
+applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-checker.schema.json,CONTRIBUTING.md"
 ---
 
 # Tool-specific files
@@ -19,7 +19,7 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   behavior, using `tools/_tool-template.ps1` as the starting point.
   Keep simple parser and platform-command differences in catalog properties.
   Keep catalog field changes aligned with tool-checker.schema.json and
-  tests/schema.Tests.ps1; preserve the relative $schema reference and exact field
+  infra/tests/schema.Tests.ps1; preserve the relative $schema reference and exact field
   casing. Schema validation is an editor/test gate, not a startup dependency;
   retain runtime checks for files, dependencies, and entry points.
   Cross-tool package-manager decisions and helpers belong in `infra/PackageManagers/`.
@@ -29,7 +29,7 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
 - Explicitly dot-source the fixed generic infrastructure list via `$PSScriptRoot`, independently
   of catalog selection; do not scan the folder or register it as a tool.
   Infrastructure files define functions only and reuse main-script state.
-  Keep the missing-infrastructure test cases in tests/configuration.Tests.ps1 aligned
+  Keep the missing-infrastructure test cases in infra/tests/configuration.Tests.ps1 aligned
   with the fixed bootstrap list; verify each missing path and independent -Version output.
   Loading must not check or repair registries. Preserve explicit approval even
   with `-Force`, and never offer repairs with `-SkipUpdate`.
@@ -92,6 +92,11 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
 - Worker definitions come from explicit source files and selected registries,
   never live Get-Command bodies. Cover selected-only loading, colliding generic
   operation names, real synthetic jobs, and metadata preservation in architecture tests.
+  Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
+  `infra/tests/<package-manager>.Tests.ps1`; keep generic loader and dispatch contracts in
+  `infra/tests/`.
+  Every specialized checker must cover selected-alone and check-only execution in its
+  owning suite.
   Track check workers immediately after creation; protect pool opening, startup,
   and collection with guaranteed cleanup. Attempt every disposal without masking
   the original failure, and cover the lifecycle with synthetic real-runspace tests.

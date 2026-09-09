@@ -1,5 +1,5 @@
 # Real runspace lifecycle checks with synthetic startup and collection failures.
-$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 
 Describe 'Parallel check resource cleanup' {
     It 'disposes workers and their pool on the <FailureStage> path' -TestCases @(

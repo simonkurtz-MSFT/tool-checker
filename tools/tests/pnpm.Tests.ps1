@@ -1,5 +1,5 @@
 # pnpm update planning targets the active installation and preserves release eligibility.
-$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 
 Describe 'pnpm update planning' {
     $cases = @(

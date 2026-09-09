@@ -1,6 +1,6 @@
 # Cross-file architecture contracts: selected definitions, isolated dispatch, owned
 # rows, and complete action metadata. Real jobs run synthetic operations, not installs.
-$scriptPath = Join-Path (Split-Path $PSScriptRoot) 'tool-checker.ps1'
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 
 Describe 'Generic architecture contracts' {
     BeforeEach {

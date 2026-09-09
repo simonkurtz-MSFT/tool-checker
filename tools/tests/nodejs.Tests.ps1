@@ -1,0 +1,36 @@
+# Node.js release planning contracts.
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
+. $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) 'tool-checker-nodejs-tests-absent.env')
+
+Describe 'Node release planning' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools/nodejs.ps1')
+    }
+
+    It 'filters prereleases and classifies the latest patch in the installed major' {
+        $distributionIndex = @(
+            [PSCustomObject]@{ version = 'v27.0.0-rc.1'; lts = $false },
+            [PSCustomObject]@{ version = 'v26.2.0'; lts = $false },
+            [PSCustomObject]@{ version = 'v24.12.1'; lts = 'Krypton' },
+            [PSCustomObject]@{ version = 'v22.5.1'; lts = 'Jod' }
+        )
+
+        $plan = Get-NodeReleasePlan -DistributionIndex $distributionIndex -CurrentVersion '22.5.0'
+
+        $plan.LatestCurrentVersion | Should Be '26.2.0'
+        $plan.LatestLTSVersion | Should Be '24.12.1'
+        $plan.LatestInMajor | Should Be '22.5.1'
+        $plan.UpdateKind | Should Be 'patch'
+    }
+
+    It 'classifies a newer minor in the installed major' {
+        $distributionIndex = @(
+            [PSCustomObject]@{ version = 'v22.6.0'; lts = 'Jod' },
+            [PSCustomObject]@{ version = 'v22.5.9'; lts = 'Jod' }
+        )
+
+        $plan = Get-NodeReleasePlan -DistributionIndex $distributionIndex -CurrentVersion '22.5.0'
+
+        $plan.UpdateKind | Should Be 'minor'
+    }
+}

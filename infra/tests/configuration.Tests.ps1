@@ -1,7 +1,8 @@
 # Configuration loading/snapshot contracts using temporary catalog and env fixtures.
 # Isolated sessions verify that readers do not load tools or replace caller state.
-$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tool-checker.ps1'
-$configurationPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'infra/configuration.ps1'
+$repositoryPath = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$scriptPath = Join-Path $repositoryPath 'tool-checker.ps1'
+$configurationPath = Join-Path $repositoryPath 'infra/configuration.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "configuration-tests-$([guid]::NewGuid()).env")
 
 Describe 'Configuration infrastructure' {

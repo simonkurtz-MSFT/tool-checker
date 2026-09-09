@@ -1,5 +1,5 @@
 # Generic version policy contracts.
-$scriptPath = Join-Path (Split-Path $PSScriptRoot) 'tool-checker.ps1'
+$scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 
 Describe 'Version comparison contracts' {
     BeforeEach {

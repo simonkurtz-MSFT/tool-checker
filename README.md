@@ -94,7 +94,7 @@ shadowed on `PATH`.
 The characterization tests require Pester and run without invoking tool checks or update actions:
 
 ```powershell
-Invoke-Pester ./tests
+Invoke-Pester -Script @('./infra/tests', './tools/tests')
 ```
 
 ### Tool selection and registry policy

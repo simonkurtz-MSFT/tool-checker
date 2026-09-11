@@ -174,12 +174,21 @@ to the implementation, catalog, and tests.
 
 [infra/configuration.ps1](infra/configuration.ps1) owns catalog and dotenv reading,
 selection, sorting, optional defaults, cooldown resolution, configuration lookup,
-and startup validation. `Get-ToolSortKey` is also shared with table rendering.
+first-run setup, and startup validation. `Get-ToolSortKey` is also shared with table rendering.
 The main script explicitly dot-sources this function-only file via `$PSScriptRoot`
 and calls `Read-ToolCheckerConfiguration` with catalog/env paths and explicit
 cooldown override presence. The reader returns a snapshot; main assigns shared
 state and registers selected tool definitions before validating them. Reading a
 snapshot must not load tool files, modify process environment, or replace shared state.
+
+For a normal, non-dot-sourced run, the entry point checks the resolved environment-file
+path before reading configuration. If it is absent, `Initialize-ToolCheckerEnvironment`
+uses the repository's `.env.example` as the source, prompts with enabled catalog entries,
+and replaces only the template's `TOOL_CHECKER_TOOLS` line. Enter selects all enabled
+tools, comma-separated numbers select a subset, and `0` returns false so the entry point
+exits without creating a file or starting checks. Existing environment files must never
+be overwritten by setup. Keep the application banner visible before this prompt, while
+`-Version` and dot-sourced loading remain noninteractive.
 
 Preserve relative env paths against the caller's working directory, optional
 missing env files, selection normalization, ordered install commands, explicit
@@ -188,7 +197,8 @@ Keep the `-Version` early return independent of infrastructure and configuration
 Workers receive the resolved state and allowlisted `Get-ToolConfiguration` helper;
 they must not reread configuration. Validate these boundaries with
 [infra/tests/configuration.Tests.ps1](infra/tests/configuration.Tests.ps1) and the existing
-selection, cooldown, tool-loading, and real-runspace tests.
+selection, setup cancellation, template preservation, cooldown, tool-loading, and
+real-runspace tests.
 
 ## Registry infrastructure
 

@@ -11,7 +11,7 @@ Describe 'Configuration infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($configurationPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 6
+        $ast.EndBlock.Statements.Count | Should Be 7
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $configurationPath
         }
@@ -161,5 +161,73 @@ Describe 'Configuration snapshots' {
         (ConvertTo-Json $script:RegistryEnvironment -Depth 10 -Compress) | Should Be $beforeEnvironment
         (ConvertTo-Json $script:ToolDefinitions -Depth 5 -Compress) | Should Be $beforeDefinitions
         $script:ReleaseCooldownDays | Should Be $beforeCooldown
+    }
+}
+
+Describe 'Interactive environment setup' {
+    BeforeEach {
+        $fixtureCatalog = Join-Path $TestDrive 'setup-catalog.json'
+        $fixtureEnv = Join-Path $TestDrive 'setup.env'
+        $fixtureTemplate = Join-Path $TestDrive '.env.example'
+        Remove-Item -LiteralPath $fixtureEnv -Force -ErrorAction SilentlyContinue
+        [ordered]@{
+            settings = @{ CooldownDays = 8 }
+            tools = [ordered]@{
+                zulu = @{ Name = 'Zulu CLI'; enabled = $true }
+                disabled = @{ Name = 'Disabled CLI'; enabled = $false }
+                alpha = @{ Name = 'Alpha CLI'; enabled = $true }
+            }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureCatalog
+        Set-Content -LiteralPath $fixtureTemplate -Value @(
+            '# Tool selection'
+            '# TOOL_CHECKER_TOOLS=alpha,zulu'
+            ''
+            '# npm user registry'
+            '# NPM_CONFIG_REGISTRY=https://registry.npmjs.org/'
+        )
+    }
+
+    It 'creates the environment from the template with all enabled tools when the user presses Enter' {
+        Mock Read-Host { '' }
+
+        $completed = Initialize-ToolCheckerEnvironment -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -TemplatePath $fixtureTemplate
+
+        $completed | Should Be $true
+        $environmentContent = Get-Content -LiteralPath $fixtureEnv -Raw
+        $environmentContent | Should Match '(?m)^TOOL_CHECKER_TOOLS=alpha,zulu$'
+        $environmentContent | Should Match '# npm user registry'
+        $environmentContent | Should Match '# NPM_CONFIG_REGISTRY=https://registry.npmjs.org/'
+        Assert-MockCalled Read-Host 1 -Scope It
+    }
+
+    It 'writes the selected tools and retries invalid input' {
+        $script:responses = [System.Collections.Queue]::new()
+        $script:responses.Enqueue('999999999999999999999999')
+        $script:responses.Enqueue('2,1,2')
+        Mock Read-Host { $script:responses.Dequeue() }
+
+        $completed = Initialize-ToolCheckerEnvironment -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -TemplatePath $fixtureTemplate
+
+        $completed | Should Be $true
+        (Get-Content -LiteralPath $fixtureEnv -Raw) | Should Match '(?m)^TOOL_CHECKER_TOOLS=zulu,alpha$'
+        Assert-MockCalled Read-Host 2 -Scope It
+    }
+
+    It 'returns false without creating an environment file when the user selects zero' {
+        Mock Read-Host { '0' }
+
+        $completed = Initialize-ToolCheckerEnvironment -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -TemplatePath $fixtureTemplate
+
+        $completed | Should Be $false
+        Test-Path -LiteralPath $fixtureEnv | Should Be $false
+        Assert-MockCalled Read-Host 1 -Scope It
+    }
+
+    It 'fails clearly when the environment template is missing' {
+        Mock Read-Host { throw 'Setup must validate its template before prompting.' }
+
+        { Initialize-ToolCheckerEnvironment -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -TemplatePath (Join-Path $TestDrive 'missing.example') } |
+            Should Throw 'Environment template file not found'
+        Assert-MockCalled Read-Host 0 -Scope It
     }
 }

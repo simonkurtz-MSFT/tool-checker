@@ -45,6 +45,18 @@ From PowerShell, run:
 
 Checks run concurrently, followed by a summary showing installed and latest versions, release age, available commands, and release-note links. If actions are available, an interactive menu lets you select one or more comma-separated action numbers. Press Enter or select `0` to exit without making further changes.
 
+### First-run setup
+
+Before loading tool configuration, Tool Checker checks whether the selected environment file exists. The default path is `.env` beside the script; `-EnvFile` selects a different destination. When that file is missing, Tool Checker displays its name and version banner, then opens the setup menu.
+
+- Enter one or more comma-separated tool numbers to select only those tools.
+- Press Enter to select every enabled catalog tool.
+- Enter `0` to exit Tool Checker without creating the environment file or running checks.
+
+After a selection, Tool Checker copies `.env.example` to the selected environment-file path and activates `TOOL_CHECKER_TOOLS` with the chosen catalog IDs. Comments and optional registry settings from the template are preserved. Setup does not run when the environment file already exists, and Tool Checker does not overwrite an existing file.
+
+To change the selection later, edit `TOOL_CHECKER_TOOLS` in the environment file or remove the file and run Tool Checker again. Registry settings remain opt-in; uncomment and edit only the entries you want to enforce.
+
 ### Options
 
 | Option | Description |
@@ -99,7 +111,7 @@ Invoke-Pester -Script @('./infra/tests', './tools/tests')
 
 ### Tool selection and registry policy
 
-Copy [`.env.example`](.env.example) to `.env`, then optionally set `TOOL_CHECKER_TOOLS` to a comma-separated list of catalog IDs. When it is omitted, Tool Checker checks every configured tool. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
+The first-run setup creates `.env` from [`.env.example`](.env.example) and sets `TOOL_CHECKER_TOOLS` from the interactive selection. You can also copy the template manually or create a custom file and pass its path with `-EnvFile`. When `TOOL_CHECKER_TOOLS` is omitted, Tool Checker checks every configured tool. The `.env` file and variant names such as `.env.local` are Git-ignored; `.env.example` remains tracked. Values may use quoted or unquoted dotenv syntax, and URL comparisons ignore a trailing slash.
 
 `TOOL_CHECKER_TOOLS` accepts only the IDs defined in [`tool-checker.json`](tool-checker.json). Unknown IDs stop the run before tool checks start. The current catalog IDs are:
 

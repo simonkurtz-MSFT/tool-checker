@@ -45,7 +45,7 @@ Describe 'Output infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($outputPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 12
+        $ast.EndBlock.Statements.Count | Should Be 13
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $outputPath
         }
@@ -187,6 +187,12 @@ Describe 'Output rendering' {
         Mock Get-ReleaseNotesUrl { '' }
     }
 
+    It 'renders the application name and version banner' {
+        Show-ApplicationBanner
+
+        ($script:OutputLines -join "`n") | Should Match 'Tool Checker V'
+    }
+
     It 'renders startup state without performing checks' {
         $SkipUpdate = $true
         $Force = $true
@@ -194,7 +200,6 @@ Describe 'Output rendering' {
         Mock Test-RegistryConfiguration { throw 'Rendering must not check registries' }
         Show-StartupInformation -IsElevated $true
         $rendered = $script:OutputLines -join "`n"
-        $rendered | Should Match 'Tool Checker V'
         $rendered | Should Match 'Process elevated\s+: Yes'
         $rendered | Should Match 'check-only mode'
         $rendered | Should Match 'automatic update'

@@ -38,6 +38,9 @@ if ($Version) {
     return
 }
 
+$startupEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
+$requiresInteractiveSetup = -not (Test-Path -LiteralPath $startupEnvFile -PathType Leaf)
+
 if (-not $script:IsDotSourced) {
     Clear-Host
 }
@@ -56,11 +59,19 @@ foreach ($infrastructure in @('configuration','output','results','runtime','vers
 Initialize-ConsoleColors
 $script:PlatformKey = Get-PlatformKey
 $results = New-ToolCheckResults
+if (-not $script:IsDotSourced) {
+    Show-ApplicationBanner
+}
 
 $configPath = Join-Path $PSScriptRoot 'tool-checker.json'
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     Write-Error "tool-checker.json not found at: $configPath"
     exit 1
+}
+if ($requiresInteractiveSetup -and -not $script:IsDotSourced) {
+    $setupCompleted = Initialize-ToolCheckerEnvironment -ConfigPath $configPath -EnvFile $startupEnvFile `
+        -TemplatePath (Join-Path $PSScriptRoot '.env.example')
+    if (-not $setupCompleted) { return }
 }
 # Readers return a snapshot; only bootstrap publishes it to the shared runtime scope.
 $configuration = Read-ToolCheckerConfiguration -ConfigPath $configPath -EnvFile $EnvFile `

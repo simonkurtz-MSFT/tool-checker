@@ -40,6 +40,14 @@ function Get-ApplicationBannerLines {
     )
 }
 
+function Show-ApplicationBanner {
+    Write-Host ''
+    foreach ($line in Get-ApplicationBannerLines -Version $script:ToolCheckerVersion) {
+        Write-Host "$ColorCyan$line$ColorReset"
+    }
+    Write-Host ''
+}
+
 function Show-UpdateLegend {
     if ($results.Updates.Count -eq 0) { return }
 
@@ -112,11 +120,6 @@ function Show-ResultsTable {
 function Show-StartupInformation {
     param([bool]$IsElevated)
 
-    Write-Host ""
-    foreach ($line in Get-ApplicationBannerLines -Version $script:ToolCheckerVersion) {
-        Write-Host "$ColorCyan$line$ColorReset"
-    }
-    Write-Host ""
     Write-Host "  Process elevated     : $(if ($IsElevated) { 'Yes' } else { 'No' })"
 
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }

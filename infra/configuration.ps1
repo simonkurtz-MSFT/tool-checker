@@ -76,6 +76,84 @@ function Read-DotEnvFile {
     $values
 }
 
+function Initialize-ToolCheckerEnvironment {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$TemplatePath
+    )
+
+    if (-not (Test-Path -LiteralPath $TemplatePath -PathType Leaf)) {
+        throw "Environment template file not found: $TemplatePath"
+    }
+    $toolsJson = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $catalog = Get-ToolCatalogSelection -Tools $toolsJson.tools
+    $availableTools = @($catalog.SelectedEntries | Where-Object { $_.Configuration.enabled -ne $false })
+    if ($availableTools.Count -eq 0) {
+        throw 'Tool Checker setup found no enabled tools in the catalog.'
+    }
+
+    Write-Host 'Tool Checker setup'
+    Write-Host ''
+    Write-Host "No environment file was found at: $EnvFile"
+    Write-Host ''
+
+    Write-Host 'Select tools to check (comma-separated numbers), press Enter for all tools, or enter 0 to exit:'
+    Write-Host ''
+    Write-Host '  0. Exit setup'
+    Write-Host ''
+    for ($index = 0; $index -lt $availableTools.Count; $index++) {
+        Write-Host ("  {0}. {1}" -f ($index + 1), $availableTools[$index].Name)
+    }
+
+    Write-Host ''
+
+    while ($true) {
+        $response = (Read-Host 'Tools').Trim()
+        if (-not $response) {
+            $selectedToolIds = @($availableTools.Id)
+            break
+        }
+        if ($response -eq '0') {
+            Write-Host ''
+            Write-Host "Setup cancelled. Exiting Tool Checker.`n"
+            return $false
+        }
+
+        $selections = @($response -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $selectionNumbers = [System.Collections.Generic.List[int]]::new()
+        $validSelections = $selections.Count -gt 0
+        foreach ($selection in $selections) {
+            $selectionNumber = 0
+            if (-not [int]::TryParse($selection, [ref]$selectionNumber) -or
+                $selectionNumber -lt 1 -or $selectionNumber -gt $availableTools.Count) {
+                $validSelections = $false
+                break
+            }
+            $selectionNumbers.Add($selectionNumber)
+        }
+        if ($validSelections) {
+            $selectedToolIds = @($selectionNumbers | ForEach-Object { $availableTools[$_ - 1].Id } | Select-Object -Unique)
+            break
+        }
+        Write-Warning "Enter 0 to exit, or numbers from 1 to $($availableTools.Count), separated by commas."
+    }
+
+    $parentDirectory = Split-Path -Parent $EnvFile
+    if ($parentDirectory -and -not (Test-Path -LiteralPath $parentDirectory -PathType Container)) {
+        $null = New-Item -ItemType Directory -Path $parentDirectory -Force
+    }
+    $template = Get-Content -LiteralPath $TemplatePath -Raw
+    $toolSelection = "TOOL_CHECKER_TOOLS=$($selectedToolIds -join ',')"
+    if ($template -notmatch '(?m)^\s*#?\s*TOOL_CHECKER_TOOLS=.*$') {
+        throw "Environment template does not contain a TOOL_CHECKER_TOOLS entry: $TemplatePath"
+    }
+    $environmentContent = $template -replace '(?m)^\s*#?\s*TOOL_CHECKER_TOOLS=.*$', $toolSelection
+    Set-Content -LiteralPath $EnvFile -Value $environmentContent -Encoding utf8 -NoNewline
+    Write-Host "Saved tool selection to: $EnvFile`n"
+    return $true
+}
+
 function Read-ToolCheckerConfiguration {
     param(
         [Parameter(Mandatory)][string]$ConfigPath,

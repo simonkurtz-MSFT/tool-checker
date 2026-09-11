@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-11
+
 ### Added
 
 - Add an interactive first-run setup that creates the environment file and records
@@ -168,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.1.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.2.0...HEAD
+[2.2.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/1.2.5...2.0.0
 [1.2.5]: https://github.com/simonkurtz-MSFT/tool-checker/compare/1.2.4...1.2.5

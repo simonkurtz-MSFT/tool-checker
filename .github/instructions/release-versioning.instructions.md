@@ -12,8 +12,12 @@ applyTo: "tool-checker.ps1,CHANGELOG.md"
   explicitly requires a prerelease version. Choose the increment from the shipped
   behavior: breaking changes increment `MAJOR`, backward-compatible features
   increment `MINOR`, and backward-compatible fixes increment `PATCH`.
-- Keep a version bump and its changelog release entry in the same change. Do not
-  create a Git tag, commit, or GitHub release unless explicitly requested.
+- Keep a version bump and its changelog release entry in the same change. After
+  validation, commit the release files with the exact message `Set V<version>`,
+  preserving the uppercase `V`, then create the matching `<version>` Git tag on that
+  commit. For example, version `2.2.0` uses commit message `Set V2.2.0` and tag
+  `2.2.0`. Do not push the commit or tag or create a GitHub release unless explicitly
+  requested.
 - Maintain `CHANGELOG.md` in Keep a Changelog format. Record notable user-facing
   changes under `Unreleased` as they are introduced; omit formatting-only churn and
   test-only changes unless they materially affect contributors or release confidence.

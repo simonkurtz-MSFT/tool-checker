@@ -2,6 +2,8 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
+The latest release is **[2.2.0](CHANGELOG.md#220---2026-09-11)**, including interactive first-run tool selection and environment-file setup.
+
 Checks npm releases from newest to oldest and selects the newest production version that has completed the catalog-configured cooldown (eight full days by default, overridable at runtime). If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
 
 The included configuration checks:
@@ -17,13 +19,29 @@ Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tool
 
 ## See it in action
 
-The following screenshots show Tool Checker `1.2.0` validating registry policy and metadata sources, tracking parallel checks with a live elapsed-time and per-check progress indicator, reporting release age and cooldown status in the consolidated inventory, and refreshing registry checks after an explicitly approved alignment.
+These images come from a **real Tool Checker 2.2.0 run on Windows**, captured on September 15, 2026—not fabricated terminal output. The unchanged script ran in a PowerShell pseudoterminal; recorded text, ANSI colors, versions, and timings were rendered to PNG. Setup, execution, summary, and action-menu views are cropped separately, with the recorded version banner retained for context.
 
-![Tool Checker 1.2.0 validating registry configuration and displaying elapsed time with running and completed parallel checks](docs/assets/tool-checker-execution.png)
+The run used an isolated environment file, selected all 19 enabled catalog tools, and queried actual installed versions and upstream releases. Registry policy was left unset; metadata queries used the machine's configured npm proxy. The action menu was exited with `0`: **no installs, updates, or registry repairs were performed**. Versions, release ages, available actions, and timings will vary by machine and capture date.
 
-![Tool Checker 1.2.0 inventory summary with release age and npm cooldown status](docs/assets/tool-checker-summary.png)
+### First-run setup
 
-![Tool Checker 1.2.0 registry checks and summary after an explicitly approved registry alignment](docs/assets/tool-checker-post-execution-summary.png)
+![Tool Checker 2.2.0 first-run setup offering all 19 enabled tools and waiting for a selection](docs/assets/tool-checker-setup.png)
+
+### Parallel checks
+
+![Tool Checker 2.2.0 reporting registry metadata sources and live elapsed time with running and completed parallel checks](docs/assets/tool-checker-execution.png)
+
+### Inventory summary
+
+The captured summary shows an actionable uv update and a pnpm release still in the catalog's eight-day npm cooldown.
+
+![Tool Checker 2.2.0 real inventory summary showing installed and latest versions, an available uv update, and pnpm in cooldown](docs/assets/tool-checker-summary.png)
+
+### Explicit action approval
+
+![Tool Checker 2.2.0 real action menu offering a uv update or exit without changing the machine](docs/assets/tool-checker-post-execution-summary.png)
+
+See [Capturing README images](docs/capturing-readme-images.md) to reproduce these captures.
 
 ## Requirements
 
@@ -45,9 +63,11 @@ From PowerShell, run:
 
 Checks run concurrently, followed by a summary showing installed and latest versions, release age, available commands, and release-note links. If actions are available, an interactive menu lets you select one or more comma-separated action numbers. Press Enter or select `0` to exit without making further changes.
 
-### First-run setup
+For an inventory-only run, omit `-Force` and exit the action menu without selecting anything. First-run setup can still create the selected environment file; it does not install or update tools.
 
-Before loading tool configuration, Tool Checker checks whether the selected environment file exists. The default path is `.env` beside the script; `-EnvFile` selects a different destination. When that file is missing, Tool Checker displays its name and version banner, then opens the setup menu.
+### First-run configuration
+
+Version 2.2.0 adds interactive first-run setup. Before loading tool configuration, Tool Checker checks whether the selected environment file exists. The default path is `.env` beside the script; `-EnvFile` selects a different destination. When that file is missing, Tool Checker displays its name and version banner, then opens the setup menu.
 
 - Enter one or more comma-separated tool numbers to select only those tools.
 - Press Enter to select every enabled catalog tool.
@@ -61,7 +81,7 @@ To change the selection later, edit `TOOL_CHECKER_TOOLS` in the environment file
 
 | Option | Description |
 | --- | --- |
-| `-SkipUpdate` | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu. |
+| `-SkipUpdate` | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu; exit without selecting an install for a read-only inventory. |
 | `-Force` | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools. |
 | `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds. |
 | `-CooldownDays <days>` | Override the catalog's npm release cooldown for this run. Nonnegative integer; `0` removes the age delay. |

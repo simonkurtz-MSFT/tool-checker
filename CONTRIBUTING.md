@@ -154,6 +154,10 @@ remain behind the shared dispatcher and approval gates.
 
 Keep cross-tool npm release metadata helpers in [infra/PackageManagers/npm.ps1](infra/PackageManagers/npm.ps1), declared through
 `PackageManagerFiles`. In particular, a pnpm-only selection must not depend on the global npm tool file.
+An npm-managed tool can opt into `InstalledVersionPackageManager: "npm.ps1"` to
+read its exact global package version during discovery and refresh, falling back
+to its CLI parser when npm metadata is unavailable. Copilot uses this to retain
+package revisions that can differ from its CLI banner; pnpm keeps its active-command source.
 Use catalog JSON properties, regexes, and platform command overrides for simple
 differences instead of adding tool-name branches to the standard framework.
 Test changes with focused Pester coverage and synthetic real-runspace checks;

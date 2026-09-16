@@ -79,6 +79,9 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   Use Test-UpdateAvailable or Compare-OwnedToolVersions with ToolName for owned
   decisions, including table status. Standard checks persist source metadata in
   owner ToolState (command/api/package-manager filename); workers must retain it.
+- Opt npm-managed tools into `InstalledVersionPackageManager: "npm.ps1"` only when
+  the global package is the intended version source. Preserve CLI fallback and
+  cover discovery, refresh, and selected-only workers; do not override active-command sources such as pnpm.
 - Rows/actions carry ToolId and optional ItemId. Use Get-ToolState for owner-keyed
   inventory; never add product-specific fields to shared results. Preserve the
   latest known release during refresh and update detached visible rows explicitly.

@@ -7,6 +7,12 @@ function Get-ExecutionOutcome-PackageManager {
     }
 }
 
+function Get-InstalledVersion-PackageManager {
+    param([string]$ToolName)
+    $config = Get-ToolConfiguration -ToolName $ToolName -RequiredProperties @('NpmPackageName')
+    Get-GlobalNpmInstalledVersion -PackageName $config.NpmPackageName
+}
+
 function Get-LatestVersion-PackageManager {
     param([object]$ApiData, [string]$ToolName)
     $config = Get-ToolConfiguration -ToolName $ToolName

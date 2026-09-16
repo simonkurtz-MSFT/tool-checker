@@ -358,6 +358,7 @@
     "github-copilot-cli": {
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
+      "InstalledVersionPackageManager": "npm.ps1",
       "PackageManagerFiles": ["npm.ps1"],
       "ReleasePackageManager": "npm.ps1",
       "ApiVersionPackageManager": "npm.ps1",
@@ -367,7 +368,7 @@
       "ProductionReleasesOnly": false,
       "Command": "copilot",
       "VersionFlag": "--version",
-      "VersionParseRegex": "GitHub Copilot CLI ([0-9]+(?:\\.[0-9]+){2}-[0-9]+)",
+      "VersionParseRegex": "GitHub Copilot CLI ([0-9]+(?:\\.[0-9]+){2}(?:-[0-9]+)?)",
       "VersionExtractor": "npmDistTagLatest",
       "NpmPackageName": "@github/copilot",
       "UpdateType": "npm-global",

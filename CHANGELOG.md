@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-16
+
+### Added
+
+- Discover duplicate global npm and pnpm installations, show which command is active,
+  and recommend removal of the older installation.
+- Add a reproducible workflow for capturing README terminal images.
+
+### Fixed
+
+- Read the GitHub Copilot CLI installed version from npm package status when available.
+- Compare semantic versions consistently when either value has a leading `v`.
+
 ## [2.2.0] - 2026-09-11
 
 ### Added
@@ -170,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.2.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.3.0...HEAD
+[2.3.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/1.2.5...2.0.0

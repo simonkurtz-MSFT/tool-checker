@@ -51,6 +51,38 @@ function Resolve-ActionMetadata {
     $Action
 }
 
+function Get-DuplicateInstallationActions {
+    foreach ($owner in @($results.ToolState.Keys | Sort-Object)) {
+        $state = $results.ToolState[$owner]
+        if (-not $state.ContainsKey('Installations')) { continue }
+        $found = @($state.Installations | Where-Object Status -eq 'Found')
+        if ($found.Count -le 1) { continue }
+
+        $config = Get-OwnedConfiguration -ToolId $owner
+        $name = if ($config.Name) { $config.Name } else { $owner }
+        $preferredManager = if ($config.UpdateCommand -match '^\s*(npm|pnpm)\s') { $Matches[1] } else { $null }
+        $recommended = $found[0]
+        foreach ($candidate in $found | Select-Object -Skip 1) {
+            $comparison = Compare-OwnedToolVersions -Version1 $candidate.Version -Version2 $recommended.Version -ToolName $name
+            if ($comparison -lt 0 -or ($comparison -eq 0 -and $candidate.PackageManager -ne $preferredManager -and $recommended.PackageManager -eq $preferredManager)) {
+                $recommended = $candidate
+            }
+        }
+
+        $manager = $recommended.PackageManager
+        $package = $recommended.PackageName
+        @{
+            Name = $name
+            ToolId = $owner
+            ItemId = "duplicate:${manager}:$package"
+            Label = "Remove $manager duplicate of $name (recommended: remove version $($recommended.Version))"
+            Type = 'cleanup'
+            Command = if ($manager -eq 'pnpm') { "pnpm remove --global $package" } else { "npm uninstall --global $package" }
+            Recommended = $true
+        }
+    }
+}
+
 function Get-ActionOutcome {
     param([object]$Action, [int]$ExitCode, [string]$OutputText)
     $Action = Resolve-ActionMetadata -Action $Action
@@ -63,10 +95,10 @@ function Get-ActionOutcome {
 }
 
 function Get-AvailableActions {
-    param([switch]$RegistryOnly)
+    param([switch]$RegistryOnly, [switch]$ApprovalOnly)
 
     $actions = @()
-    foreach ($notInstalled in $results.NotInstalled | Where-Object { -not $RegistryOnly }) {
+    foreach ($notInstalled in $results.NotInstalled | Where-Object { -not $RegistryOnly -and -not $ApprovalOnly }) {
         $command = Get-InstallCommand -NotInstalledEntry $notInstalled
         $suffix = if ([string]::IsNullOrWhiteSpace($command)) { ' (no install command for this platform)' } else { '' }
         $actions += @{
@@ -79,7 +111,8 @@ function Get-AvailableActions {
     }
 
     if (-not $SkipUpdate) {
-        foreach ($update in $results.AvailableUpdates | Where-Object { -not $RegistryOnly -or $_.Type -eq 'registry' }) {
+        $includedTypes = if ($RegistryOnly) { @('registry') } elseif ($ApprovalOnly) { @('registry', 'cleanup') } else { $null }
+        foreach ($update in $results.AvailableUpdates | Where-Object { -not $includedTypes -or $_.Type -in $includedTypes }) {
             $details = if ($update.Details) { " ($($update.Details))" } else { '' }
             $verb = if ($update.Type -eq 'registry') { 'Align' } else { 'Update' }
             # Preserve all owner/executor arguments, including fields unknown to the menu.
@@ -88,6 +121,7 @@ function Get-AvailableActions {
             $action.Label = "$verb $($update.Name)$details"
             $actions += $action
         }
+        if (-not $RegistryOnly) { $actions += @(Get-DuplicateInstallationActions) }
     }
 
     $actions | ForEach-Object { Resolve-ActionMetadata -Action $_ }
@@ -184,9 +218,9 @@ function Complete-InstallExecution {
 }
 
 function Invoke-ActionMenu {
-    param([switch]$RegistryOnly)
+    param([switch]$RegistryOnly, [switch]$ApprovalOnly)
 
-    $actions = @(Get-AvailableActions -RegistryOnly:$RegistryOnly)
+    $actions = @(Get-AvailableActions -RegistryOnly:$RegistryOnly -ApprovalOnly:$ApprovalOnly)
     if ($actions.Count -eq 0) { return }
 
     $completedIdx = @()
@@ -269,9 +303,9 @@ function Invoke-ActionMenu {
 }
 
 function Invoke-ForceUpdates {
-    # Force authorizes tool updates only; registry alignment stays in the explicit menu.
+    # Force authorizes tool updates only; registry alignment and cleanup stay in the explicit menu.
     Write-Header "Available Updates (Force mode)"
-    $automaticUpdates = @($results.AvailableUpdates | Where-Object { $_.Type -ne 'registry' })
+    $automaticUpdates = @($results.AvailableUpdates | Where-Object { $_.Type -notin @('registry', 'cleanup') })
     if ($automaticUpdates.Count -eq 0) { Write-Success "No automatic tool updates available"; return }
 
     Write-Host "Running all updates in parallel...`n"

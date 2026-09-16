@@ -83,6 +83,7 @@ Describe 'pnpm update planning' {
 Describe 'pnpm version refresh' {
     . $scriptPath -EnvFile (Join-Path $TestDrive 'empty.env')
     Mock Get-GlobalNpmInstalledVersion { '10.1.0' }
+    Mock Get-GlobalNodePackageInventory { '{"dependencies":{}}' | ConvertFrom-Json }
     Mock Test-CommandExists { $true }
     Mock Get-CommandVersion { $script:mockPnpmVersion }
 

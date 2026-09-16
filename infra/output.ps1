@@ -114,6 +114,36 @@ function Show-ResultsTable {
         Write-Host "$clr$row$ColorReset"
 
     }
+    $installationOwners = @($results.ToolState.Keys | Where-Object {
+        $results.ToolState[$_].ContainsKey('Installations') -and
+        @($results.ToolState[$_].Installations | Where-Object Status -eq 'Found').Count -gt 1
+    } | Sort-Object)
+    if ($installationOwners.Count -gt 0) {
+        Write-Host ""
+        Write-Host "${ColorCyan}  Package installations (global inventories)$ColorReset"
+        Write-Host ""
+        foreach ($owner in $installationOwners) {
+            $state = $results.ToolState[$owner]
+            $config = Get-OwnedConfiguration -ToolId $owner
+            $name = if ($config.Name) { $config.Name } else { $owner }
+            $found = @($state.Installations | Where-Object Status -eq 'Found')
+            $duplicate = $found.Count -gt 1
+            $label = if ($duplicate) { "$name [multiple installations]" } else { $name }
+            $color = if ($duplicate) { $ColorYellow } else { $ColorCyan }
+            Write-Host "$color  $label$ColorReset"
+            foreach ($installation in $found) {
+                Write-Host "    $($installation.PackageManager): $($installation.PackageName)@$($installation.Version)"
+                if ($installation.Path) { Write-Host "      $($installation.Path -replace '^\\\\\?\\', '')" }
+            }
+            $cleanup = @(Get-DuplicateInstallationActions | Where-Object ToolId -eq $owner | Select-Object -First 1)
+            if ($cleanup.Count -gt 0) { Write-Host "$ColorYellow    Recommended removal: $($cleanup[0].Command)$ColorReset" }
+            if ($state.ResolvedCommandPath) {
+                Write-Host ""
+                Write-Host "    Command resolves to: $($state.ResolvedCommandPath -replace '^\\\\\?\\', '')"
+                Write-Host ""
+            }
+        }
+    }
     Write-Host ""
 }
 
@@ -138,7 +168,7 @@ function Show-RegistryMetadata {
             [PSCustomObject]@{ Label = $label; Url = $toolsConfig[$_].ApiUrl }
         })
     $registryLabels = @('npm registry source', 'npm registry URL') + @($registryMetadataRows.Label)
-    $registryLabelWidth = ($registryLabels | Measure-Object -Property Length -Maximum).Maximum
+    $registryLabelWidth = (($registryLabels | Measure-Object -Property Length -Maximum).Maximum + 1)
     Write-Host ""
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry source', $script:NpmRegistryResolution.Source)
     Write-Host ("  {0,-$registryLabelWidth}: {1}" -f 'npm registry URL', $script:NpmRegistryResolution.Url)

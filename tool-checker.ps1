@@ -110,12 +110,12 @@ function Main {
         return
     }
 
-    # Automatic tool updates never imply approval to change package registries.
+    # Automatic tool updates never imply approval to change registries or remove duplicate installations.
     if ($Force) {
         Invoke-ForceUpdates
-        if ($results.AvailableUpdates | Where-Object { $_.Type -eq 'registry' }) {
-            Write-Warning 'Registry changes always require explicit approval, including in Force mode.'
-            Invoke-ActionMenu -RegistryOnly
+        if (@(Get-AvailableActions -ApprovalOnly).Count -gt 0) {
+            Write-Warning 'Registry changes and duplicate cleanup always require explicit approval, including in Force mode.'
+            Invoke-ActionMenu -ApprovalOnly
         }
     } else {
         Invoke-ActionMenu

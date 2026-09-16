@@ -37,9 +37,97 @@ Describe 'npm release selection' {
     }
 }
 
+Describe 'Node package installation discovery' {
+    function npm { throw 'Unexpected npm execution' }
+    BeforeEach {
+        $results = New-ToolCheckResults
+        Mock Test-CommandExists { $true }
+        Mock Get-GlobalNodePackageInventory {
+            if ($PackageManager -eq 'npm') {
+                '{"dependencies":{"@github/copilot":{"version":"1.0.84-2","path":"/npm/node_modules/@github/copilot"}}}' | ConvertFrom-Json
+            } else {
+                '[{"dependencies":{"@github/copilot":{"version":"1.0.83-3","path":"/pnpm/node_modules/@github/copilot"}}}]' | ConvertFrom-Json
+            }
+        }
+    }
+
+    It 'discovers duplicate installations with their own versions and paths' {
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        $installations = @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' })
+        $installations.Count | Should Be 2
+        $installations[0].PackageManager | Should Be 'npm'
+        $installations[0].Version | Should Be '1.0.84-2'
+        $installations[0].Path | Should Be '/npm/node_modules/@github/copilot'
+        $installations[1].PackageManager | Should Be 'pnpm'
+        $installations[1].Version | Should Be '1.0.83-3'
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'discovers a package installed only through <Manager>' -TestCases @(@{ Manager = 'npm' }, @{ Manager = 'pnpm' }) {
+        param($Manager)
+        $script:ExpectedManager = $Manager
+        Mock Test-CommandExists { $Command -eq $script:ExpectedManager }
+        $installations = @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' })
+        $installations.Count | Should Be 1
+        $installations[0].PackageManager | Should Be $Manager
+    }
+
+    It 'uses the npm global root when inventory omits the package path' {
+        Mock Test-CommandExists { $Command -eq 'npm' }
+        Mock Get-GlobalNodePackageInventory { '{"dependencies":{"@github/copilot":{"version":"1.0.84-2"}}}' | ConvertFrom-Json }
+        Mock npm { $global:LASTEXITCODE = 0; Join-Path $TestDrive 'node_modules' }
+
+        $installations = @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' })
+
+        $installations.Count | Should Be 1
+        $installations[0].Path | Should Be (Join-Path $TestDrive 'node_modules/@github/copilot')
+        Assert-MockCalled npm 1 -Scope It -ParameterFilter { $args -contains 'root' -and $args -contains '-g' }
+    }
+
+    It 'skips absent package managers' {
+        Mock Test-CommandExists { $false }
+        @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' }).Count | Should Be 0
+        Assert-MockCalled Get-GlobalNodePackageInventory 0 -Scope It
+    }
+
+    It 'does not report unrelated packages as installations' {
+        Mock Get-GlobalNodePackageInventory { '{"dependencies":{"other":{"version":"1.0.0"}}}' | ConvertFrom-Json }
+        @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' }).Count | Should Be 0
+    }
+
+    It 'treats inventories without dependencies as empty rather than unavailable' {
+        Mock Get-GlobalNodePackageInventory { '{"name":"empty"}' | ConvertFrom-Json }
+        @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' }).Count | Should Be 0
+    }
+
+    It 'distinguishes unavailable inventory from an absent package' {
+        Mock Get-GlobalNodePackageInventory { throw 'Invalid inventory' }
+        $installations = @(Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-Installations' -Arguments @{ ToolName = 'GitHub Copilot CLI' })
+        $installations.Count | Should Be 2
+        $installations[0].Status | Should Be 'Unavailable'
+        $installations[1].Status | Should Be 'Unavailable'
+    }
+}
+
+Describe 'Node package inventory commands' {
+    function npm { throw 'Unexpected npm execution' }
+    It 'rejects malformed inventory and nonzero npm exits' {
+        Mock npm { $global:LASTEXITCODE = 0; 'not JSON' }
+        $message = try { Get-GlobalNodePackageInventory -PackageManager npm } catch { $_.Exception.Message }
+        [string]::IsNullOrEmpty($message) | Should Be $false
+
+        Mock npm { $global:LASTEXITCODE = 1; '{"dependencies":{}}' }
+        $message = try { Get-GlobalNodePackageInventory -PackageManager npm } catch { $_.Exception.Message }
+        $message | Should Match 'Could not read npm global inventory'
+    }
+}
+
 Describe 'npm installed version refresh' {
     BeforeEach {
         $results = New-ToolCheckResults
+        Mock Get-GlobalNodePackageInventory {
+            '{"dependencies":{"@github/copilot":{"version":"1.0.84-2","path":"/packages/@github/copilot"}}}' | ConvertFrom-Json
+        }
         Mock Get-GlobalNpmInstalledVersion { '1.0.84-2' }
         Mock Test-CommandExists { $true }
         Mock Get-CommandVersion { 'GitHub Copilot CLI 1.0.83-3.' }
@@ -53,12 +141,15 @@ Describe 'npm installed version refresh' {
 
     It 'refreshes the installed package revision and clears the displayed update command' {
         $results.Tools['GitHub Copilot CLI'] = @{ ToolId = 'github-copilot-cli'; Installed = '1.0.83'; Latest = '1.0.84-2' }
+        (Get-ToolState 'github-copilot-cli').Installations = @(@{ PackageManager = 'npm'; Version = '1.0.83'; Status = 'Found' })
 
         Refresh-ToolVersion -ToolName 'GitHub Copilot CLI' | Should Be $true
 
         $row = $results.Tools['GitHub Copilot CLI']
         $row.Installed | Should Be '1.0.84-2'
         $row.Latest | Should Be '1.0.84-2'
+        $results.ToolState['github-copilot-cli'].Installations.Count | Should Be 2
+        $results.ToolState['github-copilot-cli'].Installations[0].Version | Should Be '1.0.84-2'
         Get-UpdateCommand -ToolName 'GitHub Copilot CLI' -Installed $row.Installed -Latest $row.Latest | Should Be ''
     }
 
@@ -83,9 +174,16 @@ Describe 'npm installed version worker' {
             Block = {
                 function copilot { 'GitHub Copilot CLI 1.0.83-3.' }
                 function npm {
-                    if ($args -contains 'list' -and $args -contains '@github/copilot' -and $args -contains '--json') {
-                        '{"dependencies":{"@github/copilot":{"version":"1.0.84-2"}}}'
+                    $global:LASTEXITCODE = 0
+                    if ($args -contains 'list' -and $args -contains '--json') {
+                        '{"dependencies":{"@github/copilot":{"version":"1.0.84-2","path":"/npm/@github/copilot"}}}'
                     } else { throw 'Unexpected npm operation' }
+                }
+                function pnpm {
+                    $global:LASTEXITCODE = 0
+                    if ($args -contains 'list' -and $args -contains '--json') {
+                        '[{"dependencies":{"@github/copilot":{"version":"1.0.83-3","path":"/pnpm/@github/copilot"}}}]'
+                    } else { throw 'Unexpected pnpm operation' }
                 }
                 Test-StandardTool -ToolName 'GitHub Copilot CLI'
             }
@@ -93,6 +191,9 @@ Describe 'npm installed version worker' {
 
         $results.Tools['GitHub Copilot CLI'].Installed | Should Be '1.0.84-2'
         $results.ToolState['github-copilot-cli'].InstalledVersionSource | Should Be 'npm.ps1'
+        $results.ToolState['github-copilot-cli'].Installations.Count | Should Be 2
+        $results.ToolState['github-copilot-cli'].Installations[1].PackageManager | Should Be 'pnpm'
+        $results.ToolState['github-copilot-cli'].Installations[1].Version | Should Be '1.0.83-3'
         $results.AvailableUpdates.Count | Should Be 0
         $results.Errors.Count | Should Be 0
     }

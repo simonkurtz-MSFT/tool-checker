@@ -158,6 +158,17 @@ An npm-managed tool can opt into `InstalledVersionPackageManager: "npm.ps1"` to
 read its exact global package version during discovery and refresh, falling back
 to its CLI parser when npm metadata is unavailable. Copilot uses this to retain
 package revisions that can differ from its CLI banner; pnpm keeps its active-command source.
+Catalog tools with `NpmPackageName` can separately opt into
+`InstallationsPackageManager: "npm.ps1"` to discover global npm and pnpm copies.
+Standard checks (including check-only) and refresh store `Installations` and
+`ResolvedCommandPath` in owner-keyed `ToolState`; workers preserve these records.
+The results table displays manager-reported versions and paths only when a tool
+has multiple found installations. Duplicate discovery offers one recommended
+cleanup action for the older copy, preferring the package manager outside the
+configured update command when versions match. Cleanup always requires explicit
+approval, including with `-Force`. Discovery does not change the installed-version
+source or update commands.
+The shipped opt-ins are ncu, pnpm, and GitHub Copilot CLI, not arbitrary global packages.
 Use catalog JSON properties, regexes, and platform command overrides for simple
 differences instead of adding tool-name branches to the standard framework.
 Test changes with focused Pester coverage and synthetic real-runspace checks;

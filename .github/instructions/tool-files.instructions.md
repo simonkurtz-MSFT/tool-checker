@@ -82,6 +82,13 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
 - Opt npm-managed tools into `InstalledVersionPackageManager: "npm.ps1"` only when
   the global package is the intended version source. Preserve CLI fallback and
   cover discovery, refresh, and selected-only workers; do not override active-command sources such as pnpm.
+- `InstallationsPackageManager` selects read-only `Get-Installations-PackageManager`
+  discovery. Keep manager/version/path/status records and resolved command paths in
+  owner `ToolState`, refresh them after actions, and preserve them across workers.
+  Render only duplicate found inventories. Offer one explicit cleanup action for
+  the older installation, using the configured update manager as the equal-version
+  tie-breaker; cleanup must remain approval-gated even in Force mode. Do not change
+  version-source policy, update actions, or package-manager selection.
 - Rows/actions carry ToolId and optional ItemId. Use Get-ToolState for owner-keyed
   inventory; never add product-specific fields to shared results. Preserve the
   latest known release during refresh and update detached visible rows explicitly.

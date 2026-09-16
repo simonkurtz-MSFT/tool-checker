@@ -216,7 +216,7 @@ Describe 'Output rendering' {
         $script:NpmRegistryResolution = @{ Source = 'test'; Url = 'https://example.test'; Details = 'Synthetic fallback' }
         Show-RegistryMetadata
         $rendered = $script:OutputLines -join "`n"
-        $rendered | Should Match 'GHCP CLI metadata URL\s*: https://example.test/copilot'
+        $rendered | Should Match 'GHCP CLI metadata URL : https://example.test/copilot'
         $rendered | Should Match 'Registry resolution detail: Synthetic fallback'
         $rendered | Should Not Match 'Other CLI'
         $rows = @($script:OutputLines | Where-Object { $_ -match '^  (npm registry|GHCP CLI)' })
@@ -240,6 +240,53 @@ Describe 'Output rendering' {
         $rendered | Should Match ([regex]::Escape($ColorOrange) + '  Blocked\s+1.0.0\s+2.0.0\s+2d')
         $rendered | Should Match ([regex]::Escape($ColorRed) + '  Failed')
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'renders duplicate package inventories and command paths without probing or mutating state' {
+        $toolsConfig = @{ Example = @{ Id = 'example'; Name = 'Example' } }
+        $results.Tools.Example = @{ ToolId = 'example'; Installed = '2.0.0'; Latest = '2.0.0' }
+        $results.ToolState.example = @{
+            Installations = @(
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Path = '\\?\C:\npm\cli'; Status = 'Found' },
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Path = '/pnpm/cli'; Status = 'Found' }
+            )
+            ResolvedCommandPath = '\\?\C:\editor\cli.ps1'
+        }
+        Mock Invoke-PackageManagerOperation { throw 'Rendering must not discover installations' }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+
+        Show-ResultsTable
+
+        $rendered = $script:OutputLines -join "`n"
+        $headingIndex = @($script:OutputLines | ForEach-Object { $_ -replace [regex]::Escape($ColorCyan), '' -replace [regex]::Escape($ColorReset), '' }).IndexOf('  Package installations (global inventories)')
+        $script:OutputLines[$headingIndex - 1] | Should Be ''
+        $script:OutputLines[$headingIndex + 1] | Should Be ''
+        $rendered | Should Match 'Example \[multiple installations\]'
+        $rendered | Should Match 'npm: @example/cli@2.0.0'
+        $rendered | Should Match 'pnpm: @example/cli@1.0.0'
+        $rendered | Should Match ([regex]::Escape('C:\npm\cli'))
+        $rendered | Should Match '/pnpm/cli'
+        $rendered | Should Not Match ([regex]::Escape('\\?\'))
+        $rendered | Should Match 'Recommended removal: pnpm remove --global @example/cli'
+        $rendered | Should Match ('\n\n    Command resolves to: ' + [regex]::Escape('C:\editor\cli.ps1') + '\n\n')
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+        Assert-MockCalled Invoke-PackageManagerOperation 0 -Scope It
+    }
+
+    It 'omits unavailable, empty, and single-installation inventories' {
+        $toolsConfig = @{ Example = @{ Id = 'example'; Name = 'Example' } }
+        $results.Tools.Example = @{ ToolId = 'example'; Installed = '2.0.0'; Latest = '2.0.0' }
+        $results.ToolState.example = @{ Installations = @(@{ PackageManager = 'pnpm'; Status = 'Unavailable' }) }
+        Show-ResultsTable
+        ($script:OutputLines -join "`n") | Should Not Match 'Package installations'
+
+        $results.ToolState.example.Installations = @()
+        Show-ResultsTable
+        ($script:OutputLines -join "`n") | Should Not Match 'Package installations'
+
+        $results.ToolState.example.Installations = @(@{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' })
+        Show-ResultsTable
+        ($script:OutputLines -join "`n") | Should Not Match 'Package installations'
     }
 
     It 'renders blank latest versions as a dash in check-only mode' {

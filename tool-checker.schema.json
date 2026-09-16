@@ -138,6 +138,8 @@
         "ApiVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
         "WindowsApiVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
         "InstalledVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "InstallationsPackageManager": { "$ref": "#/definitions/packageManagerFile" },
+        "WindowsInstallationsPackageManager": { "$ref": "#/definitions/packageManagerFile" },
         "WindowsInstalledVersionPackageManager": { "$ref": "#/definitions/packageManagerFile" },
         "InstallExecutor": { "$ref": "#/definitions/executor" },
         "WindowsInstallExecutor": { "$ref": "#/definitions/executor" },

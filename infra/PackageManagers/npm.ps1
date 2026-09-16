@@ -53,6 +53,51 @@ function Get-ReleasePlan-PackageManager {
     }
 }
 
+function Get-Installations-PackageManager {
+    param([string]$ToolName)
+    $config = Get-ToolConfiguration -ToolName $ToolName -RequiredProperties @('NpmPackageName')
+    foreach ($manager in @('npm', 'pnpm')) {
+        if (-not (Test-CommandExists $manager)) { continue }
+        try {
+            $inventory = @(Get-GlobalNodePackageInventory -PackageManager $manager)
+            foreach ($project in $inventory) {
+                if (-not $project.dependencies) { continue }
+                $package = $project.dependencies.PSObject.Properties[$config.NpmPackageName].Value
+                if (-not $package.version) { continue }
+                $packagePath = $package.path
+                if (-not $packagePath -and $manager -eq 'npm') {
+                    $root = & npm root -g 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $root) {
+                        $packagePath = Join-Path ("$root".Trim()) $config.NpmPackageName
+                    }
+                }
+                @{
+                    PackageManager = $manager
+                    PackageName = $config.NpmPackageName
+                    Version = "$($package.version)"
+                    Path = "$packagePath"
+                    Status = 'Found'
+                }
+            }
+        } catch {
+            @{
+                PackageManager = $manager
+                PackageName = $config.NpmPackageName
+                Version = ''
+                Path = ''
+                Status = 'Unavailable'
+            }
+        }
+    }
+}
+
+function Get-GlobalNodePackageInventory {
+    param([ValidateSet('npm', 'pnpm')][string]$PackageManager)
+    $json = & $PackageManager list -g --depth=0 --json 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $json) { throw "Could not read $PackageManager global inventory." }
+    ($json -join "`n") | ConvertFrom-Json -ErrorAction Stop
+}
+
 function Get-GlobalNpmInstalledVersion {
     param([string]$PackageName)
     try {

@@ -663,6 +663,39 @@ Describe 'Action planning' {
         $actions[0].Type | Should Be 'registry'
         $actions[0].RegistryKey | Should Be 'npm'
     }
+
+    It 'offers the older duplicate installation as an approval-gated cleanup action' {
+        $toolsConfig['Example CLI'] = @{ Id = 'example-cli'; Name = 'Example CLI'; UpdateCommand = 'npm install -g @example/cli@latest' }
+        $results.ToolState['example-cli'] = @{
+            Installations = @(
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' },
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Status = 'Found' }
+            )
+        }
+
+        $actions = @(Get-AvailableActions -ApprovalOnly)
+        $cleanup = @($actions | Where-Object Type -eq 'cleanup')
+
+        $cleanup.Count | Should Be 1
+        $cleanup[0].Command | Should Be 'pnpm remove --global @example/cli'
+        $cleanup[0].Label | Should Match 'recommended: remove version 1.0.0'
+        $toolsConfig.Remove('Example CLI')
+    }
+
+    It 'recommends removing the non-update-manager duplicate when versions match' {
+        $toolsConfig['Example CLI'] = @{ Id = 'example-cli'; Name = 'Example CLI'; UpdateCommand = 'npm install -g @example/cli@latest' }
+        $results.ToolState['example-cli'] = @{
+            Installations = @(
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' },
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' }
+            )
+        }
+
+        $cleanup = @(Get-DuplicateInstallationActions)
+
+        $cleanup[0].Command | Should Be 'pnpm remove --global @example/cli'
+        $toolsConfig.Remove('Example CLI')
+    }
 }
 
 Describe 'Action execution' {
@@ -775,7 +808,8 @@ Describe 'Action execution' {
     It 'excludes registry actions and refreshes successful automatic updates in force mode' {
         $results.AvailableUpdates = @(
             @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct' },
-            @{ Name = 'npm registry'; Command = 'npm config set registry'; Type = 'registry' }
+            @{ Name = 'npm registry'; Command = 'npm config set registry'; Type = 'registry' },
+            @{ Name = 'Example cleanup'; Command = 'npm uninstall --global example'; Type = 'cleanup' }
         )
         Mock Invoke-ParallelUpdates { }
         Mock Refresh-ToolVersion { $true }

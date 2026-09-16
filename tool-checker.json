@@ -29,6 +29,7 @@
       }
     },
     "npm-check-updates": {
+      "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
       "PackageManagerFiles": ["npm.ps1"],
@@ -68,6 +69,7 @@
       "ReleaseNotesUrl": ""
     },
     "pnpm": {
+      "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
       "PackageManagerFiles": ["npm.ps1"],
@@ -356,6 +358,7 @@
       }
     },
     "github-copilot-cli": {
+      "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
       "InstalledVersionPackageManager": "npm.ps1",

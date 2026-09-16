@@ -15,7 +15,7 @@ function Get-ParallelCheckFunctionBlock {
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Compare-OwnedToolVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Set-LatestToolVersion',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate',
-        'Test-StandardTool','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates'
+        'Test-StandardTool','Update-ToolInstallationDiscovery','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates'
     )
     $functionNames += @($ToolsConfiguration.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
 

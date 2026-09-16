@@ -125,6 +125,7 @@ function Test-StandardTool {
 
     $config = $toolsConfig[$ToolName]
     Write-Header "Checking $ToolName" -Progress $Progress
+    Update-ToolInstallationDiscovery -ToolName $ToolName
 
     if (-not (Test-CommandExists $config.Command)) {
         Write-Error "$ToolName not installed"
@@ -333,8 +334,19 @@ function Refresh-ToolVersion {
     }
 }
 
+function Update-ToolInstallationDiscovery {
+    param([string]$ToolName)
+    $config = Get-ToolConfiguration -ToolName $ToolName
+    $packageManager = Get-ConfiguredPackageManager -Configuration $config -Operation 'Installations'
+    if (-not $packageManager) { return }
+    $state = Get-ToolState -ToolId $config.Id
+    $state.Installations = @(Invoke-PackageManagerOperation -PackageManager $packageManager -Operation 'Get-Installations' -Arguments @{ ToolName = $ToolName })
+    $state.ResolvedCommandPath = (Get-Command -Name $config.Command -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+}
+
 function Refresh-StandardVersion {
     param([string]$ToolName, [hashtable]$Config)
+    Update-ToolInstallationDiscovery -ToolName $ToolName
     if (-not (Test-CommandExists $Config.Command)) { return }
     $version = Get-CommandVersion $Config.Command $Config.VersionFlag
     if ($version -and $version -notmatch "Unable to retrieve") {

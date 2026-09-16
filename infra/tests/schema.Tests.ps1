@@ -39,6 +39,8 @@ Describe 'Catalog JSON Schema' {
             $catalog.tools.example.PackageManagerFiles = @('npm.ps1')
             $catalog.tools.example.WindowsPackageManagerFiles = @('winget.ps1')
             $catalog.tools.example.ReleasePackageManager = 'npm.ps1'
+            $catalog.tools.example.InstallationsPackageManager = 'npm.ps1'
+            $catalog.tools.example.WindowsInstallationsPackageManager = 'npm.ps1'
             $catalog.tools.example.WindowsInstalledVersionPackageManager = 'winget.ps1'
             $catalog.tools.example.WindowsUpdateExecutor = 'tool'
             $catalog.tools.example.WindowsUpdateEntryPoint = 'Invoke-ToolInstall'
@@ -83,6 +85,7 @@ Describe 'Catalog JSON Schema' {
         @{ Name = 'the tool template'; Change = { param($catalog) $catalog.tools.example.ToolFile = '_tool-template.ps1' } },
         @{ Name = 'non-PowerShell tool files'; Change = { param($catalog) $catalog.tools.example.ToolFile = 'example.cmd' } },
         @{ Name = 'package manager paths'; Change = { param($catalog) $catalog.tools.example.PackageManagerFiles = @('infra/npm.ps1') } },
+        @{ Name = 'installation discovery paths'; Change = { param($catalog) $catalog.tools.example.InstallationsPackageManager = '../npm.ps1' } },
         @{ Name = 'duplicate package manager filenames'; Change = { param($catalog) $catalog.tools.example.PackageManagerFiles = @('npm.ps1', 'npm.ps1') } },
         @{ Name = 'invalid executors'; Change = { param($catalog) $catalog.tools.example.UpdateExecutor = 'unknown' } },
         @{ Name = 'invalid Windows execution modes'; Change = { param($catalog) $catalog.tools.example.WindowsUpdateExecutionMode = 'Background' } },

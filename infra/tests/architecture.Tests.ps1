@@ -124,9 +124,12 @@ Describe 'Generic architecture contracts' {
         foreach ($config in $toolsConfig.Values) {
             $files = @(Get-PackageManagerDefinitionFiles -ToolsConfiguration @{ Tool = $config } -Directory (Join-Path (Split-Path $scriptPath) 'infra/PackageManagers'))
             $registry = Read-DefinitionRegistry -Files $files
-            foreach ($operation in @('Release','ApiVersion','InstalledVersion')) {
+            foreach ($operation in @('Release','ApiVersion','InstalledVersion','Installations')) {
                 $packageManager = Get-ConfiguredPackageManager -Configuration $config -Operation $operation
                 if ($packageManager) { $registry.ContainsKey($packageManager) | Should Be $true }
+                if ($packageManager -and $operation -eq 'Installations') {
+                    $registry[$packageManager].ContainsKey('Get-Installations-PackageManager') | Should Be $true
+                }
             }
             foreach ($operation in @('Install','Update')) {
                 $action = Resolve-ActionMetadata @{ Name = $config.Name; ToolId = $config.Id; Operation = $operation }

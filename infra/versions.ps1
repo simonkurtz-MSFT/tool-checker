@@ -2,6 +2,7 @@
 # return -1, 0, or 1; callers without an owner use the default semantic comparison.
 function ConvertTo-CanonicalSemanticVersion {
     param([string]$Version)
+    $Version = $Version -replace '^v(?=\d)', ''
     if ($Version -match '^(\d+(?:\.\d+)+)-(\d+)$') {
         $Version = "$($Matches[1]).$($Matches[2])"
     }

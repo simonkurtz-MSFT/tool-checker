@@ -13,6 +13,15 @@ Describe 'Version comparison contracts' {
         Test-UpdateAvailable -InstalledVersion '1.0.0' -LatestVersion '' | Should Be $false
     }
 
+    It 'normalizes optional v prefixes before comparing versions numerically' {
+        Compare-SemanticVersions '26.9.0' 'v26.9.0' | Should Be 0
+        Compare-SemanticVersions 'v26.9.0' '26.9.0' | Should Be 0
+        Compare-SemanticVersions 'v26.9.0' 'v26.10.0' | Should Be -1
+        Compare-SemanticVersions '26.10.0' 'v26.9.0' | Should Be 1
+        Compare-SemanticVersions 'v1.2.3.0' '1.2.3' | Should Be 0
+        Test-UpdateAvailable -InstalledVersion '26.9.0' -LatestVersion 'v26.9.0' -ToolName 'NodeJS' | Should Be $false
+    }
+
     It 'isolates same-named overrides by row owner and does not leak public functions' {
         $script:ToolDefinitions = @{
             first = @{ 'Compare-ToolVersions' = 'function Compare-ToolVersions { param($Version1,$Version2,$Version1Source,$Version2Source) 0 }' }

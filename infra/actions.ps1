@@ -143,7 +143,7 @@ function Invoke-ActionCommand {
 }
 
 function Complete-UpdateExecution {
-    # A skipped package manager operation is still an unsuccessful requested update.
+    # A skipped operation or a version that remains below the planned target is unsuccessful.
     param(
         [Parameter(Mandatory)][object]$Action,
         [Parameter(Mandatory)][object]$Execution,
@@ -154,15 +154,25 @@ function Complete-UpdateExecution {
     $outputText = @($Execution.Output) -join "`n"
     if ($outputText) { Write-Host $outputText.TrimEnd() }
 
+    if ($exitCode -eq 0 -and $Refresh -and $Action.Version) {
+        $refreshed = Refresh-ToolVersion -ToolName $Action.Name
+        $installedVersion = if ($refreshed -and $results.Tools.ContainsKey($Action.Name)) { $results.Tools[$Action.Name].Installed } else { $null }
+        if (-not $installedVersion -or (Test-UpdateAvailable -InstalledVersion $installedVersion -LatestVersion $Action.Version -ToolName $Action.Name)) {
+            $found = if ($installedVersion) { $installedVersion } else { 'unknown' }
+            $message = "Update verification failed for $($Action.Name). Expected at least $($Action.Version), but found $found."
+            Write-Error $message
+            if ($Action.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $Action.Name }
+            $results.Errors += $message
+            return $false
+        }
+        Write-Host "  Verified version: $installedVersion"
+    } elseif ($exitCode -eq 0 -and $Refresh) {
+        Refresh-ToolVersion -ToolName $Action.Name | Out-Null
+    }
+
     if ($exitCode -eq 0) {
         Write-Success "Update completed: $($Action.Name)"
         $results.UpdateFailed = @($results.UpdateFailed | Where-Object { $_ -ne $Action.Name })
-        if ($Refresh) {
-            $refreshed = Refresh-ToolVersion -ToolName $Action.Name
-            if ($refreshed -and $results.Tools.ContainsKey($Action.Name)) {
-                Write-Host "  Verified version: $($results.Tools[$Action.Name].Installed)"
-            }
-        }
         return $true
     }
 
@@ -248,6 +258,8 @@ function Invoke-ActionMenu {
         Write-Host ""
 
         $response = Read-Host "Select option"
+        Write-Host ""
+        
         if ($response -eq "0" -or [string]::IsNullOrWhiteSpace($response)) { break }
 
         $selected = @()
@@ -310,9 +322,6 @@ function Invoke-ForceUpdates {
 
     Write-Host "Running all updates in parallel...`n"
     Invoke-ParallelUpdates -Updates $automaticUpdates
-    foreach ($u in $automaticUpdates | Where-Object { $_.Name -notin $results.UpdateFailed }) {
-        Refresh-ToolVersion -ToolName $u.Name | Out-Null
-    }
     Show-ResultsTable
     if ($results.UpdateFailed.Count -gt 0) {
         Write-Error "$($results.UpdateFailed.Count) update(s) failed or were skipped: $($results.UpdateFailed -join ', ')"
@@ -333,7 +342,7 @@ function Invoke-ParallelUpdates {
         if ($u.ExecutionMode -eq 'CurrentSession') {
             Write-Host "Starting: $($u.Name)"
             $execution = Invoke-ActionCommand -Action $u
-            Complete-UpdateExecution -Action $u -Execution $execution | Out-Null
+            Complete-UpdateExecution -Action $u -Execution $execution -Refresh | Out-Null
             Write-Host ''
             continue
         }
@@ -371,7 +380,7 @@ function Invoke-ParallelUpdates {
             $result = @($execution.Output)
             if ($execution.Error) { $result += $execution.Error }
             $outputText = if ($result.Count -gt 0) { ($result | Out-String) } else { "" }
-            Complete-UpdateExecution -Action $j.Update -Execution @{ Output = $outputText; ExitCode = $exitCode } | Out-Null
+            Complete-UpdateExecution -Action $j.Update -Execution @{ Output = $outputText; ExitCode = $exitCode } -Refresh | Out-Null
         } else {
             $message = "Failed: $($j.Update.Name) | Job state: $state | Command: $($j.Update.Command)"
             Write-Error $message

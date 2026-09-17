@@ -116,7 +116,7 @@ function Register-ToolUpdate {
     }
 
     $results.Updates += $Name
-    Add-AvailableUpdate -Name $Name -Command $Command -Type $Type -Details "$InstalledVersion -> $LatestVersion"
+    Add-AvailableUpdate -Name $Name -Command $Command -Type $Type -Details "$InstalledVersion -> $LatestVersion" -Version $LatestVersion
     $true
 }
 
@@ -280,7 +280,7 @@ function Get-StandardToolUpdates {
             if (-not $SkipUpdate) {
                 $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
                 $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
-                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion"
+                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion" -Version $latestVersion
             }
         } else {
             Write-Success "$ToolName is up to date"
@@ -309,7 +309,7 @@ function Register-ReleasePlan {
             if ($Plan.MaturityBlocked) { $results.MaturityBlockedUpdates += @{ Name = $ToolName; AgeDays = $Plan.AgeDays; RequiredAgeDays = $Plan.RequiredAgeDays } }
         } elseif (-not $SkipUpdate) {
             if ($config.ReleaseNotesUrl) { Write-Host "  Release notes: $($config.ReleaseNotesUrl)" }
-            Add-AvailableUpdate -Name $ToolName -Command $Plan.Command -Type $Plan.Type -Details "$InstalledVersion -> $latest"
+            Add-AvailableUpdate -Name $ToolName -Command $Plan.Command -Type $Plan.Type -Details "$InstalledVersion -> $latest" -Version $latest
         }
     } else { Write-Success "$ToolName is up to date$($Plan.CurrentLabel)" }
 }

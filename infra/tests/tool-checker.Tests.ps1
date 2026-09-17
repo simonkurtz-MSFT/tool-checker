@@ -267,6 +267,7 @@ Describe 'Tool update registration' {
         $results.Updates[0] | Should Be 'Example CLI'
         $results.AvailableUpdates.Count | Should Be 1
         $results.AvailableUpdates[0].Details | Should Be '1.9.0 -> 1.10.0'
+        $results.AvailableUpdates[0].Version | Should Be '1.10.0'
     }
 
     It 'does not mutate update collections when versions are equal' {
@@ -732,6 +733,28 @@ Describe 'Action execution' {
         $results.Errors.Count | Should Be 0
     }
 
+    It 'fails a Deno update when refresh still reports the previous version' {
+        $results.Tools['Deno'] = @{ Installed = '2.9.6'; Latest = '2.9.7' }
+        Mock Refresh-ToolVersion { $true }
+        $action = @{ Name = 'Deno'; ToolId = 'deno'; Command = 'deno upgrade'; Type = 'direct'; Version = '2.9.7' }
+
+        Complete-UpdateExecution -Action $action -Execution @{ Output = ''; ExitCode = 0 } -Refresh | Should Be $false
+
+        $results.UpdateFailed[0] | Should Be 'Deno'
+        $results.Errors[0] | Should Be 'Update verification failed for Deno. Expected at least 2.9.7, but found 2.9.6.'
+    }
+
+    It 'completes a versioned update after refresh reaches the planned version' {
+        $results.Tools['Deno'] = @{ Installed = '2.9.6'; Latest = '2.9.7' }
+        Mock Refresh-ToolVersion { $results.Tools['Deno'].Installed = '2.9.7'; $true }
+        $action = @{ Name = 'Deno'; ToolId = 'deno'; Command = 'deno upgrade'; Type = 'direct'; Version = '2.9.7' }
+
+        Complete-UpdateExecution -Action $action -Execution @{ Output = ''; ExitCode = 0 } -Refresh | Should Be $true
+
+        $results.UpdateFailed.Count | Should Be 0
+        $results.Errors.Count | Should Be 0
+    }
+
     It 'classifies a WinGet no-update response as a retryable failure' {
         $action = @{ Name = 'Example CLI'; Command = 'winget upgrade Example.CLI'; Type = 'winget'; OutcomePackageManager = 'winget.ps1' }
 
@@ -805,14 +828,13 @@ Describe 'Action execution' {
         Assert-MockCalled Complete-UpdateExecution 1 -ParameterFilter { $Action.Name -eq 'NodeJS' -and $Execution.ExitCode -eq 0 }
     }
 
-    It 'excludes registry actions and refreshes successful automatic updates in force mode' {
+    It 'excludes registry and cleanup actions in force mode' {
         $results.AvailableUpdates = @(
             @{ Name = 'Example CLI'; Command = 'example update'; Type = 'direct' },
             @{ Name = 'npm registry'; Command = 'npm config set registry'; Type = 'registry' },
             @{ Name = 'Example cleanup'; Command = 'npm uninstall --global example'; Type = 'cleanup' }
         )
         Mock Invoke-ParallelUpdates { }
-        Mock Refresh-ToolVersion { $true }
         Mock Show-ResultsTable { }
 
         Invoke-ForceUpdates
@@ -820,8 +842,6 @@ Describe 'Action execution' {
         Assert-MockCalled Invoke-ParallelUpdates 1 -ParameterFilter {
             $Updates.Count -eq 1 -and $Updates[0].Name -eq 'Example CLI'
         }
-        Assert-MockCalled Refresh-ToolVersion 1 -ParameterFilter { $ToolName -eq 'Example CLI' }
-        Assert-MockCalled Refresh-ToolVersion 0 -ParameterFilter { $ToolName -eq 'npm registry' }
     }
 }
 

@@ -107,7 +107,7 @@
       "VersionFlag": "--version",
       "VersionParseRegex": "deno\\s+([0-9]+(?:\\.[0-9]+){1,3})",
       "UpdateType": "direct",
-      "UpdateCommand": "deno upgrade --quiet",
+      "UpdateCommand": "deno upgrade",
       "ReleaseNotesUrl": "https://github.com/denoland/deno/releases",
       "ApiUrl": "https://api.github.com/repos/denoland/deno/releases/latest",
       "InstallCommands": {

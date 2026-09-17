@@ -189,7 +189,7 @@ function Invoke-ParallelChecks {
             $checkStr = $Checks[$i].Block.ToString()
             $progress = "{0,$padWidth}/{1}" -f ($i + 1), $Total
 
-            $threadStatusLines[$i] = "  $ColorCyan⟳ [$progress] Running: $toolName$ColorReset"
+            $threadStatusLines[$i] = "  $ColorCyan⟳ [$progress] Running  : $toolName$ColorReset"
             Write-Host $threadStatusLines[$i]
 
             $ps = [System.Management.Automation.PowerShell]::Create()

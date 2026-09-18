@@ -369,3 +369,38 @@ Describe 'No-action workflow output' {
         Assert-MockCalled Invoke-ActionMenu 1 -Scope It
     }
 }
+
+Describe 'Application banner' {
+    It 'keeps border and title widths aligned for varying version lengths' {
+        foreach ($version in @('1.2.4', '10.123.4567-preview.89')) {
+            $lines = @(Get-ApplicationBannerLines -Version $version)
+
+            $lines.Count | Should Be 3
+            $lines | ForEach-Object { $_ | Should Match '^  [^ ]' }
+            $lines[1] | Should Match "Tool Checker V$version"
+            $lines[0].Length | Should Be $lines[1].Length
+            $lines[1].Length | Should Be $lines[2].Length
+        }
+    }
+}
+
+Describe 'Update legend' {
+    BeforeEach {
+        $results.Updates = @()
+        Mock Write-Host { }
+    }
+
+    It 'is hidden when no updates are available' {
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 0
+    }
+
+    It 'is shown when an update is available' {
+        $results.Updates = @('Example CLI')
+
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 2
+    }
+}

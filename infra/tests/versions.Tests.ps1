@@ -44,3 +44,25 @@ Describe 'Version comparison contracts' {
     }
 
 }
+
+Describe 'Version comparison' {
+    BeforeEach {
+        . $scriptPath -EnvFile (Join-Path $TestDrive 'absent.env')
+    }
+
+    It 'orders multi-digit semantic version components numerically' {
+        Test-UpdateAvailable -InstalledVersion '1.9.0' -LatestVersion '1.10.0' | Should Be $true
+    }
+
+    It 'does not report an older version as an update' {
+        Test-UpdateAvailable -InstalledVersion '2.0.0' -LatestVersion '1.10.0' | Should Be $false
+    }
+
+    It 'normalizes numeric revision suffixes' {
+        ConvertTo-CanonicalSemanticVersion '1.0.83-3' | Should Be '1.0.83.3'
+    }
+
+    It 'treats an optional fourth zero component as a production release' {
+        Test-IsProductionVersion '26.3.240.0' | Should Be $true
+    }
+}

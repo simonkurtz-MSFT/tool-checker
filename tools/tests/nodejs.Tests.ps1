@@ -34,3 +34,63 @@ Describe 'Node release planning' {
         $plan.UpdateKind | Should Be 'minor'
     }
 }
+
+Describe 'Node.js tool integration' {
+    It 'runs the extracted Node.js checker and release planner in a network-free worker' {
+        $previousResults = $results
+        $results = New-ToolCheckResults
+        try {
+            $checks = @(@{
+                Name = 'NodeJS'
+                Block = {
+                    function Test-CommandExists { $true }
+                    function Get-CommandVersion { 'v22.1.0' }
+                    function Get-WingetLatestVersion { '22.1.1' }
+                    function Invoke-RestMethod {
+                        @([PSCustomObject]@{ version = 'v22.1.1'; lts = 'Example' })
+                    }
+                    $SkipUpdate = $false
+                    Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+                }
+            })
+
+            Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+            $results.Tools['NodeJS'].Installed | Should Be 'v22.1.0'
+            $results.Tools['NodeJS'].Latest | Should Be 'v22.1.1'
+            $results.Updates -contains 'NodeJS (patch)' | Should Be $true
+            $results.AvailableUpdates.Count | Should Be 1
+            $results.AvailableUpdates[0].Command | Should Be $toolsConfig['NodeJS'].UpdateCommand
+            $results.Errors.Count | Should Be 0
+        } finally {
+            $results = $previousResults
+        }
+    }
+
+    It 'preserves check-only behavior in the extracted Node.js worker' {
+        $previousResults = $results
+        $results = New-ToolCheckResults
+        try {
+            $checks = @(@{
+                Name = 'NodeJS'
+                Block = {
+                    function Test-CommandExists { $true }
+                    function Get-CommandVersion { 'v22.1.0' }
+                    function Get-WingetLatestVersion { throw 'Unexpected package lookup' }
+                    function Invoke-RestMethod { throw 'Unexpected release lookup' }
+                    $SkipUpdate = $true
+                    Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+                }
+            })
+
+            Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+            $results.Tools['NodeJS'].Installed | Should Be 'v22.1.0'
+            $results.Tools['NodeJS'].Latest | Should Be ''
+            $results.AvailableUpdates.Count | Should Be 0
+            $results.Errors.Count | Should Be 0
+        } finally {
+            $results = $previousResults
+        }
+    }
+}

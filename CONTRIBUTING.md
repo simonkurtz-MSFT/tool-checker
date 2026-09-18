@@ -178,7 +178,8 @@ real installs, updates, or registry repairs in tests.
 Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
 `infra/tests/<package-manager>.Tests.ps1`. Every specialized checker must cover selected-alone
 and check-only execution in its owning suite; keep generic loader and dispatch contracts
-in `infra/tests/`.
+in `infra/tests/`, in the suite named after the owning infrastructure file (for example
+`infra/actions.ps1` is covered by `infra/tests/actions.Tests.ps1`).
 
 When conventions, helper contracts, loading, or validation practices change,
 update the template and this guidance in the same change. The corresponding

@@ -104,7 +104,8 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   operation names, real synthetic jobs, and metadata preservation in architecture tests.
   Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
   `infra/tests/<package-manager>.Tests.ps1`; keep generic loader and dispatch contracts in
-  `infra/tests/`.
+  `infra/tests/<infrastructure-file>.Tests.ps1`, named after the owning `infra/` file, and
+  cross-file contracts in `infra/tests/architecture.Tests.ps1`.
   Every specialized checker must cover selected-alone and check-only execution in its
   owning suite.
   Track check workers immediately after creation; protect pool opening, startup,

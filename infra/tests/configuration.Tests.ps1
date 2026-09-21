@@ -52,7 +52,7 @@ Describe 'Configuration infrastructure' {
     }
 
     It 'ships the lookup helper to workers without configuration readers or startup validation' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration @{}
+        $functionBlock = Get-ParallelCheckFunctionBlock
         $functionBlock | Should Match 'function Get-ToolConfiguration'
         $functionBlock | Should Not Match 'function Read-ToolCheckerConfiguration|function Read-DotEnvFile|function Get-ToolCatalogSelection|function Assert-ToolConfigurations|function Get-ToolSortKey'
     }
@@ -250,9 +250,9 @@ Describe 'Tool configuration' {
     }
 
     It 'returns a configured custom checker with required properties' {
-        $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('CustomFunction', 'Command')
+        $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('ToolFile', 'Command')
 
-        $config.CustomFunction | Should Be 'Test-Tool'
+        $config.ToolFile | Should Be 'nodejs.ps1'
         $config.Command | Should Be 'node'
     }
 
@@ -265,21 +265,38 @@ Describe 'Tool configuration' {
             Should Throw "Tool 'Azure CLI Extensions' requires configuration property 'ApiUrl'."
     }
 
-    It 'resolves every configured custom checker function' {
+    It 'resolves every configured custom checker' {
         { Assert-ToolConfigurations } | Should Not Throw
     }
 
-    It 'rejects a configured custom checker function that does not exist' {
+    It 'rejects a custom tool without a declared tool file' {
         $toolsConfig['Broken Custom Tool'] = @{
             Enabled = $true
             CheckType = 'custom'
-            CustomFunction = 'Test-MissingCustomTool'
             UpdateType = 'direct'
             UpdateCommand = 'broken update'
         }
         try {
             { Assert-ToolConfigurations } |
-                Should Throw "Custom checker 'Test-MissingCustomTool' configured for 'Broken Custom Tool' was not found."
+                Should Throw "Tool 'Broken Custom Tool' requires configuration property 'ToolFile'."
+        } finally {
+            $toolsConfig.Remove('Broken Custom Tool')
+        }
+    }
+
+    It 'rejects a custom tool whose file does not define the checker and ignores a retired CustomFunction value' {
+        $toolsConfig['Broken Custom Tool'] = @{
+            Id = 'uv'
+            Enabled = $true
+            CheckType = 'custom'
+            CustomFunction = 'Get-Date'
+            ToolFile = 'uv.ps1'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Custom tool 'Broken Custom Tool' requires its ToolFile to define Test-Tool."
         } finally {
             $toolsConfig.Remove('Broken Custom Tool')
         }

@@ -1,38 +1,23 @@
 # Parallel inventory checks: build isolated workers, capture their host output,
 # enforce timeouts, and merge results in catalog order. No actions execute here.
 function Get-ParallelCheckFunctionBlock {
-    param(
-        [Parameter(Mandatory)][string]$ScriptContent,
-        [Parameter(Mandatory)][hashtable]$ToolsConfiguration
-    )
-
     # Only checking dependencies cross into workers; startup/readers/renderers stay out.
-    $functionNames = @(
+    $definitions = @(Get-InfrastructureDefinitions -Names @(
         'Invoke-ToolEntryPoint','Get-ConfiguredPackageManager','Invoke-PackageManagerOperation','Register-ReleasePlan',
         'Get-ResultToolId','Get-OwnedConfiguration','Set-ToolResultOwnership','Get-ToolState','Resolve-ActionMetadata',
         'New-ToolCheckResults','Write-Header','Write-Success','Write-Warning','Write-Error',
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
-        'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Compare-OwnedToolVersions','Test-UpdateAvailable',
+        'Test-IsWindowsPlatform','Get-PlatformConfigurationValue',
+        'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Sort-SemanticVersions','Compare-OwnedToolVersions','Test-UpdateAvailable',
         'Test-IsProductionVersion','Set-LatestToolVersion',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate',
         'Test-StandardTool','Update-ToolInstallationDiscovery','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates'
-    )
-    $functionNames += @($ToolsConfiguration.Values | Where-Object { $_.CheckType -eq 'custom' } | ForEach-Object { $_.CustomFunction })
-
-    $outputContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'output.ps1') -Raw
-    $configurationContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'configuration.ps1') -Raw
-    $sourcePaths = @('checks.ps1','versions.ps1','package-managers.ps1','results.ps1','runtime.ps1','actions.ps1')
-    $sharedContent = ($sourcePaths | ForEach-Object { Get-Content -LiteralPath (Join-Path $PSScriptRoot $_) -Raw }) -join "`n"
-    $ast = [System.Management.Automation.Language.Parser]::ParseInput("$ScriptContent`n$sharedContent`n$outputContent`n$configurationContent", [ref]$null, [ref]$null)
-    $functionDefinitions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
-    $definitions = @($functionDefinitions | Where-Object { $_.Name -in $functionNames } | ForEach-Object { $_.Extent.Text })
+    ))
     $serializedDefinitions = (ConvertTo-Json -InputObject $script:ToolDefinitions -Depth 5 -Compress).Replace("'", "''")
     $definitions += "`$script:ToolDefinitions = ConvertFrom-Json -AsHashtable -InputObject '$serializedDefinitions'"
     $serializedPackageManagers = (ConvertTo-Json -InputObject $script:PackageManagerDefinitions -Depth 5 -Compress).Replace("'", "''")
     $definitions += "`$script:PackageManagerDefinitions = ConvertFrom-Json -AsHashtable -InputObject '$serializedPackageManagers'"
-    foreach ($packageManager in $script:PackageManagerDefinitions.Values) {
-        $definitions += @($packageManager.Keys | Where-Object { $_ -notlike '*-PackageManager' } | ForEach-Object { $packageManager[$_] })
-    }
+    $definitions += @(Get-SharedPackageManagerDefinitions)
     $definitions -join "`n`n"
 }
 
@@ -130,9 +115,8 @@ function Invoke-ParallelChecks {
     param([array]$Checks, [int]$Total, [int]$TimeoutSec = 60)
     if ($Checks.Count -eq 0) { return }
 
-    # Extract shared script helpers and the loaded tool-file functions for workers.
-    $scriptContent = Get-Content (Join-Path (Split-Path $PSScriptRoot) 'tool-checker.ps1') -Raw
-    $fnBlock = Get-ParallelCheckFunctionBlock -ScriptContent $scriptContent -ToolsConfiguration $toolsConfig
+    # Extract shared infrastructure helpers and the selected definition registries for workers.
+    $fnBlock = Get-ParallelCheckFunctionBlock
 
     # Build runspace pool — cap at check count but no more than logical CPUs
     $maxThreads = [Math]::Min($Checks.Count, [System.Environment]::ProcessorCount)

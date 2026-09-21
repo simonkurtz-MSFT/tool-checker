@@ -118,7 +118,7 @@ Describe 'Output infrastructure' {
     }
 
     It 'includes only worker-needed output helpers in the function block' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration @{}
+        $functionBlock = Get-ParallelCheckFunctionBlock
         foreach ($name in @('Write-Header', 'Write-Success', 'Write-Warning', 'Write-Error')) {
             $functionBlock | Should Match "function $name"
         }
@@ -247,8 +247,8 @@ Describe 'Output rendering' {
         $results.Tools.Example = @{ ToolId = 'example'; Installed = '2.0.0'; Latest = '2.0.0' }
         $results.ToolState.example = @{
             Installations = @(
-                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Path = '\\?\C:\npm\cli'; Status = 'Found' },
-                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Path = '/pnpm/cli'; Status = 'Found' }
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Path = '\\?\C:\npm\cli'; Status = 'Found'; RemoveCommand = 'npm uninstall --global @example/cli' },
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Path = '/pnpm/cli'; Status = 'Found'; RemoveCommand = 'pnpm remove --global @example/cli' }
             )
             ResolvedCommandPath = '\\?\C:\editor\cli.ps1'
         }

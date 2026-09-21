@@ -86,10 +86,7 @@ $script:ReleaseCooldownDays = $configuration.CooldownDays
 $script:ToolDefinitionFiles = @(Get-ToolDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'tools'))
 $script:ToolDefinitions = Read-DefinitionRegistry -Files $script:ToolDefinitionFiles
 $script:PackageManagerDefinitions = Read-DefinitionRegistry -Files @(Get-PackageManagerDefinitionFiles -ToolsConfiguration $toolsConfig -Directory (Join-Path $PSScriptRoot 'infra/PackageManagers'))
-foreach ($definitions in $script:PackageManagerDefinitions.Values) {
-    $sharedDefinitions = @($definitions.Keys | Where-Object { $_ -notlike '*-PackageManager' } | ForEach-Object { $definitions[$_] })
-    . ([scriptblock]::Create(($sharedDefinitions -join "`n`n")))
-}
+. ([scriptblock]::Create((@(Get-SharedPackageManagerDefinitions) -join "`n`n")))
 Initialize-RegistryContext -ResolveEndpoints:(-not $script:IsDotSourced)
 
 function Main {

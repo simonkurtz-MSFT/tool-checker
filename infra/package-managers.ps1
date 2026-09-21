@@ -4,7 +4,7 @@ function Get-PackageManagerDefinitionFiles {
     param([System.Collections.IDictionary]$ToolsConfiguration, [string]$Directory)
     $files = @($ToolsConfiguration.Values | Where-Object { $_.Enabled } | ForEach-Object {
         $_.PackageManagerFiles
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') { $_.WindowsPackageManagerFiles }
+        if (Test-IsWindowsPlatform) { $_.WindowsPackageManagerFiles }
     } | Where-Object { $_ } | Sort-Object -Unique)
     foreach ($file in $files) {
         if ($file -notmatch '^[a-z0-9][a-z0-9-]*\.ps1$') { throw "Invalid package manager filename: $file" }
@@ -16,11 +16,14 @@ function Get-PackageManagerDefinitionFiles {
 
 function Get-ConfiguredPackageManager {
     param([object]$Configuration, [string]$Operation)
-    $platformProperty = "Windows${Operation}PackageManager"
-    if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $Configuration[$platformProperty]) {
-        return $Configuration[$platformProperty]
+    Get-PlatformConfigurationValue -Configuration $Configuration -Property "${Operation}PackageManager"
+}
+
+function Get-SharedPackageManagerDefinitions {
+    # Named helpers are shared with tools; *-PackageManager operations stay locally dispatched.
+    foreach ($definitions in $script:PackageManagerDefinitions.Values) {
+        $definitions.Keys | Where-Object { $_ -notlike '*-PackageManager' } | ForEach-Object { $definitions[$_] }
     }
-    $Configuration["${Operation}PackageManager"]
 }
 
 function Invoke-PackageManagerOperation {

@@ -8,7 +8,7 @@ function Test-Tool {
     $config = Get-ToolConfiguration -ToolName 'WSL' -RequiredProperties @('Command', 'VersionCommand', 'VersionParseRegex', 'ApiUrl', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking WSL" -Progress $Progress
 
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+    if (-not (Test-IsWindowsPlatform)) {
         Write-Warning "WSL check skipped: Windows only"
         return
     }

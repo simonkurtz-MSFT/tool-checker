@@ -36,7 +36,7 @@ function Get-WingetInstalledVersion {
     # CLI-reported versions may differ from WinGet package versions; compare like sources.
     param([string]$ToolName, [string]$PackageId)
 
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT') -or
+    if (-not (Test-IsWindowsPlatform) -or
         [string]::IsNullOrWhiteSpace($PackageId) -or -not (Test-CommandExists 'winget')) {
         return $null
     }
@@ -57,7 +57,7 @@ function Get-WingetInstalledVersion {
 function Get-WingetLatestVersion {
     param([string]$ToolName, [string]$PackageId)
 
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT') -or [string]::IsNullOrWhiteSpace($PackageId)) {
+    if (-not (Test-IsWindowsPlatform) -or [string]::IsNullOrWhiteSpace($PackageId)) {
         return $null
     }
     if (-not (Test-CommandExists 'winget')) {

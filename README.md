@@ -259,7 +259,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `WindowsUpdateCommand`                                        | No                    | Windows-only override for `UpdateCommand`.                                                                                                  |
 | `InstallCommands`                                             | No                    | Platform-specific commands offered when the tool is missing.                                                                                |
 | `ReleaseNotesUrl`                                             | No                    | Link displayed when an update is actionable.                                                                                                |
-| `ToolFile`                                                    | No for standard tools | Explicit filename under `tools/`; a loaded `Refresh-ToolStatus` overrides standard post-update refresh.                                     |
+| `ToolFile`                                                    | No for standard tools | Filename under `tools/`. Required for `custom` checks (must define `Test-Tool`); a loaded `Refresh-ToolStatus` overrides standard refresh.  |
 | `PackageManagerFiles`, `WindowsPackageManagerFiles`           | No                    | Explicit filenames under `infra/PackageManagers/`, loaded only for selected tools and applicable platforms.                                 |
 | `ReleasePackageManager`, `ApiVersionPackageManager`           | No                    | Package manager for release planning or API version extraction; each supports a `Windows` prefix override.                                  |
 | `InstallExecutor`, `UpdateExecutor`                           | No                    | `command` (default), `tool`, or a declared package manager filename. Supports `Windows` prefix overrides.                                   |
@@ -307,7 +307,6 @@ Use a custom entry only when the standard framework cannot model the check:
       "Name": "Example SDK",
       "enabled": true,
       "CheckType": "custom",
-      "CustomFunction": "Test-Tool",
       "ToolFile": "example-sdk.ps1",
       "Command": "example"
     }

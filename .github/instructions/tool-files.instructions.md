@@ -45,7 +45,8 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   wrappers. Define the palette in Initialize-ConsoleColors; bootstrap calls it
   explicitly to set caller-scope variables, while definition-only loading preserves
   existing colors. Workers reuse color snapshots without running the initializer.
-  Worker discovery explicitly reads the output file and includes only
+  Worker discovery reads the fixed infrastructure sources through
+  Get-InfrastructureDefinitions and includes only
   allowlisted helpers; keep its Write-Host capture override in worker setup.
   Test definition-only loading, rendering, and synthetic runspace output.
 - Tool files define functions only. Preserve shared state and helper
@@ -87,7 +88,9 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   owner `ToolState`, refresh them after actions, and preserve them across workers.
   Render only duplicate found inventories. Offer one explicit cleanup action for
   the older installation, using the configured update manager as the equal-version
-  tie-breaker; cleanup must remain approval-gated even in Force mode. Do not change
+  tie-breaker; cleanup must remain approval-gated even in Force mode. Found records
+  carry the package manager's `RemoveCommand`; generic planning and rendering never
+  build removal syntax or name a package manager. Do not change
   version-source policy, update actions, or package-manager selection.
 - Rows/actions carry ToolId and optional ItemId. Use Get-ToolState for owner-keyed
   inventory; never add product-specific fields to shared results. Preserve the
@@ -99,8 +102,19 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   same checked release shown in the action.
   Generic executors return Output/ExitCode; optional Get-ToolOutcome interprets
   failures. Keep eligibility decisions in the owning tool or package manager, not rendering.
+- Reuse shared helpers instead of repeating idioms: branch on Test-IsWindowsPlatform,
+  resolve Windows<Property> overrides only through Get-PlatformConfigurationValue, and
+  record action failures through Register-UpdateFailure. Use Invoke-SafeApiRequest for
+  release lookups; call Invoke-RestMethod directly only where a failed request must stay
+  silent, such as the .NET refresh. Standard self-reported and API checks share one
+  Register-ToolUpdate path.
 - Worker definitions come from explicit source files and selected registries,
-  never live Get-Command bodies. Cover selected-only loading, colliding generic
+  never live Get-Command bodies. Check workers and action jobs share
+  Get-InfrastructureDefinitions (fails on unknown names) and
+  Get-SharedPackageManagerDefinitions; do not reintroduce per-caller parsing. When a
+  worker-reachable function gains an infrastructure call, extend the owning allowlist;
+  the worker definition closure tests in architecture tests must stay green.
+  Cover selected-only loading, colliding generic
   operation names, real synthetic jobs, and metadata preservation in architecture tests.
   Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
   `infra/tests/<package-manager>.Tests.ps1`; keep generic loader and dispatch contracts in

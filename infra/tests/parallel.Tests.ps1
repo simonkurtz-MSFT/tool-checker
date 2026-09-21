@@ -106,14 +106,9 @@ Describe 'Parallel check resource cleanup' {
 
 Describe 'Parallel check orchestration' {
     It 'rehydrates configured checker dependencies without including the main entry point' {
-        $scriptContent = Get-Content $scriptPath -Raw
-        $customChecker = $toolsConfig.Values |
-            Where-Object { $_.CheckType -eq 'custom' } |
-            Select-Object -First 1 -ExpandProperty CustomFunction
+        $functionBlock = Get-ParallelCheckFunctionBlock
 
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent $scriptContent -ToolsConfiguration $toolsConfig
-
-        $functionBlock | Should Match "function $customChecker"
+        $functionBlock | Should Match 'function Test-Tool'
         $functionBlock | Should Match 'function Set-LatestToolVersion'
         $functionBlock | Should Not Match 'function Main'
     }

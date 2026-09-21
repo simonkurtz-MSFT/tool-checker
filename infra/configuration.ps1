@@ -251,21 +251,16 @@ function Assert-ToolConfigurations {
                 throw "Standard tool '$toolName' requires either 'VersionFlag' or 'VersionCommand'."
             }
         } else {
-            $requiredProperties += @('CustomFunction')
+            $requiredProperties += @('ToolFile')
             $requiredProperties += @($config.RequiredProperties | Where-Object { $_ })
         }
 
         $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties $requiredProperties
         if ($config.CheckType -ne 'custom') { continue }
 
-        $functionName = "$($config.CustomFunction)"
-        $checkerExists = if ($config.Id -and $script:ToolDefinitions.ContainsKey($config.Id)) {
-            $functionName -eq 'Test-Tool' -and $script:ToolDefinitions[$config.Id].ContainsKey($functionName)
-        } else {
-            [bool](Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue)
-        }
-        if (-not $checkerExists) {
-            throw "Custom checker '$functionName' configured for '$toolName' was not found."
+        $definitions = if ($config.Id) { $script:ToolDefinitions[$config.Id] }
+        if (-not $definitions -or -not $definitions.ContainsKey('Test-Tool')) {
+            throw "Custom tool '$toolName' requires its ToolFile to define Test-Tool."
         }
     }
 }

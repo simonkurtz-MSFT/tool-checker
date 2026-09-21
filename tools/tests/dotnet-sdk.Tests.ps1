@@ -26,7 +26,7 @@ Describe '.NET SDK tool integration' {
                         'Test-Tool', 'Refresh-ToolStatus', 'ConvertFrom-DotNetSDKList',
                         'Get-DotNetSDKInventory', 'Get-DotNetSDKReleasePlan'
                     ))
-                    WorkerDefinitions = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $path -Raw) -ToolsConfiguration $toolsConfig
+                    WorkerDefinitions = Get-ParallelCheckFunctionBlock
                 }
             }).AddArgument($scriptPath).AddArgument($selectionFile)
             $observed = @($session.Invoke())
@@ -144,6 +144,18 @@ Describe '.NET SDK tool integration' {
 
 Describe '.NET SDK release planning' {
     BeforeEach { . (Join-Path (Split-Path -Parent $scriptPath) 'tools/dotnet-sdk.ps1') }
+
+    It 'keeps inventory planning working when a preview SDK is installed' {
+        $records = ConvertFrom-DotNetSDKList -OutputLines @(
+            '10.0.100-rc.1.25451.107 [C:\dotnet\sdk]',
+            '10.0.100 [C:\dotnet\sdk]'
+        )
+        $inventory = Get-DotNetSDKInventory -SdkRecords $records -LatestSdkByChannel @{
+            '10.0' = @{ LatestSdk = '10.0.101'; SupportPhase = 'active' }
+        }
+        $inventory.DotNetSDKs['10.0.100'].HighestInstalled | Should Be '10.0.100'
+        $inventory.Tools['.NET SDK 10.0.100'].Covered | Should Be $false
+    }
 
     It 'parses SDK list output and annotates every row from its channel' {
         $records = ConvertFrom-DotNetSDKList -OutputLines @(

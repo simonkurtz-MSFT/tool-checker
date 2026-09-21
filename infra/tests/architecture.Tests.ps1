@@ -16,6 +16,15 @@ Describe 'Generic architecture contracts' {
         $functions[0].Name | Should Be 'Main'
     }
 
+    It 'keeps product names out of generic <File> infrastructure' -TestCases @(
+        @{ File = 'actions' }, @{ File = 'checks' }, @{ File = 'parallel' }, @{ File = 'runtime' },
+        @{ File = 'results' }, @{ File = 'versions' }, @{ File = 'package-managers' }
+    ) {
+        param($File)
+        $source = Get-Content (Join-Path (Split-Path $scriptPath) "infra/$File.ps1") -Raw
+        $source | Should Not Match '(?i)\b(npm|pnpm|winget|dotnet|nodejs|python)\b'
+    }
+
     It 'loads only explicitly selected package manager dependencies once' {
         $config = @{
             Selected = @{ Enabled = $true; PackageManagerFiles = @('npm.ps1','npm.ps1') }
@@ -166,5 +175,97 @@ Describe 'Owned package row refresh' {
         $results.Tools['npm: example'].Installed | Should Be '2.0.0'
         $results.Tools['npm: example'].Latest | Should Be '3.0.0'
         (Get-ToolState 'npm-global-packages').Packages[0].Current | Should Be '2.0.0'
+    }
+}
+
+Describe 'Worker definition closure' {
+    # Static call-graph check: a helper missing from a worker allowlist otherwise fails only at runtime.
+    . $scriptPath -EnvFile (Join-Path $TestDrive 'absent.env')
+    $repositoryPath = Split-Path $scriptPath
+    $parse = { param($text) [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null) }
+    $getFunctions = {
+        param($ast)
+        $functions = @{}
+        foreach ($statement in $ast.EndBlock.Statements) {
+            if ($statement -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $functions[$statement.Name] = $statement }
+        }
+        $functions
+    }
+    $getCalls = {
+        param($ast)
+        @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
+            ForEach-Object { $_.GetCommandName() } | Where-Object { $_ } | Sort-Object -Unique)
+    }
+    $infrastructure = @{}
+    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $repositoryPath 'infra') -Filter '*.ps1' -File) {
+        foreach ($entry in (& $getFunctions (& $parse (Get-Content -LiteralPath $file.FullName -Raw))).GetEnumerator()) { $infrastructure[$entry.Key] = $entry.Value }
+    }
+    $checkWorker = & $getFunctions (& $parse (Get-ParallelCheckFunctionBlock))
+    $actionWorker = & $getFunctions (& $parse (Get-ActionWorkerDefinitions))
+    # Walk local calls from the given roots and report infrastructure calls the worker lacks.
+    $getMissing = {
+        param($label, $local, $roots, $available, $ignored = @())
+        $pending = [System.Collections.Generic.Queue[string]]::new()
+        @($roots) | Where-Object { $local.ContainsKey($_) } | ForEach-Object { $pending.Enqueue($_) }
+        $visited = @{}
+        while ($pending.Count -gt 0) {
+            $name = $pending.Dequeue()
+            if ($visited.ContainsKey($name)) { continue }
+            $visited[$name] = $true
+            foreach ($call in & $getCalls $local[$name]) {
+                if ($local.ContainsKey($call)) { $pending.Enqueue($call) }
+                elseif ($infrastructure.ContainsKey($call) -and -not $available.ContainsKey($call) -and $call -notin $ignored) { "${label}: $name -> $call" }
+            }
+        }
+    }
+    $definitionFiles = {
+        param($folder)
+        Get-ChildItem -LiteralPath (Join-Path $repositoryPath $folder) -Filter '*.ps1' -File | Where-Object Name -ne '_tool-template.ps1'
+    }
+
+    It 'gives check workers every infrastructure function their allowlist calls' {
+        $allowlisted = @($checkWorker.Keys | Where-Object { $infrastructure.ContainsKey($_) })
+        $missing = @(& $getMissing 'infra' $checkWorker $allowlisted $checkWorker)
+        if ($missing.Count -gt 0) { throw "Missing from Get-ParallelCheckFunctionBlock: $($missing -join '; ')" }
+    }
+
+    It 'gives check workers every infrastructure function reachable from tool checkers and comparers' {
+        $missing = @(foreach ($file in & $definitionFiles 'tools') {
+            $local = & $getFunctions (& $parse (Get-Content -LiteralPath $file.FullName -Raw))
+            & $getMissing $file.Name $local @('Test-Tool', 'Compare-ToolVersions') $checkWorker
+        })
+        if ($missing.Count -gt 0) { throw "Missing from Get-ParallelCheckFunctionBlock: $($missing -join '; ')" }
+    }
+
+    It 'gives check workers every infrastructure function reachable from package-manager lookups' {
+        $missing = @(foreach ($file in & $definitionFiles 'infra/PackageManagers') {
+            $local = & $getFunctions (& $parse (Get-Content -LiteralPath $file.FullName -Raw))
+            $roots = @($local.Keys | Where-Object { $_ -match '^Get-(InstalledVersion|LatestVersion|ReleasePlan|Installations)-PackageManager$' })
+            & $getMissing $file.Name $local $roots $checkWorker
+        })
+        if ($missing.Count -gt 0) { throw "Missing from Get-ParallelCheckFunctionBlock: $($missing -join '; ')" }
+    }
+
+    It 'gives action jobs every infrastructure function their allowlist and package-manager executors call' {
+        $allowlisted = @($actionWorker.Keys | Where-Object { $infrastructure.ContainsKey($_) })
+        # Registry repairs always run in the approving session, never in a job.
+        $missing = @(& $getMissing 'infra' $actionWorker $allowlisted $actionWorker @('Set-RegistryConfiguration'))
+        $missing += @(foreach ($file in & $definitionFiles 'infra/PackageManagers') {
+            $local = & $getFunctions (& $parse (Get-Content -LiteralPath $file.FullName -Raw))
+            & $getMissing $file.Name $local @('Invoke-Command-PackageManager') $actionWorker
+        })
+        if ($missing.Count -gt 0) { throw "Missing from Get-ActionWorkerDefinitions: $($missing -join '; ')" }
+    }
+
+    It 'reports a call that an allowlist does not cover' {
+        $local = & $getFunctions (& $parse 'function Test-Tool { Get-ProbeHelper }; function Get-ProbeHelper { Show-ResultsTable }')
+        $missing = @(& $getMissing 'probe.ps1' $local @('Test-Tool') $checkWorker)
+        $missing.Count | Should Be 1
+        $missing[0] | Should Be 'probe.ps1: Get-ProbeHelper -> Show-ResultsTable'
+    }
+
+    It 'fails fast when an allowlisted infrastructure function no longer exists' {
+        $message = try { Get-InfrastructureDefinitions -Names @('Get-ToolState', 'Get-RemovedHelper') } catch { $_.Exception.Message }
+        $message | Should Be 'Worker infrastructure function(s) not found: Get-RemovedHelper'
     }
 }

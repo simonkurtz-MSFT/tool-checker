@@ -20,10 +20,10 @@ function Test-Tool {
 
         Write-Host "  Checking for PowerShell updates..."
         try {
-            $latestVersion = if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
+            $latestVersion = if ((Test-IsWindowsPlatform) -and $config.WingetId) {
                 Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
             } else {
-                $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
+                $releases = Invoke-SafeApiRequest -Uri $config.ApiUrl
                 $releases.tag_name -replace 'v', ''
             }
             $latestToolNames = @('PowerShell')
@@ -31,7 +31,7 @@ function Test-Tool {
             if (-not (Set-LatestToolVersion -ToolNames $latestToolNames -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
 
             if (Register-ToolUpdate -Name 'PowerShell' -InstalledVersion $pwshVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
-                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
+                $sourceLabel = if (Test-IsWindowsPlatform) { ' in WinGet' } else { '' }
                 Write-Warning "  PowerShell has available updates${sourceLabel}: $pwshVersion -> $latestVersion"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
             } else { Write-Success "PowerShell is up to date" }

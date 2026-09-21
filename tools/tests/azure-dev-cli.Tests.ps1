@@ -83,7 +83,7 @@ Describe 'Azure Developer CLI package version' {
     }
 
     It 'includes the installed-package lookup in parallel checks' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration $toolsConfig
+        $functionBlock = Get-ParallelCheckFunctionBlock
         $functionBlock | Should Match 'function Get-WingetInstalledVersion'
     }
 }

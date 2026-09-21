@@ -40,8 +40,8 @@ Describe 'Action planning' {
         $toolsConfig['Example CLI'] = @{ Id = 'example-cli'; Name = 'Example CLI'; UpdateCommand = 'npm install -g @example/cli@latest' }
         $results.ToolState['example-cli'] = @{
             Installations = @(
-                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' },
-                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Status = 'Found' }
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found'; RemoveCommand = 'npm uninstall --global @example/cli' },
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Status = 'Found'; RemoveCommand = 'pnpm remove --global @example/cli' }
             )
         }
 
@@ -58,8 +58,8 @@ Describe 'Action planning' {
         $toolsConfig['Example CLI'] = @{ Id = 'example-cli'; Name = 'Example CLI'; UpdateCommand = 'npm install -g @example/cli@latest' }
         $results.ToolState['example-cli'] = @{
             Installations = @(
-                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' },
-                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found' }
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found'; RemoveCommand = 'pnpm remove --global @example/cli' },
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Status = 'Found'; RemoveCommand = 'npm uninstall --global @example/cli' }
             )
         }
 
@@ -68,12 +68,37 @@ Describe 'Action planning' {
         $cleanup[0].Command | Should Be 'pnpm remove --global @example/cli'
         $toolsConfig.Remove('Example CLI')
     }
+
+    It 'uses the removal command supplied by discovery and skips records without one' {
+        $toolsConfig['Example CLI'] = @{ Id = 'example-cli'; Name = 'Example CLI'; UpdateCommand = 'synthetic install example' }
+        $results.ToolState['example-cli'] = @{
+            Installations = @(
+                @{ PackageManager = 'synthetic'; PackageName = 'example'; Version = '2.0.0'; Status = 'Found'; RemoveCommand = 'synthetic remove example' },
+                @{ PackageManager = 'other'; PackageName = 'example'; Version = '1.0.0'; Status = 'Found'; RemoveCommand = 'other erase example' }
+            )
+        }
+
+        @(Get-DuplicateInstallationActions)[0].Command | Should Be 'other erase example'
+
+        $results.ToolState['example-cli'].Installations[1].Remove('RemoveCommand')
+        @(Get-DuplicateInstallationActions).Count | Should Be 0
+        $results.ToolState.Remove('example-cli')
+        $toolsConfig.Remove('Example CLI')
+    }
 }
 
 Describe 'Action execution' {
     BeforeEach {
         $results.UpdateFailed = @()
         $results.Errors = @()
+    }
+
+    It 'records a repeated update failure once while keeping each message' {
+        Register-UpdateFailure -Name 'Example CLI' -Message 'first failure'
+        Register-UpdateFailure -Name 'Example CLI' -Message 'second failure'
+
+        $results.UpdateFailed.Count | Should Be 1
+        $results.Errors.Count | Should Be 2
     }
 
     It 'dispatches ordinary actions through the tool command runner' {

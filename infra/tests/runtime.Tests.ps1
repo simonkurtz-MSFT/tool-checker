@@ -102,7 +102,7 @@ Describe 'Tool definition loading' {
                     HasNodeChecker = $script:ToolDefinitions.ContainsKey('nodejs')
                     HasDotNetChecker = $script:ToolDefinitions.ContainsKey('dotnet-sdk')
                     HasNodeUpdater = [bool](Get-Command -CommandType Function | Where-Object Name -eq 'Invoke-ToolUpdate')
-                    WorkerDefinitions = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $path -Raw) -ToolsConfiguration $toolsConfig
+                    WorkerDefinitions = Get-ParallelCheckFunctionBlock
                 }
             }).AddArgument($scriptPath).AddArgument($selectionFile)
             $observed = @($session.Invoke())
@@ -209,7 +209,7 @@ Describe 'Tool definition loading' {
     }
 
     It 'includes tool-local helpers in worker definitions but excludes the template' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration $toolsConfig
+        $functionBlock = Get-ParallelCheckFunctionBlock
 
         $functionBlock | Should Match 'function Get-NodeReleasePlan'
         $functionBlock | Should Match 'function Test-Tool'

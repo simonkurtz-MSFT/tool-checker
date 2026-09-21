@@ -33,6 +33,15 @@ Describe 'Node release planning' {
 
         $plan.UpdateKind | Should Be 'minor'
     }
+
+    It 'does not classify an older index entry in the installed major as an update' {
+        $distributionIndex = @([PSCustomObject]@{ version = 'v22.4.9'; lts = 'Jod' })
+
+        $plan = Get-NodeReleasePlan -DistributionIndex $distributionIndex -CurrentVersion '22.5.0'
+
+        $plan.LatestInMajor | Should Be '22.4.9'
+        $plan.UpdateKind | Should BeNullOrEmpty
+    }
 }
 
 Describe 'Node.js tool integration' {

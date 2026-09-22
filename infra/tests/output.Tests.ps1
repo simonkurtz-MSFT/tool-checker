@@ -45,7 +45,7 @@ Describe 'Output infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($outputPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 13
+        $ast.EndBlock.Statements.Count | Should Be 14
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $outputPath
         }
@@ -311,9 +311,31 @@ Describe 'Output rendering' {
         $rendered | Should Match '⚠  Updates Available'
         $rendered | Should Match '⚠  Updates Not Yet Available'
         $rendered | Should Match '⚠  Errors'
-        $rendered | Should Match 'Blocked CLI: release is 2d old; available at 8d'
+        $rendered | Should Match 'Blocked CLI : release is 2 days old; available at 8 days'
         $rendered | Should Match 'Errors \(1\)'
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'pluralizes maturity ages and aligns summary colons to the table name column' {
+        $results.Tools = @{
+            'GitHub Copilot CLI' = @{ Installed = '0.0.1'; Latest = '0.0.2' }
+            pnpm = @{ Installed = '9.0.0'; Latest = '10.0.0' }
+            'One Day CLI' = @{ Installed = '1.0.0'; Latest = '1.0.1' }
+        }
+        $results.Updates = @('GitHub Copilot CLI', 'pnpm', 'One Day CLI')
+        $results.MaturityBlockedUpdates = @(
+            @{ Name = 'GitHub Copilot CLI'; AgeDays = 0; RequiredAgeDays = 8 },
+            @{ Name = 'pnpm'; AgeDays = 7; RequiredAgeDays = 8 },
+            @{ Name = 'One Day CLI'; AgeDays = 1; RequiredAgeDays = 1 }
+        )
+
+        Show-ResultsSummary -AvailableUpdateNames @()
+
+        $rows = @($script:OutputLines | Where-Object { $_ -match '^  - (GitHub Copilot CLI|pnpm|One Day CLI)' })
+        $rows[0] | Should Be '  - GitHub Copilot CLI : release is 0 days old; available at 8 days'
+        $rows[1] | Should Be '  - pnpm               : release is 7 days old; available at 8 days'
+        $rows[2] | Should Be '  - One Day CLI        : release is 1 day old; available at 1 day'
+        @($rows | ForEach-Object { $_.IndexOf(':') } | Select-Object -Unique).Count | Should Be 1
     }
 
     It 'omits empty summary categories and preserves the check progress heading' {

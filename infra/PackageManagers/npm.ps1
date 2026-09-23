@@ -77,6 +77,7 @@ function Get-Installations-PackageManager {
                     Version = "$($package.version)"
                     Path = "$packagePath"
                     Status = 'Found'
+                    RemoveCommand = if ($manager -eq 'pnpm') { "pnpm remove --global $($config.NpmPackageName)" } else { "npm uninstall --global $($config.NpmPackageName)" }
                 }
             }
         } catch {

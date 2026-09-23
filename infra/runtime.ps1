@@ -1,7 +1,16 @@
 # Runtime discovery and tool dispatch. Definitions are loaded by bootstrap; tool
 # code runs only through the selected catalog ID, never through a folder scan.
+function Test-IsWindowsPlatform { $IsWindows -or $env:OS -eq 'Windows_NT' }
+
+function Get-PlatformConfigurationValue {
+    # A Windows<Property> override wins on Windows; otherwise the base property applies.
+    param([object]$Configuration, [string]$Property)
+    if ((Test-IsWindowsPlatform) -and $Configuration["Windows$Property"]) { return $Configuration["Windows$Property"] }
+    $Configuration[$Property]
+}
+
 function Get-PlatformKey {
-    $os = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'Windows' } else { 'Linux' }
+    $os = if (Test-IsWindowsPlatform) { 'Windows' } else { 'Linux' }
     $cpu = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
     $arch = if ($cpu -eq [System.Runtime.InteropServices.Architecture]::Arm64) { 'arm64' } else { 'amd64' }
     "$os ($arch)"
@@ -13,10 +22,8 @@ function Get-ConfiguredChecks {
         $config = $toolsConfig[$toolName]
         if (-not $config.Enabled) { continue }
         $escapedName = $toolName.Replace("'", "''")
-        if ($config.CheckType -eq 'custom' -and $config.CustomFunction) {
-            $command = if ($script:ToolDefinitions.ContainsKey($config.Id)) {
-                "Invoke-ToolEntryPoint -ToolId '$($config.Id)' -EntryPoint 'Test-Tool' -Arguments @{ Progress = `$args[0] }"
-            } else { "$($config.CustomFunction) -Progress `$args[0]" }
+        if ($config.CheckType -eq 'custom') {
+            $command = "Invoke-ToolEntryPoint -ToolId '$($config.Id)' -EntryPoint 'Test-Tool' -Arguments @{ Progress = `$args[0] }"
             @{ Name = $toolName; ToolId = $config.Id; Block = [scriptblock]::Create($command) }
         } elseif ($config.CheckType -eq 'standard') {
             @{ Name = $toolName; ToolId = $config.Id; Block = [scriptblock]::Create("Test-StandardTool -ToolName '$escapedName' -Progress `$args[0]") }
@@ -63,6 +70,22 @@ function Invoke-ToolEntryPoint {
     finally { Set-ToolResultOwnership -ToolId $ToolId -PreviousRows $previousRows }
 }
 
+function Get-InfrastructureDefinitions {
+    # Read source text, not live Get-Command bodies that tests may have mocked.
+    param([Parameter(Mandatory)][string[]]$Names)
+    $files = @('configuration','output','results','runtime','versions','checks','actions','parallel','package-managers','registry')
+    $source = ($files | ForEach-Object { Get-Content -LiteralPath (Join-Path $PSScriptRoot "$_.ps1") -Raw }) -join "`n"
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
+    $definitions = @{}
+    foreach ($statement in $ast.EndBlock.Statements) {
+        if ($statement -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $definitions[$statement.Name] = $statement.Extent.Text }
+    }
+    # A renamed or removed helper must fail startup, not silently break a worker.
+    $missing = @($Names | Where-Object { -not $definitions.ContainsKey($_) })
+    if ($missing.Count -gt 0) { throw "Worker infrastructure function(s) not found: $($missing -join ', ')" }
+    $Names | ForEach-Object { $definitions[$_] }
+}
+
 function Test-CommandExists {
     param([string]$Command)
     $null = Get-Command $Command -ErrorAction SilentlyContinue
@@ -70,7 +93,7 @@ function Test-CommandExists {
 }
 
 function Test-IsAdministrator {
-    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+    if (Test-IsWindowsPlatform) {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

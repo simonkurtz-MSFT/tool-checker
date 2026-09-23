@@ -3,7 +3,9 @@
 $repositoryPath = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $scriptPath = Join-Path $repositoryPath 'tool-checker.ps1'
 $configurationPath = Join-Path $repositoryPath 'infra/configuration.ps1'
-. $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "configuration-tests-$([guid]::NewGuid()).env")
+$testEnvFile = Join-Path ([System.IO.Path]::GetTempPath()) "configuration-tests-$([guid]::NewGuid()).env"
+. $scriptPath -EnvFile $testEnvFile
+$toolsJson = Get-Content (Join-Path $repositoryPath 'tool-checker.json') -Raw | ConvertFrom-Json
 
 Describe 'Configuration infrastructure' {
     It 'defines functions only and loads each from the configuration file' {
@@ -50,7 +52,7 @@ Describe 'Configuration infrastructure' {
     }
 
     It 'ships the lookup helper to workers without configuration readers or startup validation' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration @{}
+        $functionBlock = Get-ParallelCheckFunctionBlock
         $functionBlock | Should Match 'function Get-ToolConfiguration'
         $functionBlock | Should Not Match 'function Read-ToolCheckerConfiguration|function Read-DotEnvFile|function Get-ToolCatalogSelection|function Assert-ToolConfigurations|function Get-ToolSortKey'
     }
@@ -229,5 +231,254 @@ Describe 'Interactive environment setup' {
         { Initialize-ToolCheckerEnvironment -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -TemplatePath (Join-Path $TestDrive 'missing.example') } |
             Should Throw 'Environment template file not found'
         Assert-MockCalled Read-Host 0 -Scope It
+    }
+}
+
+Describe 'Tool configuration' {
+    It 'loads stable, unique catalog IDs for display-named tools' {
+        $catalogIds = @($toolsConfig.Values | ForEach-Object { $_.Id })
+
+        $toolsConfig['Azure CLI Extensions'].Id | Should Be 'azure-cli-extensions'
+        $toolsConfig['Azure Developer CLI'].Id | Should Be 'azure-dev-cli'
+        $catalogIds.Count | Should Be ($catalogIds | Select-Object -Unique).Count
+        $catalogIds | ForEach-Object { $_ | Should Match '^[a-z][a-z0-9-]*$' }
+    }
+
+    It 'applies defaults for optional custom-check properties' {
+        $toolsConfig['Azure CLI Extensions'].Enabled | Should Be $true
+        $toolsConfig['Azure CLI Extensions'].ProductionReleasesOnly | Should Be $true
+    }
+
+    It 'returns a configured custom checker with required properties' {
+        $config = Get-ToolConfiguration -ToolName 'NodeJS' -RequiredProperties @('ToolFile', 'Command')
+
+        $config.ToolFile | Should Be 'nodejs.ps1'
+        $config.Command | Should Be 'node'
+    }
+
+    It 'rejects an unknown tool' {
+        { Get-ToolConfiguration -ToolName 'Missing Tool' } | Should Throw 'Tool configuration not found: Missing Tool'
+    }
+
+    It 'rejects a missing required property' {
+        { Get-ToolConfiguration -ToolName 'Azure CLI Extensions' -RequiredProperties @('ApiUrl') } |
+            Should Throw "Tool 'Azure CLI Extensions' requires configuration property 'ApiUrl'."
+    }
+
+    It 'resolves every configured custom checker' {
+        { Assert-ToolConfigurations } | Should Not Throw
+    }
+
+    It 'rejects a custom tool without a declared tool file' {
+        $toolsConfig['Broken Custom Tool'] = @{
+            Enabled = $true
+            CheckType = 'custom'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Tool 'Broken Custom Tool' requires configuration property 'ToolFile'."
+        } finally {
+            $toolsConfig.Remove('Broken Custom Tool')
+        }
+    }
+
+    It 'rejects a custom tool whose file does not define the checker and ignores a retired CustomFunction value' {
+        $toolsConfig['Broken Custom Tool'] = @{
+            Id = 'uv'
+            Enabled = $true
+            CheckType = 'custom'
+            CustomFunction = 'Get-Date'
+            ToolFile = 'uv.ps1'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Custom tool 'Broken Custom Tool' requires its ToolFile to define Test-Tool."
+        } finally {
+            $toolsConfig.Remove('Broken Custom Tool')
+        }
+    }
+
+    It 'rejects an unsupported check type during startup validation' {
+        $toolsConfig['Broken Tool'] = @{
+            Enabled = $true
+            CheckType = 'manual'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Tool 'Broken Tool' has unsupported CheckType 'manual'."
+        } finally {
+            $toolsConfig.Remove('Broken Tool')
+        }
+    }
+
+    It 'rejects a standard tool without a version command form' {
+        $toolsConfig['Broken Standard Tool'] = @{
+            Enabled = $true
+            CheckType = 'standard'
+            Command = 'broken'
+            ApiUrl = 'https://example.invalid/releases'
+            UpdateType = 'direct'
+            UpdateCommand = 'broken update'
+        }
+        try {
+            { Assert-ToolConfigurations } |
+                Should Throw "Standard tool 'Broken Standard Tool' requires either 'VersionFlag' or 'VersionCommand'."
+        } finally {
+            $toolsConfig.Remove('Broken Standard Tool')
+        }
+    }
+}
+
+Describe 'Tool catalog selection' {
+    It 'selects the complete catalog when no IDs are requested' {
+        $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
+
+        $selection.CatalogToolIds.Count | Should Be 19
+        $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
+    }
+
+    It 'filters requested catalog IDs and retains display sort order' {
+        $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools -RequestedToolIds @('deno', 'azure-cli-extensions')
+
+        $selection.SelectedEntries.Count | Should Be 2
+        $selection.SelectedEntries[0].Id | Should Be 'azure-cli-extensions'
+        $selection.SelectedEntries[0].Name | Should Be 'Azure CLI Extensions'
+        $selection.SelectedEntries[1].Id | Should Be 'deno'
+    }
+
+    It 'rejects a requested ID that is absent from the catalog' {
+        { Get-ToolCatalogSelection -Tools $toolsJson.tools -RequestedToolIds @('deno', 'missing-tool') } |
+            Should Throw 'TOOL_CHECKER_TOOLS contains unknown catalog ID(s): missing-tool'
+    }
+
+    It 'rejects a catalog ID that is not a lowercase semantic identifier' {
+        $invalidCatalog = [PSCustomObject]@{
+            'Invalid Tool' = [PSCustomObject]@{ Name = 'Invalid Tool' }
+        }
+
+        { Get-ToolCatalogSelection -Tools $invalidCatalog } |
+            Should Throw "Tool catalog ID 'Invalid Tool' must use lowercase letters, numbers, and hyphens."
+    }
+
+    It 'rejects a catalog entry without a display name' {
+        $missingNameCatalog = [PSCustomObject]@{
+            'valid-tool' = [PSCustomObject]@{}
+        }
+
+        { Get-ToolCatalogSelection -Tools $missingNameCatalog } |
+            Should Throw "Tool catalog entry 'valid-tool' requires a display Name."
+    }
+
+    It 'rejects duplicate display names even when neither entry is selected' {
+        $duplicateNameCatalog = [PSCustomObject]@{
+            'first-tool' = [PSCustomObject]@{ Name = 'Same Tool' }
+            'second-tool' = [PSCustomObject]@{ Name = 'Same Tool' }
+        }
+
+        { Get-ToolCatalogSelection -Tools $duplicateNameCatalog -RequestedToolIds @('first-tool') } |
+            Should Throw "Tool catalog display Name 'Same Tool' must be unique."
+    }
+}
+
+Describe 'Cooldown configuration' {
+    BeforeEach {
+        $cooldownDirectory = Join-Path $TestDrive 'cooldown-catalog'
+        New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'infra') -Destination $cooldownDirectory -Recurse -Force
+        $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
+        $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
+        $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')
+    }
+
+    It 'uses catalog <CatalogDays> and runtime <OverrideDays> consistently in the main session and workers' -TestCases @(
+        @{ CatalogDays = 8; OverrideDays = $null; ExpectedDays = 8; ExpectedInstallable = $false },
+        @{ CatalogDays = 12; OverrideDays = $null; ExpectedDays = 12; ExpectedInstallable = $false },
+        @{ CatalogDays = 8; OverrideDays = 2; ExpectedDays = 2; ExpectedInstallable = $true },
+        @{ CatalogDays = 8; OverrideDays = 0; ExpectedDays = 0; ExpectedInstallable = $true }
+    ) {
+        param($CatalogDays, $OverrideDays, $ExpectedDays, $ExpectedInstallable)
+
+        $cooldownCatalog.settings.CooldownDays = $CatalogDays
+        $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile, $overrideDays)
+                $options = @{ EnvFile = $envFile }
+                if ($null -ne $overrideDays) { $options.CooldownDays = $overrideDays }
+                . $path @options
+                $check = {
+                    $apiData = [PSCustomObject]@{
+                        versions = [PSCustomObject]@{ '1.1.0' = @{} }
+                        time = [PSCustomObject]@{ '1.1.0' = [DateTimeOffset]::UtcNow.AddDays(-3).ToString('O') }
+                    }
+                    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion '1.0.0' -MaximumVersion '1.1.0'
+                    $results.Tools['Cooldown probe'] = @{
+                        Days = $script:ReleaseCooldownDays
+                        Installable = $null -ne $release -and $release.Installable
+                    }
+                }
+                & $check
+                $mainResult = $results.Tools['Cooldown probe']
+                $results = New-ToolCheckResults
+                Invoke-ParallelChecks -Checks @(@{ Name = 'Cooldown probe'; Block = $check }) -Total 1 -TimeoutSec 5
+                [PSCustomObject]@{
+                    Main = $mainResult
+                    Worker = $results.Tools['Cooldown probe']
+                }
+            }).AddArgument((Join-Path $cooldownDirectory 'tool-checker.ps1')).AddArgument($testEnvFile).AddArgument($OverrideDays)
+            $observed = @($session.Invoke())
+
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].Main.Days | Should Be $ExpectedDays
+            $observed[0].Worker.Days | Should Be $ExpectedDays
+            $observed[0].Main.Installable | Should Be $ExpectedInstallable
+            $observed[0].Worker.Installable | Should Be $ExpectedInstallable
+        } finally {
+            $session.Dispose()
+        }
+    }
+
+    It 'rejects missing and invalid catalog cooldown values' {
+        foreach ($invalidValue in @($null, -1, 1.5, '8', $true, 2147483648)) {
+            $cooldownCatalog.settings = @{ CooldownDays = $invalidValue }
+            if ($null -eq $invalidValue) { $cooldownCatalog.Remove('settings') | Out-Null }
+            $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
+            $session = [powershell]::Create()
+            try {
+                $null = $session.AddScript({
+                    param($path, $envFile)
+                    try { . $path -EnvFile $envFile } catch { $_.Exception.Message }
+                }).AddArgument((Join-Path $cooldownDirectory 'tool-checker.ps1')).AddArgument($testEnvFile)
+                $observed = @($session.Invoke())
+
+                $observed.Count | Should Be 1
+                $observed[0] | Should Match 'Catalog settings.CooldownDays must be a nonnegative integer'
+            } finally {
+                $session.Dispose()
+            }
+        }
+    }
+
+    It 'rejects a negative runtime override' {
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path)
+                try { . $path -CooldownDays -1 -Version } catch { $_.FullyQualifiedErrorId }
+            }).AddArgument($scriptPath)
+            $observed = @($session.Invoke())
+
+            $observed.Count | Should Be 1
+            $observed[0] | Should Match 'ParameterArgumentValidationError'
+        } finally {
+            $session.Dispose()
+        }
     }
 }

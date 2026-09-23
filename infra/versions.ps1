@@ -27,6 +27,20 @@ function Compare-SemanticVersions {
     }
 }
 
+function Sort-SemanticVersions {
+    # Order by numeric core, then prerelease before release; suffixed versions never throw.
+    param([string[]]$Versions, [switch]$Descending)
+    @($Versions | Where-Object { $_ }) | Sort-Object -Descending:$Descending -Property @(
+        {
+            $core = [version]'0.0'
+            $null = [version]::TryParse(((ConvertTo-CanonicalSemanticVersion $_) -replace '^(\d+(?:\.\d+)+).*$', '$1'), [ref]$core)
+            $core
+        },
+        { (ConvertTo-CanonicalSemanticVersion $_) -match '^\d+(?:\.\d+)+$' },
+        { $_ }
+    )
+}
+
 function Compare-OwnedToolVersions {
     param([string]$Version1, [string]$Version2, [string]$ToolName)
     $owner = if ($ToolName) { Get-ResultToolId -Name $ToolName }

@@ -129,7 +129,7 @@ Describe 'pnpm npm metadata fallback' {
         Mock npm { '{"2.0.0":"2020-01-01T00:00:00Z"}' }
         $script:ToolDefinitions.ContainsKey('npm-global-packages') | Should Be $false
         (Get-NpmVersionReleaseInfo -PackageName 'pnpm' -Version '2.0.0').Installable | Should Be $true
-        $worker = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration $toolsConfig
+        $worker = Get-ParallelCheckFunctionBlock
         $worker | Should Match 'function Get-NpmVersionReleaseInfo'
         $worker | Should Not Match 'function ConvertFrom-NcuGlobalOutput'
     }

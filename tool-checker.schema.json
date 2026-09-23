@@ -81,14 +81,10 @@
         "enabled": { "type": "boolean", "default": true, "description": "Whether the selected tool is checked and its definitions loaded." },
         "CheckType": { "type": "string", "enum": ["standard", "custom"] },
         "ProductionReleasesOnly": { "type": "boolean", "default": true },
-        "CustomFunction": {
-          "$ref": "#/definitions/nonBlankString",
-          "description": "Custom checker function. Use Test-Tool when declaring a ToolFile."
-        },
         "ToolFile": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*\\.ps1$",
-          "description": "Explicit filename directly under tools/, not a path or _tool-template.ps1. Omit when no specialized behavior is needed."
+          "description": "Explicit filename directly under tools/, not a path or _tool-template.ps1. Required for custom checks, whose file must define Test-Tool; otherwise omit when no specialized behavior is needed."
         },
         "RequiredProperties": {
           "type": "array",
@@ -173,11 +169,7 @@
               },
               {
                 "if": { "required": ["CheckType"], "properties": { "CheckType": { "const": "custom" } } },
-                "then": {
-                  "required": ["CustomFunction"],
-                  "if": { "required": ["ToolFile"] },
-                  "then": { "properties": { "CustomFunction": { "const": "Test-Tool" } } }
-                }
+                "then": { "required": ["ToolFile"] }
               },
               {
                 "if": { "required": ["VersionExtractor"], "properties": { "VersionExtractor": { "const": "jsonProperty" } } },

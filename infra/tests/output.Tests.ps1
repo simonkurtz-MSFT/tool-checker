@@ -45,7 +45,7 @@ Describe 'Output infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($outputPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 13
+        $ast.EndBlock.Statements.Count | Should Be 14
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $outputPath
         }
@@ -118,7 +118,7 @@ Describe 'Output infrastructure' {
     }
 
     It 'includes only worker-needed output helpers in the function block' {
-        $functionBlock = Get-ParallelCheckFunctionBlock -ScriptContent (Get-Content $scriptPath -Raw) -ToolsConfiguration @{}
+        $functionBlock = Get-ParallelCheckFunctionBlock
         foreach ($name in @('Write-Header', 'Write-Success', 'Write-Warning', 'Write-Error')) {
             $functionBlock | Should Match "function $name"
         }
@@ -247,8 +247,8 @@ Describe 'Output rendering' {
         $results.Tools.Example = @{ ToolId = 'example'; Installed = '2.0.0'; Latest = '2.0.0' }
         $results.ToolState.example = @{
             Installations = @(
-                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Path = '\\?\C:\npm\cli'; Status = 'Found' },
-                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Path = '/pnpm/cli'; Status = 'Found' }
+                @{ PackageManager = 'npm'; PackageName = '@example/cli'; Version = '2.0.0'; Path = '\\?\C:\npm\cli'; Status = 'Found'; RemoveCommand = 'npm uninstall --global @example/cli' },
+                @{ PackageManager = 'pnpm'; PackageName = '@example/cli'; Version = '1.0.0'; Path = '/pnpm/cli'; Status = 'Found'; RemoveCommand = 'pnpm remove --global @example/cli' }
             )
             ResolvedCommandPath = '\\?\C:\editor\cli.ps1'
         }
@@ -311,9 +311,31 @@ Describe 'Output rendering' {
         $rendered | Should Match '⚠  Updates Available'
         $rendered | Should Match '⚠  Updates Not Yet Available'
         $rendered | Should Match '⚠  Errors'
-        $rendered | Should Match 'Blocked CLI: release is 2d old; available at 8d'
+        $rendered | Should Match 'Blocked CLI : release is 2 days old; available at 8 days'
         $rendered | Should Match 'Errors \(1\)'
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'pluralizes maturity ages and aligns summary colons to the table name column' {
+        $results.Tools = @{
+            'GitHub Copilot CLI' = @{ Installed = '0.0.1'; Latest = '0.0.2' }
+            pnpm = @{ Installed = '9.0.0'; Latest = '10.0.0' }
+            'One Day CLI' = @{ Installed = '1.0.0'; Latest = '1.0.1' }
+        }
+        $results.Updates = @('GitHub Copilot CLI', 'pnpm', 'One Day CLI')
+        $results.MaturityBlockedUpdates = @(
+            @{ Name = 'GitHub Copilot CLI'; AgeDays = 0; RequiredAgeDays = 8 },
+            @{ Name = 'pnpm'; AgeDays = 7; RequiredAgeDays = 8 },
+            @{ Name = 'One Day CLI'; AgeDays = 1; RequiredAgeDays = 1 }
+        )
+
+        Show-ResultsSummary -AvailableUpdateNames @()
+
+        $rows = @($script:OutputLines | Where-Object { $_ -match '^  - (GitHub Copilot CLI|pnpm|One Day CLI)' })
+        $rows[0] | Should Be '  - GitHub Copilot CLI : release is 0 days old; available at 8 days'
+        $rows[1] | Should Be '  - pnpm               : release is 7 days old; available at 8 days'
+        $rows[2] | Should Be '  - One Day CLI        : release is 1 day old; available at 1 day'
+        @($rows | ForEach-Object { $_.IndexOf(':') } | Select-Object -Unique).Count | Should Be 1
     }
 
     It 'omits empty summary categories and preserves the check progress heading' {
@@ -367,5 +389,40 @@ Describe 'No-action workflow output' {
         Main
         ($script:OutputLines -join "`n") | Should Not Match 'Nothing to do'
         Assert-MockCalled Invoke-ActionMenu 1 -Scope It
+    }
+}
+
+Describe 'Application banner' {
+    It 'keeps border and title widths aligned for varying version lengths' {
+        foreach ($version in @('1.2.4', '10.123.4567-preview.89')) {
+            $lines = @(Get-ApplicationBannerLines -Version $version)
+
+            $lines.Count | Should Be 3
+            $lines | ForEach-Object { $_ | Should Match '^  [^ ]' }
+            $lines[1] | Should Match "Tool Checker V$version"
+            $lines[0].Length | Should Be $lines[1].Length
+            $lines[1].Length | Should Be $lines[2].Length
+        }
+    }
+}
+
+Describe 'Update legend' {
+    BeforeEach {
+        $results.Updates = @()
+        Mock Write-Host { }
+    }
+
+    It 'is hidden when no updates are available' {
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 0
+    }
+
+    It 'is shown when an update is available' {
+        $results.Updates = @('Example CLI')
+
+        Show-UpdateLegend
+
+        Assert-MockCalled Write-Host 2
     }
 }

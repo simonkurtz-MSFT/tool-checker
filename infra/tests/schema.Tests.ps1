@@ -32,7 +32,7 @@ Describe 'Catalog JSON Schema' {
         @{ Name = 'zero cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 0 } },
         @{ Name = 'maximum cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 2147483647 } },
         @{ Name = 'an explicit version command'; Change = { param($catalog) $catalog.tools.example.Remove('VersionFlag'); $catalog.tools.example.VersionCommand = 'example version --json' } },
-        @{ Name = 'a custom checker without standard-only fields'; Change = { param($catalog) $catalog.tools.example = @{ Name = 'Custom'; CheckType = 'custom'; CustomFunction = 'Test-Tool'; ToolFile = 'different.filename.ps1'; UpdateType = 'custom'; UpdateCommand = 'custom update'; ReleaseNotesUrl = '' } } },
+        @{ Name = 'a custom checker without standard-only fields'; Change = { param($catalog) $catalog.tools.example = @{ Name = 'Custom'; CheckType = 'custom'; ToolFile = 'different.filename.ps1'; UpdateType = 'custom'; UpdateCommand = 'custom update'; ReleaseNotesUrl = '' } } },
         @{ Name = 'a disabled entry without runnable configuration'; Change = { param($catalog) $catalog.tools.example = @{ Name = 'Disabled'; enabled = $false } } },
         @{ Name = 'package managers and platform-specific action metadata'; Change = {
             param($catalog)
@@ -77,8 +77,8 @@ Describe 'Catalog JSON Schema' {
         @{ Name = 'missing update command'; Change = { param($catalog) $catalog.tools.example.Remove('UpdateCommand') } },
         @{ Name = 'blank update command'; Change = { param($catalog) $catalog.tools.example.UpdateCommand = ' ' } },
         @{ Name = 'missing update type'; Change = { param($catalog) $catalog.tools.example.Remove('UpdateType') } },
-        @{ Name = 'missing custom checker'; Change = { param($catalog) $catalog.tools.example.CheckType = 'custom' } },
-        @{ Name = 'nonstandard tool-local checker name'; Change = { param($catalog) $catalog.tools.example.CheckType = 'custom'; $catalog.tools.example.CustomFunction = 'Test-Example'; $catalog.tools.example.ToolFile = 'example.ps1' } },
+        @{ Name = 'a custom check without a tool file'; Change = { param($catalog) $catalog.tools.example.CheckType = 'custom' } },
+        @{ Name = 'the retired CustomFunction property'; Change = { param($catalog) $catalog.tools.example.CheckType = 'custom'; $catalog.tools.example.CustomFunction = 'Test-Tool'; $catalog.tools.example.ToolFile = 'example.ps1' } },
         @{ Name = 'JSON extraction without its property'; Change = { param($catalog) $catalog.tools.example.VersionExtractor = 'jsonProperty' } },
         @{ Name = 'unsupported version extractor'; Change = { param($catalog) $catalog.tools.example.VersionExtractor = 'magic' } },
         @{ Name = 'tool file paths'; Change = { param($catalog) $catalog.tools.example.ToolFile = '../example.ps1' } },

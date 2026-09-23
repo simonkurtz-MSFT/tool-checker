@@ -239,49 +239,31 @@ function Get-StandardToolUpdates {
         return
     }
 
-    # Self-reporting tools: the version command itself reveals available updates
-    if ($config.UpdateParseRegex) {
-        $outputStr = if ($RawOutput -is [array]) { $RawOutput -join ' ' } else { "$RawOutput" }
-        if ($outputStr -match $config.UpdateParseRegex) {
-            $latestVersion = $Matches[1]
-            if ($null -ne $latestVersion) {
-                $latestVersion = "$latestVersion".Trim().TrimEnd('.')
-            }
-            if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'reported version')) { return }
-            $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
-            if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
-                Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
-                $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-            } else {
-                Write-Success "$ToolName is up to date"
-            }
-        } else {
-            $results.Tools[$ToolName].Latest = $InstalledVersion
-            Write-Success "$ToolName is up to date"
-        }
-        return
-    }
-
-    # API-based update check
+    # Resolve the latest version from self-reported output or the API, then register once.
     try {
-        if (-not $config.ApiUrl) { Write-Warning "  No API endpoint configured for $ToolName"; return }
-
-        $apiData = Invoke-SafeApiRequest -Uri $config.ApiUrl
-        if (-not $apiData) { return }
-
-        $latestVersion = Get-LatestVersionFromApi -ToolName $ToolName -ApiData $apiData
-        if (-not $latestVersion) { Write-Warning "  Could not determine latest version"; return }
-
-        if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
-
-        if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -ToolName $ToolName) {
-            Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
-            $results.Updates += $ToolName
-            if (-not $SkipUpdate) {
-                $url = $config.ReleaseNotesUrl; if ($url) { Write-Host "  Release notes: $url" }
-                $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
-                Add-AvailableUpdate -Name $ToolName -Command $updateCommand -Type $config.UpdateType -Details "$InstalledVersion -> $latestVersion" -Version $latestVersion
+        $versionLabel = 'version'
+        if ($config.UpdateParseRegex) {
+            $outputStr = if ($RawOutput -is [array]) { $RawOutput -join ' ' } else { "$RawOutput" }
+            if ($outputStr -notmatch $config.UpdateParseRegex) {
+                $results.Tools[$ToolName].Latest = $InstalledVersion
+                Write-Success "$ToolName is up to date"
+                return
             }
+            $latestVersion = "$($Matches[1])".Trim().TrimEnd('.')
+            $versionLabel = 'reported version'
+        } else {
+            if (-not $config.ApiUrl) { Write-Warning "  No API endpoint configured for $ToolName"; return }
+            $apiData = Invoke-SafeApiRequest -Uri $config.ApiUrl
+            if (-not $apiData) { return }
+            $latestVersion = Get-LatestVersionFromApi -ToolName $ToolName -ApiData $apiData
+            if (-not $latestVersion) { Write-Warning "  Could not determine latest version"; return }
+        }
+
+        if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel $versionLabel)) { return }
+        $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
+        if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
+            Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
+            if ($config.ReleaseNotesUrl) { Write-Host "  Release notes: $($config.ReleaseNotesUrl)" }
         } else {
             Write-Success "$ToolName is up to date"
         }
@@ -366,20 +348,10 @@ function Get-UpdateCommand {
 
     if ($results.Tools.ContainsKey($ToolName) -and $results.Tools[$ToolName].Covered) { return '' }
 
-    # Direct config match
-    foreach ($k in $toolsConfig.Keys) {
-        if ($ToolName -ne $k) { continue }
-        $config = $toolsConfig[$k]
-        if ($config.ReleasePackageManager) { return '' }
-        $command = if ($config.WindowsUpdateCommand -and ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            $config.WindowsUpdateCommand
-        } else {
-            $config.UpdateCommand
-        }
-        return $command.Replace('{latest}', $Latest)
-    }
-
-    ""
+    if (-not $toolsConfig.Contains($ToolName)) { return '' }
+    $config = $toolsConfig[$ToolName]
+    if ($config.ReleasePackageManager) { return '' }
+    (Get-PlatformConfigurationValue -Configuration $config -Property 'UpdateCommand').Replace('{latest}', $Latest)
 }
 
 function Get-ReleaseNotesUrl {

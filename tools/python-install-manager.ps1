@@ -9,7 +9,7 @@ function Test-Tool {
     $config = Get-ToolConfiguration -ToolName $toolName -RequiredProperties @('PackageName', 'WingetId', 'UpdateCommand', 'UpdateType')
     Write-Header "Checking $toolName" -Progress $Progress
 
-    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+    if (-not (Test-IsWindowsPlatform)) {
         Write-Warning "$toolName check skipped: Windows only"
         return
     }

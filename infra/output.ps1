@@ -55,9 +55,15 @@ function Show-UpdateLegend {
     Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
 }
 
+function Get-ResultsNameColumnWidth {
+    $maxName = ($results.Tools.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    if (-not $maxName -or $maxName -lt 4) { return 4 }
+    return $maxName
+}
+
 function Show-ResultsTable {
     # Column widths
-    $maxName = ($results.Tools.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    $maxName = Get-ResultsNameColumnWidth
     $maxInst = ($results.Tools.Values | ForEach-Object { $_.Installed.Length } | Measure-Object -Maximum).Maximum
     $maxLat  = ($results.Tools.Values | ForEach-Object {
         if (-not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Latest)) { "unknown".Length }
@@ -78,7 +84,7 @@ function Show-ResultsTable {
     } | ForEach-Object { $_.Key }
     $urls   = $actionableNames | ForEach-Object { Get-ReleaseNotesUrl -ToolName $_ } | Where-Object { $_ }
     $maxUrl = if ($urls) { ($urls | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum } else { 0 }
-    if ($maxName -lt 4)   { $maxName = 4 };  if ($maxInst -lt 9) { $maxInst = 9 }
+    if ($maxInst -lt 9) { $maxInst = 9 }
     if ($maxLat  -lt 6)   { $maxLat  = 6 };  if (-not $maxUpd -or $maxUpd -lt 16) { $maxUpd = 16 }
     if ($maxUrl -lt 13)   { $maxUrl = 13 }
 
@@ -210,8 +216,15 @@ function Show-ResultsSummary {
     }
     if ($results.MaturityBlockedUpdates.Count -gt 0) {
         Write-Host "`n$ColorOrange⚠  Updates Not Yet Available ($($results.MaturityBlockedUpdates.Count)):$ColorReset"
+        $nameWidth = Get-ResultsNameColumnWidth
+        $blockedNameWidth = ($results.MaturityBlockedUpdates.Name | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        if ($blockedNameWidth -gt $nameWidth) { $nameWidth = $blockedNameWidth }
+        $labelWidth = $nameWidth + 1
         $results.MaturityBlockedUpdates | ForEach-Object {
-            Write-Host "  - $($_.Name): release is $($_.AgeDays)d old; available at $($_.RequiredAgeDays)d"
+            $ageUnit = if ($_.AgeDays -eq 1) { 'day' } else { 'days' }
+            $requiredAgeUnit = if ($_.RequiredAgeDays -eq 1) { 'day' } else { 'days' }
+            Write-Host ("  - {0,-$labelWidth}: release is {1} {2} old; available at {3} {4}" -f
+                $_.Name, $_.AgeDays, $ageUnit, $_.RequiredAgeDays, $requiredAgeUnit)
         }
     }
     if ($results.Errors.Count -gt 0) {

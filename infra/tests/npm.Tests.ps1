@@ -58,8 +58,10 @@ Describe 'Node package installation discovery' {
         $installations[0].PackageManager | Should Be 'npm'
         $installations[0].Version | Should Be '1.0.84-2'
         $installations[0].Path | Should Be '/npm/node_modules/@github/copilot'
+        $installations[0].RemoveCommand | Should Be 'npm uninstall --global @github/copilot'
         $installations[1].PackageManager | Should Be 'pnpm'
         $installations[1].Version | Should Be '1.0.83-3'
+        $installations[1].RemoveCommand | Should Be 'pnpm remove --global @github/copilot'
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
     }
 

@@ -17,10 +17,8 @@ function Get-NodeReleasePlan {
     }
     if ($allowedReleases.Count -eq 0) { return $null }
 
-    $currentParts = $CurrentVersion -split '\.'
-    $currentMajor = [int]$currentParts[0]
-    $currentMinor = if ($currentParts.Count -gt 1) { [int]$currentParts[1] } else { 0 }
-    $currentPatch = if ($currentParts.Count -gt 2) { [int]$currentParts[2] } else { 0 }
+    $current = [version](ConvertTo-CanonicalSemanticVersion $CurrentVersion)
+    $currentMajor = $current.Major
     # The distribution index is newest-first; retain separate current, LTS, and
     # installed-major targets rather than treating every newer major as a patch.
     $latestLTS = $allowedReleases | Where-Object { $_.lts } | Select-Object -First 1
@@ -33,12 +31,8 @@ function Get-NodeReleasePlan {
     $latestLTSVersion = if ($latestLTS) { $latestLTS.version -replace '^v', '' } else { $null }
     $latestInMajor = if ($latestInCurrentMajor) { $latestInCurrentMajor.version -replace '^v', '' } else { $null }
     $updateKind = $null
-    if ($latestInMajor -and $latestInMajor -ne $CurrentVersion) {
-        $latestParts = $latestInMajor -split '\.'
-        $latestMinor = if ($latestParts.Count -gt 1) { [int]$latestParts[1] } else { 0 }
-        $latestPatch = if ($latestParts.Count -gt 2) { [int]$latestParts[2] } else { 0 }
-        if ($latestMinor -gt $currentMinor) { $updateKind = 'minor' }
-        elseif ($latestPatch -gt $currentPatch) { $updateKind = 'patch' }
+    if ($latestInMajor -and (Compare-SemanticVersions $CurrentVersion $latestInMajor) -lt 0) {
+        $updateKind = if (([version](ConvertTo-CanonicalSemanticVersion $latestInMajor)).Minor -gt $current.Minor) { 'minor' } else { 'patch' }
     }
 
     [PSCustomObject]@{
@@ -74,7 +68,7 @@ function Test-Tool {
 
     Write-Host "  Checking for NodeJS updates..."
     $wingetLatestVersion = $null
-    if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config.WingetId) {
+    if ((Test-IsWindowsPlatform) -and $config.WingetId) {
         $wingetLatestVersion = Get-WingetLatestVersion -ToolName 'NodeJS' -PackageId $config.WingetId
         if ($wingetLatestVersion -and $config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $wingetLatestVersion)) {
             Write-Warning "  Latest WinGet version '$wingetLatestVersion' is not a full production semantic version"
@@ -84,7 +78,7 @@ function Test-Tool {
 
     try {
         Write-Host "  Querying nodejs.org distribution API..."
-        $distIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
+        $distIndex = Invoke-SafeApiRequest -Uri $config.ApiUrl
         if (-not $distIndex) { return }
 
         $releasePlan = Get-NodeReleasePlan -DistributionIndex $distIndex -CurrentVersion $currentVersion -ProductionReleasesOnly $config.ProductionReleasesOnly
@@ -123,7 +117,7 @@ function Test-Tool {
         Write-Host "  Latest Current : v$latestCurrentVersion (v$latestCurrentMajor)"
 
         if ($results.Updates -contains "NodeJS (patch)" -or $results.Updates -contains "NodeJS (minor)") {
-            $wingetCanInstall = -not ($IsWindows -or $env:OS -eq 'Windows_NT') -or (
+            $wingetCanInstall = -not (Test-IsWindowsPlatform) -or (
                 $wingetLatestVersion -and (Compare-SemanticVersions $wingetLatestVersion $latestInMajor) -ge 0
             )
             if ($wingetCanInstall) {

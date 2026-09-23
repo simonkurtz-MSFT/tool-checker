@@ -99,12 +99,14 @@ continue through the shared framework. Files must define functions only.
 Parallel workers receive the same per-tool definition registry, so
 tool-local helpers do not need separate dependency-list entries. Shared worker
 helpers in the explicitly loaded infrastructure files still belong in the
-`Get-ParallelCheckFunctionBlock` allowlist.
+`Get-ParallelCheckFunctionBlock` allowlist; the worker definition closure tests in
+[infra/tests/architecture.Tests.ps1](infra/tests/architecture.Tests.ps1) report any
+infrastructure helper a checker reaches that the allowlist omits.
 
 Use the same public names in every tool file: `Test-Tool`, `Refresh-ToolStatus`,
 `Invoke-ToolInstall`, `Invoke-ToolUpdate`, `Get-ToolOutcome`, and `Compare-ToolVersions`. Implement only the entry points the
-tool needs, in a `#region Public entry points` block. Set `CustomFunction` to
-`Test-Tool` for extracted custom checkers. Keep private functions in
+tool needs, in a `#region Public entry points` block. A `custom` catalog entry must
+declare a `ToolFile` that defines `Test-Tool`. Keep private functions in
 `#region Private helpers`; prefer tool-qualified names for clarity.
 
 Call public functions through `Invoke-ToolEntryPoint`, specifying the catalog ID,
@@ -165,7 +167,9 @@ Standard checks (including check-only) and refresh store `Installations` and
 The results table displays manager-reported versions and paths only when a tool
 has multiple found installations. Duplicate discovery offers one recommended
 cleanup action for the older copy, preferring the package manager outside the
-configured update command when versions match. Cleanup always requires explicit
+configured update command when versions match. Each found record carries the
+`RemoveCommand` supplied by its package manager; generic planning and rendering
+use it as-is and skip records without one. Cleanup always requires explicit
 approval, including with `-Force`. Discovery does not change the installed-version
 source or update commands.
 The shipped opt-ins are ncu, pnpm, and GitHub Copilot CLI, not arbitrary global packages.
@@ -178,7 +182,8 @@ real installs, updates, or registry repairs in tests.
 Put tool-owned tests in `tools/tests/<catalog-id>.Tests.ps1` and package-manager tests in
 `infra/tests/<package-manager>.Tests.ps1`. Every specialized checker must cover selected-alone
 and check-only execution in its owning suite; keep generic loader and dispatch contracts
-in `infra/tests/`.
+in `infra/tests/`, in the suite named after the owning infrastructure file (for example
+`infra/actions.ps1` is covered by `infra/tests/actions.Tests.ps1`).
 
 When conventions, helper contracts, loading, or validation practices change,
 update the template and this guidance in the same change. The corresponding
@@ -253,8 +258,9 @@ The palette is defined by `Initialize-ConsoleColors` in the output file. Bootstr
 calls it explicitly to set the immediate caller's color variables; loading the file
 alone must not initialize or overwrite them. Shared result state remains in bootstrap.
 
-`Get-ParallelCheckFunctionBlock` explicitly reads the output and configuration files
-alongside the main source and selects only allowlisted worker helpers. Do not scan `infra/` or
+`Get-ParallelCheckFunctionBlock` selects only allowlisted worker helpers through
+`Get-InfrastructureDefinitions`, which reads the fixed infrastructure source list and
+fails when an allowlisted name no longer exists. Do not scan `infra/` or
 send table/summary rendering to workers. The worker's `Write-Host` capture override
 remains in worker setup, using a snapshot of initialized colors rather than calling
 the initializer again. Validate with [infra/tests/output.Tests.ps1](infra/tests/output.Tests.ps1)
@@ -312,9 +318,11 @@ Optional `Get-ToolOutcome(Action, ExitCode, OutputText)` returns a diagnostic
 
 Interactive and Force paths share dispatch and completion. Jobs receive selected
 definition registries and allowlisted helpers extracted from explicit source files,
-not live `Get-Command` bodies that can contain mocks. Test contracts in
+not live `Get-Command` bodies that can contain mocks. Check workers and action jobs
+share `Get-InfrastructureDefinitions` and `Get-SharedPackageManagerDefinitions`. Test contracts in
 [infra/tests/architecture.Tests.ps1](infra/tests/architecture.Tests.ps1), including synthetic
-background dispatch, selected dependency isolation, owned refresh, and menu metadata.
+background dispatch, selected dependency isolation, owned refresh, menu metadata,
+and worker definition closure.
 
 ## Validate your change
 

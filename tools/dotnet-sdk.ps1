@@ -32,7 +32,7 @@ function Get-DotNetSDKInventory {
     $dotNetSDKs = @{}
     $tools = @{}
     foreach ($major in $byMajor.Keys) {
-        $sorted = @($byMajor[$major] | Sort-Object { [version]$_ })
+        $sorted = @(Sort-SemanticVersions $byMajor[$major])
         $highest = $sorted | Select-Object -Last 1
         $channel = ($highest -split '\.')[0..1] -join '.'
         $channelRelease = $latestSdkByChannel[$channel]
@@ -49,7 +49,7 @@ function Get-DotNetSDKInventory {
         foreach ($version in $sorted) {
             $record = $SdkRecords | Where-Object Version -eq $version | Select-Object -First 1
             $dotNetSDKs[$version] = @{ Installed = $version; Latest = $latest; Path = $record.Path; HighestInstalled = $highest }
-            $tools[".NET SDK $version"] = @{ ToolId = 'dotnet-sdk'; ItemId = $version; Installed = $version; Latest = $latest; HighestInstalled = $highest; Covered = $latest -and [version]$highest -ge [version]$latest }
+            $tools[".NET SDK $version"] = @{ ToolId = 'dotnet-sdk'; ItemId = $version; Installed = $version; Latest = $latest; HighestInstalled = $highest; Covered = $latest -and (Compare-SemanticVersions $highest $latest) -ge 0 }
         }
     }
 
@@ -129,7 +129,11 @@ function Test-Tool {
         if ($SkipUpdate) { return }
 
         Write-Host "  Checking for .NET SDK updates..."
-        $releasesIndex = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
+        $releasesIndex = Invoke-SafeApiRequest -Uri $config.ApiUrl
+        if (-not $releasesIndex) {
+            Write-Host "    Manual check: https://dotnet.microsoft.com/en-us/download/dotnet"
+            return
+        }
         $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($sdkRecords.Version) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $config.ProductionReleasesOnly
         $latestSdkByChannel = $releasePlan.LatestSdkByChannel
         $byMajor = $releasePlan.ByMajor
@@ -138,13 +142,13 @@ function Test-Tool {
         Write-Host "`n  Version Summary:"
         $maxLen = ($byMajor.Keys | ForEach-Object { ".NET $_".Length } | Measure-Object -Maximum).Maximum
         foreach ($maj in ($byMajor.Keys | Sort-Object { [int]$_ } -Descending)) {
-            $sorted  = $byMajor[$maj] | Sort-Object { [version]$_ }
+            $sorted  = @(Sort-SemanticVersions $byMajor[$maj])
             $highest = $sorted | Select-Object -Last 1
             Write-Host ("    {0,-$maxLen} : {1}" -f ".NET $maj", ($sorted -join ', '))
 
             $chVer = ($highest -split '\.')[0..1] -join '.'
             if ($latestSdkByChannel.ContainsKey($chVer)) {
-                $latestSdk = if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+                $latestSdk = if (Test-IsWindowsPlatform) {
                     Get-WingetLatestVersion -ToolName ".NET SDK $maj" -PackageId "Microsoft.DotNet.SDK.$maj"
                 } else {
                     $latestSdkByChannel[$chVer].LatestSdk
@@ -152,7 +156,7 @@ function Test-Tool {
                 if (-not $latestSdk) { continue }
                 if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestSdk)) { continue }
                 $latestSdkByMajor[$maj] = $latestSdk
-                if ([version]$latestSdk -gt [version]$highest) {
+                if ((Compare-SemanticVersions $latestSdk $highest) -gt 0) {
                     Write-Warning "    .NET $highest -> $latestSdk (update available)"
                     $results.Updates += ".NET SDK: $highest -> $latestSdk"
                 }
@@ -167,7 +171,7 @@ function Test-Tool {
         $maxInstalledMajor = $releasePlan.MaxInstalledMajor
         $newerMajorVersions = @{}
         $newerMajors = @($releasePlan.NewerMajors)
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        if (Test-IsWindowsPlatform) {
             $newerMajors = @($newerMajors | Where-Object {
                 $wingetVersion = Get-WingetLatestVersion -ToolName ".NET SDK $_" -PackageId "Microsoft.DotNet.SDK.$_"
                 if ($wingetVersion) { $newerMajorVersions[$_] = $wingetVersion; $true } else { $false }
@@ -181,9 +185,9 @@ function Test-Tool {
 
         if ($results.Updates -match '\.NET SDK') {
             foreach ($maj in $byMajor.Keys) {
-                $highest = $byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1
+                $highest = Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1
                 $latest  = (Get-ToolState 'dotnet-sdk')[$highest].Latest
-                if ($latest -and $latest -ne "-" -and [version]$latest -gt [version]$highest) {
+                if ($latest -and $latest -ne "-" -and (Compare-SemanticVersions $latest $highest) -gt 0) {
                     Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade Microsoft.DotNet.SDK.$maj --silent" -Type 'winget' -Details "$highest -> $latest"
                 }
             }
@@ -242,17 +246,17 @@ function Refresh-ToolStatus {
         if ($_ -notmatch '^\.NET SDK:\s*(?<from>[\d.]+)\s*->\s*(?<to>[\d.]+)') { return $true }
         $from = $Matches.from; $to = $Matches.to
         $maj  = ($from -split '\.')[0]
-        $hi   = if ($byMajor[$maj]) { ($byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1) } else { $null }
-        -not ($hi -and [version]$hi -ge [version]$to)
+        $hi   = if ($byMajor[$maj]) { Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1 } else { $null }
+        -not ($hi -and (Compare-SemanticVersions $hi $to) -ge 0)
     })
     $results.AvailableUpdates = @($results.AvailableUpdates | Where-Object {
         if ($_.Name -notmatch '^\.NET SDK\s+(?<from>[\d.]+)$') { return $true }
         $from = $Matches.from
         $maj  = ($from -split '\.')[0]
         if (-not $byMajor[$maj]) { return $true }
-        $hi   = $byMajor[$maj] | Sort-Object { [version]$_ } | Select-Object -Last 1
+        $hi   = Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1
         $lat  = (Get-ToolState 'dotnet-sdk')[$hi].Latest
-        -not ($lat -and [version]$hi -ge [version]$lat)
+        -not ($lat -and (Compare-SemanticVersions $hi $lat) -ge 0)
     })
 }
 #endregion

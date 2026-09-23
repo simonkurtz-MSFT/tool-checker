@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Report failed Node.js, .NET SDK, PowerShell, and Python release lookups the same way
+  as other tools and include them in the error summary.
+- Custom catalog entries no longer declare `CustomFunction`; they must declare a
+  `ToolFile` that defines `Test-Tool`. The catalog schema rejects the retired property.
+
+### Fixed
+
+- Compare Python release cycles as versions so 3.9 is no longer announced as newer
+  than 3.10 on Linux.
+- Keep .NET SDK update checks working when a preview SDK is installed.
+
 ## [2.3.0] - 2026-09-16
 
 ### Added

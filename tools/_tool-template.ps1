@@ -8,7 +8,7 @@
     filename (for example, "ToolFile": "example-sdk.ps1"). Prefer <catalog-id>.ps1
     for clarity, but the filename is explicitly configured, never inferred.
     Replace Example CLI with the catalog Name; keep public function names unchanged.
-    Set CustomFunction to Test-Tool for a custom catalog entry.
+    A custom catalog entry must declare this ToolFile, and the file must define Test-Tool.
     Standard entries need a file only when they have specialized behavior.
 
     Public entry points use the same tool-agnostic names in every file:
@@ -77,8 +77,8 @@
     receive the same registry, including private helpers, and use the same dispatcher.
     Tool-local helpers need no dependency-list entry. Do not rely on file paths in
     tool functions. Shared worker helpers in explicit infrastructure sources
-    still require an entry in Get-ParallelCheckFunctionBlock, which explicitly
-    reads these sources. Workers reuse resolved configuration, not its readers.
+    still require an entry in Get-ParallelCheckFunctionBlock; the worker definition
+    closure tests report omissions. Workers reuse resolved configuration, not its readers.
     Keep files directly under tools/.
 
     Store private inventory with Get-ToolState -ToolId '<catalog-id>'. Rows carry
@@ -91,6 +91,9 @@
     Invoke-ToolUpdate. Return @{ Output = '...'; ExitCode = 0 } from executors.
     Catalog Install/UpdateExecutor, EntryPoint, ExecutionMode, and OutcomePackageManager
     settings support Windows overrides. Explicit action values take precedence.
+    Use Test-IsWindowsPlatform for platform branches, Get-PlatformConfigurationValue for
+    Windows<Property> overrides, and Invoke-SafeApiRequest for release lookups so failed
+    requests are reported and recorded consistently.
 #>
 
 #region Public entry points

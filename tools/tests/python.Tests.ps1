@@ -73,6 +73,26 @@ Describe 'Python launcher planning' {
         $plan.NewerChannel | Should Be '3.14'
         $plan.LatestByChannel['3.14'] | Should Be '3.14.0'
     }
+
+    It 'compares conventional release cycles as versions on non-Windows platforms' {
+        Mock Test-IsWindowsPlatform { $false }
+        Mock Invoke-SafeApiRequest { @(
+            [PSCustomObject]@{ cycle = '3.14'; latest = '3.14.1'; eol = $false },
+            [PSCustomObject]@{ cycle = '3.10'; latest = '3.10.12'; eol = $false },
+            [PSCustomObject]@{ cycle = '3.9'; latest = '3.9.25'; eol = $false }
+        ) }
+        Mock Write-Warning { }
+        $results = New-ToolCheckResults
+        $results.Tools['Python 3.10'] = @{ ToolId = 'python'; Installed = '3.10.11'; Latest = '' }
+        $SkipUpdate = $false
+
+        Get-PythonUpdateConventional -InstalledVersion '3.10.11' 6>$null
+
+        $results.Tools['Python 3.10'].Latest | Should Be '3.10.12'
+        $results.AvailableUpdates.Count | Should Be 1
+        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -match 'Newer Python major version available: 3\.14 ' }
+        Assert-MockCalled Write-Warning 0 -Scope It -ParameterFilter { $Text -match 'major version available: 3\.9 ' }
+    }
 }
 
 Describe 'Python version refresh' {

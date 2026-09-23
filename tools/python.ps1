@@ -35,21 +35,17 @@ function Test-Tool {
                 if (-not $SkipUpdate) { Get-PythonUpdateViaPy -InstalledVersions $installedVersions }
             }
         } catch { Write-Warning "Unable to list Python versions via py: $_" }
-    } elseif (Test-CommandExists "python") {
-        $ver = (Get-CommandVersion "python" "--version") -replace 'Python ', '' | ForEach-Object { $_.Trim() }
-        Write-Success "Python installed: $ver"
-        $maj = ($ver -split '\.')[0..1] -join '.'
-        $results.Tools["Python $maj"] = @{ Installed = $ver; Latest = "" }
-        if (-not $SkipUpdate) { Get-PythonUpdateConventional -InstalledVersion $ver }
-    } elseif (Test-CommandExists "python3") {
-        $ver = (Get-CommandVersion "python3" "--version") -replace 'Python ', '' | ForEach-Object { $_.Trim() }
-        Write-Success "Python3 installed: $ver"
-        $maj = ($ver -split '\.')[0..1] -join '.'
-        $results.Tools["Python $maj"] = @{ Installed = $ver; Latest = "" }
-        if (-not $SkipUpdate) { Get-PythonUpdateConventional -InstalledVersion $ver }
-    } else {
-        Write-Error "Python not installed"; Add-NotInstalledTool "Python"
+        return
     }
+
+    $command = @('python', 'python3') | Where-Object { Test-CommandExists $_ } | Select-Object -First 1
+    if (-not $command) { Write-Error "Python not installed"; Add-NotInstalledTool "Python"; return }
+    $ver = (Get-CommandVersion $command "--version") -replace 'Python ', '' | ForEach-Object { $_.Trim() }
+    $label = if ($command -eq 'python3') { 'Python3' } else { 'Python' }
+    Write-Success "$label installed: $ver"
+    $maj = ($ver -split '\.')[0..1] -join '.'
+    $results.Tools["Python $maj"] = @{ Installed = $ver; Latest = "" }
+    if (-not $SkipUpdate) { Get-PythonUpdateConventional -InstalledVersion $ver }
 }
 #endregion
 
@@ -99,7 +95,7 @@ function Get-PythonLauncherUpdatePlan {
     }
     $latestByChannel = @{}
     foreach ($version in $AvailableVersions) {
-        if (-not $latestByChannel.ContainsKey($version.Channel) -or [version]$version.Version -gt [version]$latestByChannel[$version.Channel]) {
+        if (-not $latestByChannel.ContainsKey($version.Channel) -or (Compare-SemanticVersions $version.Version $latestByChannel[$version.Channel]) -gt 0) {
             $latestByChannel[$version.Channel] = $version.Version
         }
     }
@@ -108,7 +104,7 @@ function Get-PythonLauncherUpdatePlan {
     foreach ($channel in $installedByChannel.Keys) {
         $installed = $installedByChannel[$channel] -replace '-', '.'
         if ($installed -notmatch '^\d+\.\d+\.\d+$') { $installed = "$installed.0" }
-        if ($latestByChannel.ContainsKey($channel) -and [version]$latestByChannel[$channel] -gt [version]$installed) {
+        if ($latestByChannel.ContainsKey($channel) -and (Compare-SemanticVersions $latestByChannel[$channel] $installed) -gt 0) {
             $updates += [PSCustomObject]@{
                 Channel = $channel
                 Installed = $installedByChannel[$channel]
@@ -117,11 +113,9 @@ function Get-PythonLauncherUpdatePlan {
         }
     }
 
-    $highestInstalledChannel = @($installedByChannel.Keys | Sort-Object { [version]$_ } | Select-Object -Last 1)
+    $highestInstalledChannel = @(Sort-SemanticVersions @($installedByChannel.Keys) | Select-Object -Last 1)
     $newerChannel = if ($highestInstalledChannel.Count -gt 0) {
-        $latestByChannel.Keys |
-            Where-Object { [version]$_ -gt [version]$highestInstalledChannel[0] } |
-            Sort-Object { [version]$_ } -Descending |
+        Sort-SemanticVersions -Descending @($latestByChannel.Keys | Where-Object { (Compare-SemanticVersions $_ $highestInstalledChannel[0]) -gt 0 }) |
             Select-Object -First 1
     } else {
         $null
@@ -166,22 +160,22 @@ function Get-PythonUpdateConventional {
     Write-Host "  Checking for Python updates..."
     try {
         $major = ($InstalledVersion -split '\.')[0..1] -join '.'
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        if (Test-IsWindowsPlatform) {
             $latest = Get-WingetLatestVersion -ToolName "Python $major" -PackageId "Python.Python.$major"
             if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
             if ($latest) {
                 $results.Tools["Python $major"].Latest = $latest
             }
         } else {
-            $releases = Invoke-RestMethod -Uri $config.ApiUrl -TimeoutSec $script:ApiRequestTimeout
+            $releases = Invoke-SafeApiRequest -Uri $config.ApiUrl
             $match = $releases | Where-Object { $_.cycle -eq $major } | Select-Object -First 1
             $latest = if ($match) { $match.latest } else { $null }
             if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) { $latest = $null }
             if ($latest) { $results.Tools["Python $major"].Latest = $latest }
         }
         if ($latest) {
-            if ([version]$latest -gt [version]$InstalledVersion) {
-                $sourceLabel = if ($IsWindows -or $env:OS -eq 'Windows_NT') { ' in WinGet' } else { '' }
+            if ((Compare-SemanticVersions $latest $InstalledVersion) -gt 0) {
+                $sourceLabel = if (Test-IsWindowsPlatform) { ' in WinGet' } else { '' }
                 Write-Warning "  Python $major has update available${sourceLabel}: $InstalledVersion -> $latest"
                 $results.Updates += "Python $major"
                 if (!$SkipUpdate) {
@@ -189,8 +183,10 @@ function Get-PythonUpdateConventional {
                 }
             } else { Write-Success "Python $major is up to date" }
         }
-        if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            $newerMajors = $releases | Where-Object { $_.eol -eq $false -and [double]$_.cycle -gt [double]$major } | Sort-Object { [double]$_.cycle } -Descending | Select-Object -First 1
+        if (-not (Test-IsWindowsPlatform)) {
+            # Cycles such as 3.9 and 3.14 must compare as versions, not decimals.
+            $newerCycle = Sort-SemanticVersions -Descending @($releases | Where-Object { $_.eol -eq $false -and (Compare-SemanticVersions $_.cycle $major) -gt 0 } | ForEach-Object { $_.cycle }) | Select-Object -First 1
+            $newerMajors = if ($newerCycle) { $releases | Where-Object { $_.cycle -eq $newerCycle } | Select-Object -First 1 }
             if ($newerMajors) { Write-Warning "  Newer Python major version available: $($newerMajors.cycle) (latest: $($newerMajors.latest))" }
         }
     } catch { Write-Warning "  Could not check Python updates: $_" }

@@ -1,5 +1,6 @@
-# Real runspace lifecycle checks with synthetic startup and collection failures.
+# Real runspace lifecycle, worker-definition, merge, and timeout checks with synthetic inputs.
 $scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
+. $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "parallel-tests-$([guid]::NewGuid()).env")
 
 Describe 'Parallel check resource cleanup' {
     It 'disposes workers and their pool on the <FailureStage> path' -TestCases @(
@@ -100,5 +101,126 @@ Describe 'Parallel check resource cleanup' {
         } finally {
             $session.Dispose()
         }
+    }
+}
+
+Describe 'Parallel check orchestration' {
+    It 'rehydrates configured checker dependencies without including the main entry point' {
+        $functionBlock = Get-ParallelCheckFunctionBlock
+
+        $functionBlock | Should Match 'function Test-Tool'
+        $functionBlock | Should Match 'function Set-LatestToolVersion'
+        $functionBlock | Should Not Match 'function Main'
+    }
+
+    It 'creates a mergeable timeout result with an unknown tool marker' {
+        $timeoutResult = New-ParallelCheckTimeoutResult -Index 2 -Name 'Slow CLI' -TimeoutSec 5
+
+        $timeoutResult.Index | Should Be 2
+        $timeoutResult.Tools['Slow CLI'].Installed | Should Be 'unknown'
+        $timeoutResult.Tools['Slow CLI'].CheckTimedOut | Should Be $true
+        $timeoutResult.Errors[0] | Should Be 'Slow CLI check timed out after 5s'
+    }
+
+    It 'merges a completed check result into shared state' {
+        $results.Tools = @{}
+        $results.ToolState['dotnet-sdk'] = @{}
+        $results.NotInstalled = @()
+        $results.Updates = @()
+        $results.Errors = @()
+        $results.UpdateFailed = @()
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+        (Get-ToolState 'npm-global-packages').Packages = @()
+        (Get-ToolState 'npm-global-packages').UpdateCommand = 'ncu -g -u --loglevel=error'
+        $checkResult = @{
+            Output = @()
+            Tools = @{ 'Example CLI' = @{ Installed = '1.0.0'; Latest = '1.1.0' } }
+            ToolState = @{ 'dotnet-sdk' = @{ '10.0.100' = @{ Major = '10' } }; 'npm-global-packages' = @{ Packages = @(); UpdateCommand = 'npm update command' } }
+            NotInstalled = @('Missing CLI')
+            Updates = @('Example CLI')
+            Errors = @()
+            UpdateFailed = @()
+            AvailableUpdates = @(@{ Name = 'Example CLI' })
+            MaturityBlockedUpdates = @()
+        }
+
+        Merge-ParallelCheckResult -CheckResult $checkResult
+
+        $results.Tools['Example CLI'].Installed | Should Be '1.0.0'
+        (Get-ToolState 'dotnet-sdk').ContainsKey('10.0.100') | Should Be $true
+        $results.Updates[0] | Should Be 'Example CLI'
+        $results.AvailableUpdates[0].Name | Should Be 'Example CLI'
+        (Get-ToolState 'npm-global-packages').UpdateCommand | Should Be 'npm update command'
+    }
+
+    It 'runs and merges a network-free check through the runspace pool' {
+        $results.Tools = @{}
+        $results.ToolState['dotnet-sdk'] = @{}
+        $results.NotInstalled = @()
+        $results.Updates = @()
+        $results.Errors = @()
+        $results.UpdateFailed = @()
+        $results.AvailableUpdates = @()
+        $results.MaturityBlockedUpdates = @()
+        (Get-ToolState 'npm-global-packages').Packages = @()
+        (Get-ToolState 'npm-global-packages').UpdateCommand = 'ncu -g -u --loglevel=error'
+        $checks = @(
+            @{
+                Name = 'Synthetic CLI'
+                Block = { $results.Tools['Synthetic CLI'] = @{ Installed = '1.0.0'; Latest = '' } }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+
+        $results.Tools['Synthetic CLI'].Installed | Should Be '1.0.0'
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'stops an overlong check and merges its timeout marker' {
+        $results.Tools = @{}
+        $results.Errors = @()
+        $checks = @(
+            @{
+                Name = 'Slow CLI'
+                Block = {
+                    while ($true) { $null = 1 + 1 }
+                }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 1
+
+        $results.Tools['Slow CLI'].Installed | Should Be 'unknown'
+        $results.Tools['Slow CLI'].CheckTimedOut | Should Be $true
+        $results.Errors[0] | Should Be 'Slow CLI check timed out after 1s'
+    }
+
+    It 'merges checks in declaration order when they complete out of order' {
+        $results.Tools = @{}
+        $results.Updates = @()
+        $results.Errors = @()
+        $checks = @(
+            @{
+                Name = 'First CLI'
+                Block = {
+                    $waitHandle = [System.Threading.ManualResetEventSlim]::new($false)
+                    $null = $waitHandle.Wait(300)
+                    $results.Updates += 'First CLI'
+                }
+            },
+            @{
+                Name = 'Second CLI'
+                Block = { $results.Updates += 'Second CLI' }
+            }
+        )
+
+        Invoke-ParallelChecks -Checks $checks -Total 2 -TimeoutSec 5
+
+        $results.Updates.Count | Should Be 2
+        $results.Updates[0] | Should Be 'First CLI'
+        $results.Updates[1] | Should Be 'Second CLI'
+        $results.Errors.Count | Should Be 0
     }
 }

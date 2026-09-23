@@ -44,3 +44,33 @@ Describe 'Version comparison contracts' {
     }
 
 }
+
+Describe 'Version comparison' {
+    BeforeEach {
+        . $scriptPath -EnvFile (Join-Path $TestDrive 'absent.env')
+    }
+
+    It 'orders multi-digit semantic version components numerically' {
+        Test-UpdateAvailable -InstalledVersion '1.9.0' -LatestVersion '1.10.0' | Should Be $true
+    }
+
+    It 'does not report an older version as an update' {
+        Test-UpdateAvailable -InstalledVersion '2.0.0' -LatestVersion '1.10.0' | Should Be $false
+    }
+
+    It 'normalizes numeric revision suffixes' {
+        ConvertTo-CanonicalSemanticVersion '1.0.83-3' | Should Be '1.0.83.3'
+    }
+
+    It 'treats an optional fourth zero component as a production release' {
+        Test-IsProductionVersion '26.3.240.0' | Should Be $true
+    }
+
+    It 'sorts numerically, places prereleases before their release, and never throws on suffixes' {
+        $sorted = @(Sort-SemanticVersions @('10.0.100', '8.0.410', '10.0.100-rc.1.25451.107', '8.0.99', 'v9.0.0'))
+
+        ($sorted -join ',') | Should Be '8.0.99,8.0.410,v9.0.0,10.0.100-rc.1.25451.107,10.0.100'
+        (@(Sort-SemanticVersions -Descending @('3.9', '3.14', '3.10')) -join ',') | Should Be '3.14,3.10,3.9'
+        @(Sort-SemanticVersions @()).Count | Should Be 0
+    }
+}

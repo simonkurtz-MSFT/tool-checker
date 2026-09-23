@@ -8,7 +8,7 @@ function Get-InstallCommand {
     if ($commands.Contains($script:PlatformKey)) { return $commands[$script:PlatformKey] }
 
     # Best-effort fallback to current OS if an exact arch match is missing.
-    $osPrefix = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'Windows (' } else { 'Linux (' }
+    $osPrefix = if (Test-IsWindowsPlatform) { 'Windows (' } else { 'Linux (' }
     $fallbackKey = $commands.Keys | Where-Object { $_ -like "$osPrefix*" } | Select-Object -First 1
     if ($fallbackKey) { return $commands[$fallbackKey] }
 
@@ -39,9 +39,7 @@ function Resolve-ActionMetadata {
     $config = Get-OwnedConfiguration -ToolId $Action.ToolId
     if ($config) {
         foreach ($property in @('Executor','EntryPoint','ExecutionMode','OutcomePackageManager')) {
-            $key = "$($Action.Operation)$property"
-            $platformKey = "Windows$key"
-            $value = if (($IsWindows -or $env:OS -eq 'Windows_NT') -and $config[$platformKey]) { $config[$platformKey] } else { $config[$key] }
+            $value = Get-PlatformConfigurationValue -Configuration $config -Property "$($Action.Operation)$property"
             if (-not $Action[$property] -and $value) { $Action[$property] = $value }
         }
     }
@@ -60,7 +58,8 @@ function Get-DuplicateInstallationActions {
 
         $config = Get-OwnedConfiguration -ToolId $owner
         $name = if ($config.Name) { $config.Name } else { $owner }
-        $preferredManager = if ($config.UpdateCommand -match '^\s*(npm|pnpm)\s') { $Matches[1] } else { $null }
+        # The update command's executable identifies the manager that keeps receiving updates.
+        $preferredManager = ("$($config.UpdateCommand)".Trim() -split '\s+', 2)[0]
         $recommended = $found[0]
         foreach ($candidate in $found | Select-Object -Skip 1) {
             $comparison = Compare-OwnedToolVersions -Version1 $candidate.Version -Version2 $recommended.Version -ToolName $name
@@ -69,6 +68,8 @@ function Get-DuplicateInstallationActions {
             }
         }
 
+        # Discovery owns removal syntax; planning and rendering never call the package manager.
+        if (-not $recommended.RemoveCommand) { continue }
         $manager = $recommended.PackageManager
         $package = $recommended.PackageName
         @{
@@ -77,7 +78,7 @@ function Get-DuplicateInstallationActions {
             ItemId = "duplicate:${manager}:$package"
             Label = "Remove $manager duplicate of $name (recommended: remove version $($recommended.Version))"
             Type = 'cleanup'
-            Command = if ($manager -eq 'pnpm') { "pnpm remove --global $package" } else { "npm uninstall --global $package" }
+            Command = $recommended.RemoveCommand
             Recommended = $true
         }
     }
@@ -142,6 +143,12 @@ function Invoke-ActionCommand {
     Invoke-ToolCommand -Command $Action.Command -Type $Action.Type
 }
 
+function Register-UpdateFailure {
+    param([string]$Name, [string]$Message)
+    if ($Name -notin $results.UpdateFailed) { $results.UpdateFailed += $Name }
+    $results.Errors += $Message
+}
+
 function Complete-UpdateExecution {
     # A skipped operation or a version that remains below the planned target is unsuccessful.
     param(
@@ -161,8 +168,7 @@ function Complete-UpdateExecution {
             $found = if ($installedVersion) { $installedVersion } else { 'unknown' }
             $message = "Update verification failed for $($Action.Name). Expected at least $($Action.Version), but found $found."
             Write-Error $message
-            if ($Action.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $Action.Name }
-            $results.Errors += $message
+            Register-UpdateFailure -Name $Action.Name -Message $message
             return $false
         }
         Write-Host "  Verified version: $installedVersion"
@@ -185,8 +191,7 @@ function Complete-UpdateExecution {
         Write-Error $message
     }
 
-    if ($Action.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $Action.Name }
-    $results.Errors += $message
+    Register-UpdateFailure -Name $Action.Name -Message $message
     $false
 }
 
@@ -288,8 +293,6 @@ function Invoke-ActionMenu {
             }
             try {
                 $execution = Invoke-ActionCommand -Action $a
-                $outputText = $execution.Output
-                $exitCode   = $execution.ExitCode
 
                 if ($a.Type -eq 'registry') {
                     if (Complete-RegistryExecution -Action $a -Execution $execution) {
@@ -305,8 +308,7 @@ function Invoke-ActionMenu {
             } catch {
                 $message = "$($a.Type) failed for $($a.Name). Command: $($a.Command) | $(Get-DetailedErrorMessage $_)"
                 Write-Error $message
-                if ($a.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $a.Name }
-                $results.Errors += $message
+                Register-UpdateFailure -Name $a.Name -Message $message
             }
             Write-Host ""
             Show-ResultsTable
@@ -336,6 +338,7 @@ function Invoke-ParallelUpdates {
     if ($Updates.Count -eq 0) { return }
 
     $jobs = @()
+    $workerDefinitions = $null
     foreach ($u in $Updates) {
         $u = Resolve-ActionMetadata -Action $u
         # Some installers must remain in this process; both modes share completion logic.
@@ -348,6 +351,7 @@ function Invoke-ParallelUpdates {
         }
 
         Write-Host "Starting: $($u.Name)"
+        if (-not $workerDefinitions) { $workerDefinitions = Get-ActionWorkerDefinitions }
         $jobs += @{
             Job = Start-Job -ScriptBlock {
                 param($action, $definitions, $configuration, $packageManagerDefinitions, $toolDefinitions)
@@ -365,7 +369,7 @@ function Invoke-ParallelUpdates {
                         Error = "$_ | Exception: $($_.Exception.GetType().FullName)"
                     }
                 }
-            } -ArgumentList $u, (Get-ActionWorkerDefinitions), $toolsConfig, $script:PackageManagerDefinitions, $script:ToolDefinitions
+            } -ArgumentList $u, $workerDefinitions, $toolsConfig, $script:PackageManagerDefinitions, $script:ToolDefinitions
             Update = $u
         }
     }
@@ -384,8 +388,7 @@ function Invoke-ParallelUpdates {
         } else {
             $message = "Failed: $($j.Update.Name) | Job state: $state | Command: $($j.Update.Command)"
             Write-Error $message
-            if ($j.Update.Name -notin $results.UpdateFailed) { $results.UpdateFailed += $j.Update.Name }
-            $results.Errors += $message
+            Register-UpdateFailure -Name $j.Update.Name -Message $message
             if ($result) { $result | ForEach-Object { Write-Host "  $_" } }
         }
         Remove-Job -Job $j.Job; Write-Host ""
@@ -394,14 +397,13 @@ function Invoke-ParallelUpdates {
 }
 
 function Get-ActionWorkerDefinitions {
-    # Read allowlisted source definitions, not live Get-Command bodies that may be mocked.
-    $names = @('Invoke-ToolCommand','Resolve-ActionMetadata','Invoke-ActionCommand','Invoke-PackageManagerOperation','Get-ResultToolId','Get-OwnedConfiguration','New-ToolCheckResults','Invoke-ToolEntryPoint','Set-ToolResultOwnership','Get-ToolState','Get-DetailedErrorMessage','Get-ToolConfiguration','Test-CommandExists')
-    $paths = @('actions.ps1','results.ps1','package-managers.ps1','configuration.ps1','runtime.ps1' | ForEach-Object { Join-Path $PSScriptRoot $_ })
-    $source = ($paths | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join "`n"
-    $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
-    $definitions = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -in $names } | ForEach-Object { $_.Extent.Text })
-    foreach ($packageManager in $script:PackageManagerDefinitions.Values) {
-        $definitions += @($packageManager.Keys | Where-Object { $_ -notlike '*-PackageManager' } | ForEach-Object { $packageManager[$_] })
-    }
+    # Registry repairs always run in the approving session, so their helpers stay out of jobs.
+    $definitions = @(Get-InfrastructureDefinitions -Names @(
+        'Invoke-ToolCommand','Resolve-ActionMetadata','Invoke-ActionCommand','Invoke-PackageManagerOperation',
+        'Get-ResultToolId','Get-OwnedConfiguration','New-ToolCheckResults','Invoke-ToolEntryPoint',
+        'Set-ToolResultOwnership','Get-ToolState','Get-DetailedErrorMessage','Get-ToolConfiguration','Test-CommandExists',
+        'Test-IsWindowsPlatform','Get-PlatformConfigurationValue'
+    ))
+    $definitions += @(Get-SharedPackageManagerDefinitions)
     $definitions -join "`n`n"
 }

@@ -75,6 +75,68 @@ Describe '.NET SDK tool integration' {
         $results.Errors.Count | Should Be 0
     }
 
+    It 'plans the WinGet Preview package for .NET 11 in a network-free worker' {
+        $checks = @(@{
+            Name = '.NET SDK'
+            Block = {
+                function Test-CommandExists { $true }
+                function dotnet { '10.0.401 [C:\dotnet\sdk]'; '11.0.100-rc.1.26425.100 [C:\dotnet\sdk]' }
+                function Get-WingetLatestVersion {
+                    param($ToolName, $PackageId)
+                    switch ($PackageId) {
+                        'Microsoft.DotNet.SDK.10' { '10.0.401' }
+                        'Microsoft.DotNet.SDK.Preview' { '11.0.100-rc.1.26425.128' }
+                        default { $results.Errors += "Unexpected package $PackageId"; $null }
+                    }
+                }
+                function Invoke-RestMethod {
+                    [PSCustomObject]@{ 'releases-index' = @(
+                        [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-rc.1.26425.128'; 'support-phase' = 'go-live' },
+                        [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.401'; 'support-phase' = 'active' }
+                    ) }
+                }
+                $SkipUpdate = $false
+                Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+            }
+        })
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+        $results.Tools['.NET SDK 11.0.100-rc.1.26425.100'].Latest | Should Be '11.0.100-rc.1.26425.128'
+        $results.Updates -contains '.NET SDK: 11.0.100-rc.1.26425.100 -> 11.0.100-rc.1.26425.128' | Should Be $true
+        ($results.AvailableUpdates | Where-Object Name -eq '.NET SDK 11.0.100-rc.1.26425.100').Command |
+            Should Be 'winget upgrade Microsoft.DotNet.SDK.Preview --silent'
+        $results.Errors.Count | Should Be 0
+    }
+
+    It 'plans a new .NET 11 install with the WinGet Preview package' {
+        $checks = @(@{
+            Name = '.NET SDK'
+            Block = {
+                function Test-CommandExists { $true }
+                function dotnet { '10.0.401 [C:\dotnet\sdk]' }
+                function Get-WingetLatestVersion {
+                    param($ToolName, $PackageId)
+                    switch ($PackageId) {
+                        'Microsoft.DotNet.SDK.10' { '10.0.401' }
+                        'Microsoft.DotNet.SDK.Preview' { '11.0.100-rc.1.26425.128' }
+                        default { $results.Errors += "Unexpected package $PackageId"; $null }
+                    }
+                }
+                function Invoke-RestMethod {
+                    [PSCustomObject]@{ 'releases-index' = @(
+                        [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-rc.1.26425.128'; 'support-phase' = 'go-live' },
+                        [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.401'; 'support-phase' = 'active' }
+                    ) }
+                }
+                $SkipUpdate = $false
+                Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+            }
+        })
+        Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 5
+        $results.Updates -contains '.NET SDK: Major version 11 available' | Should Be $true
+        ($results.AvailableUpdates | Where-Object Type -eq 'winget-new').Command | Should Be 'winget install Microsoft.DotNet.SDK.Preview --silent'
+        $results.Errors.Count | Should Be 0
+    }
+
     It 'preserves check-only inventory without release or package lookups in a worker' {
         $checks = @(@{
             Name = '.NET SDK'
@@ -196,6 +258,30 @@ Describe '.NET SDK release planning' {
         $plan.LatestSdkByChannel.ContainsKey('11.0') | Should Be $false
         $plan.NewerMajors.Count | Should Be 1
         $plan.NewerMajors[0] | Should Be 10
+    }
+
+    It 'offers a go-live channel as a newer major using the WinGet Preview package' {
+        $index = [PSCustomObject]@{ 'releases-index' = @(
+            [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-rc.1.26425.128'; 'support-phase' = 'go-live' },
+            [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.401'; 'support-phase' = 'active' },
+            [PSCustomObject]@{ 'channel-version' = '9.0'; 'latest-sdk' = '9.0.318'; 'support-phase' = 'maintenance' }
+        ) }
+        $plan = Get-DotNetSDKReleasePlan -InstalledVersions @('10.0.401') -ReleasesIndex $index
+        $plan.LatestSdkByChannel['11.0'].LatestSdk | Should Be '11.0.100-rc.1.26425.128'
+        $plan.NewerMajors.Count | Should Be 1
+        $plan.NewerMajors[0] | Should Be 11
+        $plan.WingetPackageIds['11'] | Should Be 'Microsoft.DotNet.SDK.Preview'
+        $plan.WingetPackageIds['10'] | Should Be 'Microsoft.DotNet.SDK.10'
+    }
+
+    It 'switches to the numbered WinGet package once .NET 11 is generally available' {
+        $index = [PSCustomObject]@{ 'releases-index' = @(
+            [PSCustomObject]@{ 'channel-version' = '11.0'; 'latest-sdk' = '11.0.100'; 'support-phase' = 'active' },
+            [PSCustomObject]@{ 'channel-version' = '10.0'; 'latest-sdk' = '10.0.401'; 'support-phase' = 'active' }
+        ) }
+        $plan = Get-DotNetSDKReleasePlan -InstalledVersions @('10.0.401') -ReleasesIndex $index
+        $plan.WingetPackageIds['11'] | Should Be 'Microsoft.DotNet.SDK.11'
+        $plan.NewerMajors[0] | Should Be 11
     }
 
     It 'allows an installed preview channel when prereleases are enabled' {

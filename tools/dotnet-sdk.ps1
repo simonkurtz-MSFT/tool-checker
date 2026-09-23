@@ -56,6 +56,25 @@ function Get-DotNetSDKInventory {
     [PSCustomObject]@{ DotNetSDKs = $dotNetSDKs; Tools = $tools; ByMajor = $byMajor }
 }
 
+function Test-DotNetChannelEligible {
+    # A go-live channel is Microsoft-supported for production even though its SDK
+    # still carries an rc suffix, so it is eligible when only production releases are wanted.
+    param([Parameter(Mandatory)]$Channel, [bool]$ProductionReleasesOnly = $true)
+
+    $phase = $Channel.'support-phase'
+    -not $ProductionReleasesOnly -or $phase -eq 'go-live' -or (
+        $phase -ne 'preview' -and (Test-IsProductionVersion $Channel.'latest-sdk')
+    )
+}
+
+function Get-DotNetSDKWingetId {
+    # WinGet publishes the pre-GA SDK under a single rolling "Preview" package and
+    # only adds the numbered package (Microsoft.DotNet.SDK.<major>) at general availability.
+    param([Parameter(Mandatory)][string]$Major, [string]$SupportPhase)
+
+    if ($SupportPhase -in @('preview', 'go-live')) { 'Microsoft.DotNet.SDK.Preview' } else { "Microsoft.DotNet.SDK.$Major" }
+}
+
 function Get-DotNetSDKReleasePlan {
     # Separate servicing channels from newer-major announcements; do not promote
     # uninstalled preview channels into suggested new-major upgrades.
@@ -66,9 +85,13 @@ function Get-DotNetSDKReleasePlan {
     )
 
     $latestSdkByChannel = @{}
+    $wingetPackageIds = @{}
     foreach ($channel in $ReleasesIndex.'releases-index') {
-        if ($ProductionReleasesOnly -and $channel.'support-phase' -eq 'preview') { continue }
-        if ($ProductionReleasesOnly -and -not (Test-IsProductionVersion $channel.'latest-sdk')) { continue }
+        $channelMajor = ($channel.'channel-version' -split '\.')[0]
+        if (-not $wingetPackageIds.ContainsKey($channelMajor)) {
+            $wingetPackageIds[$channelMajor] = Get-DotNetSDKWingetId -Major $channelMajor -SupportPhase $channel.'support-phase'
+        }
+        if (-not (Test-DotNetChannelEligible -Channel $channel -ProductionReleasesOnly $ProductionReleasesOnly)) { continue }
         $latestSdkByChannel[$channel.'channel-version'] = @{
             LatestSdk = $channel.'latest-sdk'
             SupportPhase = $channel.'support-phase'
@@ -86,9 +109,7 @@ function Get-DotNetSDKReleasePlan {
     $availableMajors = @()
     foreach ($channel in $ReleasesIndex.'releases-index') {
         $major = [int]($channel.'channel-version' -split '\.')[0]
-        $releaseAllowed = -not $ProductionReleasesOnly -or (
-            $channel.'support-phase' -ne 'preview' -and (Test-IsProductionVersion $channel.'latest-sdk')
-        )
+        $releaseAllowed = Test-DotNetChannelEligible -Channel $channel -ProductionReleasesOnly $ProductionReleasesOnly
         if ($releaseAllowed -and $channel.'support-phase' -ne 'eol' -and ($channel.'support-phase' -ne 'preview' -or $major -in $installedMajors)) {
             if ($major -notin $availableMajors) { $availableMajors += $major }
         }
@@ -96,6 +117,7 @@ function Get-DotNetSDKReleasePlan {
 
     [PSCustomObject]@{
         LatestSdkByChannel = $latestSdkByChannel
+        WingetPackageIds = $wingetPackageIds
         ByMajor = $byMajor
         InstalledMajors = $installedMajors
         MaxInstalledMajor = $maxInstalledMajor
@@ -148,13 +170,16 @@ function Test-Tool {
 
             $chVer = ($highest -split '\.')[0..1] -join '.'
             if ($latestSdkByChannel.ContainsKey($chVer)) {
+                $wingetId = $releasePlan.WingetPackageIds[$maj]
+                if (-not $wingetId) { $wingetId = "Microsoft.DotNet.SDK.$maj" }
                 $latestSdk = if (Test-IsWindowsPlatform) {
-                    Get-WingetLatestVersion -ToolName ".NET SDK $maj" -PackageId "Microsoft.DotNet.SDK.$maj"
+                    Get-WingetLatestVersion -ToolName ".NET SDK $maj" -PackageId $wingetId
                 } else {
                     $latestSdkByChannel[$chVer].LatestSdk
                 }
                 if (-not $latestSdk) { continue }
-                if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latestSdk)) { continue }
+                $isGoLive = $latestSdkByChannel[$chVer].SupportPhase -eq 'go-live'
+                if ($config.ProductionReleasesOnly -and -not $isGoLive -and -not (Test-IsProductionVersion $latestSdk)) { continue }
                 $latestSdkByMajor[$maj] = $latestSdk
                 if ((Compare-SemanticVersions $latestSdk $highest) -gt 0) {
                     Write-Warning "    .NET $highest -> $latestSdk (update available)"
@@ -173,7 +198,9 @@ function Test-Tool {
         $newerMajors = @($releasePlan.NewerMajors)
         if (Test-IsWindowsPlatform) {
             $newerMajors = @($newerMajors | Where-Object {
-                $wingetVersion = Get-WingetLatestVersion -ToolName ".NET SDK $_" -PackageId "Microsoft.DotNet.SDK.$_"
+                $newerWingetId = $releasePlan.WingetPackageIds["$_"]
+                if (-not $newerWingetId) { $newerWingetId = "Microsoft.DotNet.SDK.$_" }
+                $wingetVersion = Get-WingetLatestVersion -ToolName ".NET SDK $_" -PackageId $newerWingetId
                 if ($wingetVersion) { $newerMajorVersions[$_] = $wingetVersion; $true } else { $false }
             })
         }
@@ -188,12 +215,16 @@ function Test-Tool {
                 $highest = Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1
                 $latest  = (Get-ToolState 'dotnet-sdk')[$highest].Latest
                 if ($latest -and $latest -ne "-" -and (Compare-SemanticVersions $latest $highest) -gt 0) {
-                    Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade Microsoft.DotNet.SDK.$maj --silent" -Type 'winget' -Details "$highest -> $latest"
+                    $upgradeId = $releasePlan.WingetPackageIds[$maj]
+                    if (-not $upgradeId) { $upgradeId = "Microsoft.DotNet.SDK.$maj" }
+                    Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade $upgradeId --silent" -Type 'winget' -Details "$highest -> $latest"
                 }
             }
             foreach ($m in $newerMajors) {
                 $details = if ($newerMajorVersions[$m]) { "Latest in WinGet: $($newerMajorVersions[$m])" } else { 'New major version' }
-                Add-AvailableUpdate -Name ".NET SDK $m (new major version)" -Command "winget install Microsoft.DotNet.SDK.$m --silent" -Type 'winget-new' -Details $details
+                $installId = $releasePlan.WingetPackageIds["$m"]
+                if (-not $installId) { $installId = "Microsoft.DotNet.SDK.$m" }
+                Add-AvailableUpdate -Name ".NET SDK $m (new major version)" -Command "winget install $installId --silent" -Type 'winget-new' -Details $details
             }
         } else {
             Write-Success "All .NET SDKs are up to date with their latest patches"
@@ -243,14 +274,14 @@ function Refresh-ToolStatus {
     # (either the patch landed or an equal/higher SDK in the same channel is
     # already installed).
     $results.Updates = @($results.Updates | Where-Object {
-        if ($_ -notmatch '^\.NET SDK:\s*(?<from>[\d.]+)\s*->\s*(?<to>[\d.]+)') { return $true }
+        if ($_ -notmatch '^\.NET SDK:\s*(?<from>\d[\w.\-]*)\s*->\s*(?<to>\d[\w.\-]*)') { return $true }
         $from = $Matches.from; $to = $Matches.to
         $maj  = ($from -split '\.')[0]
         $hi   = if ($byMajor[$maj]) { Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1 } else { $null }
         -not ($hi -and (Compare-SemanticVersions $hi $to) -ge 0)
     })
     $results.AvailableUpdates = @($results.AvailableUpdates | Where-Object {
-        if ($_.Name -notmatch '^\.NET SDK\s+(?<from>[\d.]+)$') { return $true }
+        if ($_.Name -notmatch '^\.NET SDK\s+(?<from>\d[\w.\-]*)$') { return $true }
         $from = $Matches.from
         $maj  = ($from -split '\.')[0]
         if (-not $byMajor[$maj]) { return $true }

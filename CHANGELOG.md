@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Track .NET 11 SDKs while it is in go-live: offer it as a new major on WinGet using
+  the `Microsoft.DotNet.SDK.Preview` package and keep installed 11.0 RC SDKs updated.
+  Tool Checker switches to the numbered package automatically at general availability.
+
 ### Changed
 
 - Report failed Node.js, .NET SDK, PowerShell, and Python release lookups the same way

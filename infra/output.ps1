@@ -49,10 +49,17 @@ function Show-ApplicationBanner {
 }
 
 function Show-UpdateLegend {
-    if ($results.Updates.Count -eq 0) { return }
+    if ($results.Updates.Count -eq 0 -and $results.Tools.Count -eq 0) { return }
 
     Write-Host "  npm release cooldown: $script:ReleaseCooldownDays full days"
-    Write-Host "  $ColorYellow■ Installable update / version unknown$ColorReset  $ColorOrange■ Cooldown / not yet installable$ColorReset"
+    Write-Host ''
+    Write-Host "  ${ColorCyan}Legend$ColorReset"
+    Write-Host "    $ColorYellow■ Installable update / version unknown$ColorReset"
+    Write-Host "    $ColorOrange■ No verified installable release$ColorReset"
+    Write-Host "    ${ColorCyan}* Older than installed; informational only, no downgrade offered.$ColorReset"
+    Write-Host ''
+    Write-Host '  Latest Released is informational only.'
+    Write-Host '  "-" means no verified cooldown-safe version or not checked.'
 }
 
 function Get-ResultsNameColumnWidth {
@@ -62,63 +69,74 @@ function Get-ResultsNameColumnWidth {
 }
 
 function Show-ResultsTable {
-    # Column widths
+    # Older/non-cooldown checks supply Latest only; explicit null means no verified safe release.
+    $rows = @($results.Tools.GetEnumerator() | ForEach-Object {
+        $row = $_.Value
+        $latest = if ($row.Latest) { $row.Latest } elseif ($SkipUpdate) { '-' } else { 'unknown' }
+        $cooldown = if ($row.ContainsKey('LatestCooldown')) {
+            if ($row.LatestCooldown) { $row.LatestCooldown } else { '-' }
+        } elseif ($_.Key -in $results.MaturityBlockedUpdates.Name -or ($row.ContainsKey('Installable') -and -not $row.Installable)) {
+            '-'
+        } else { $latest }
+        $released = if ($row.LatestReleased) { $row.LatestReleased } else { $latest }
+        $comparisons = @{}
+        foreach ($column in @{ Cooldown = $cooldown; Released = $released }.GetEnumerator()) {
+            $comparisons[$column.Key] = if (
+                -not [string]::IsNullOrWhiteSpace($row.Installed) -and
+                $row.Installed -notin @('-', '?', 'unknown', 'Unable to retrieve version') -and
+                $column.Value -notin @('-', '?', 'unknown', 'Unable to retrieve version')) {
+                Compare-OwnedToolVersions -Version1 $row.Installed -Version2 $column.Value -ToolName $_.Key
+            } else { $null }
+        }
+        $age = '-'
+        if ($null -ne $row.AgeDays -and
+            (Compare-OwnedToolVersions -Version1 $row.Installed -Version2 $row.Latest -ToolName $_.Key) -lt 0) {
+            $age = "$($row.AgeDays)d"
+        }
+        [pscustomobject]@{
+            Name = $_.Key
+            Row = $row
+            Cooldown = $cooldown
+            CooldownComparison = $comparisons.Cooldown
+            CooldownDisplay = if ($comparisons.Cooldown -gt 0) { "$cooldown*" } else { $cooldown }
+            Age = $age
+            ReleasedComparison = $comparisons.Released
+            ReleasedDisplay = if ($comparisons.Released -gt 0) { "$released*" } else { $released }
+        }
+    } | Sort-Object {
+        $config = Get-OwnedConfiguration -ToolId (Get-ResultToolId -Name $_.Name)
+        Get-ToolSortKey -ToolName $_.Name -Configuration $config -Row $_.Row
+    })
     $maxName = Get-ResultsNameColumnWidth
-    $maxInst = ($results.Tools.Values | ForEach-Object { $_.Installed.Length } | Measure-Object -Maximum).Maximum
-    $maxLat  = ($results.Tools.Values | ForEach-Object {
-        if (-not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Latest)) { "unknown".Length }
-        else { $_.Latest.Length }
-    } | Measure-Object -Maximum).Maximum
-    $ageLabels = @($results.Tools.Values | Where-Object { $null -ne $_.AgeDays } | ForEach-Object { "$($_.AgeDays)d" })
-    $maxAge = if ($ageLabels.Count -gt 0) { ($ageLabels | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum } else { 0 }
-    if ($maxAge -lt 3) { $maxAge = 3 }
-
-    $cmds   = $results.Tools.GetEnumerator() | ForEach-Object { Get-UpdateCommand -ToolName $_.Key -Installed $_.Value.Installed -Latest $_.Value.Latest }
-    $maxUpd = ($cmds | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
-    # Only measure release-notes width from tools that have an update or install pending
-    $actionableNames = @()
-    $actionableNames += $results.NotInstalled | ForEach-Object { $_.Name }
-    $actionableNames += $results.Tools.GetEnumerator() | Where-Object {
-        $cmd = Get-UpdateCommand -ToolName $_.Key -Installed $_.Value.Installed -Latest $(if ($_.Value.Latest) { $_.Value.Latest } else { "-" })
-        $cmd -ne ""
-    } | ForEach-Object { $_.Key }
-    $urls   = $actionableNames | ForEach-Object { Get-ReleaseNotesUrl -ToolName $_ } | Where-Object { $_ }
-    $maxUrl = if ($urls) { ($urls | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum } else { 0 }
-    if ($maxInst -lt 9) { $maxInst = 9 }
-    if ($maxLat  -lt 6)   { $maxLat  = 6 };  if (-not $maxUpd -or $maxUpd -lt 16) { $maxUpd = 16 }
-    if ($maxUrl -lt 13)   { $maxUrl = 13 }
+    $maxInst = [Math]::Max(9, ($rows | ForEach-Object { "$($_.Row.Installed)".Length } | Measure-Object -Maximum).Maximum)
+    $maxCooldown = [Math]::Max(15, ($rows.CooldownDisplay | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
+    $maxAge = [Math]::Max(3, ($rows.Age | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
+    $maxReleased = [Math]::Max(15, ($rows.ReleasedDisplay | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
 
     Write-Host ""
-    $hdr = "  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f "Name","Installed","Latest","Age","Update / Install","Release Notes"
+    $hdr = "  {0,-$maxName}   {1,-$maxInst}   {2,-$maxCooldown}   {3,$maxAge}   {4,-$maxReleased}" -f "Name","Installed","Latest Cooldown","Age","Latest Released"
     Write-Host "$ColorCyan$hdr$ColorReset"
-    Write-Host ("  {0}  {1}  {2}  {3}  {4}  {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxLat),("-"*$maxAge),("-"*$maxUpd),("-"*$maxUrl))
+    Write-Host ("  {0}   {1}   {2}   {3}   {4}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxCooldown),("-"*$maxAge),("-"*$maxReleased))
 
-    # Catalog sort metadata keeps related rows together without product-name dispatch.
-    $sorted = $results.Tools.GetEnumerator() | Sort-Object {
-        $config = Get-OwnedConfiguration -ToolId (Get-ResultToolId -Name $_.Key)
-        Get-ToolSortKey -ToolName $_.Key -Configuration $config -Row $_.Value
-    }
-
-    $sorted | ForEach-Object {
-        $inst = $_.Value.Installed
+    $rows | ForEach-Object {
+        $inst = $_.Row.Installed
         $installedUnknown = [string]::IsNullOrWhiteSpace($inst) -or $inst -in @('unknown', 'Unable to retrieve version')
-        $latestUnknown = -not $SkipUpdate -and [string]::IsNullOrWhiteSpace($_.Value.Latest)
-        $lat = if ($latestUnknown) { "unknown" } elseif ($_.Value.Latest) { $_.Value.Latest } else { "-" }
-        $currentOrNewer = -not $latestUnknown -and $lat -ne "-" -and (Compare-OwnedToolVersions -Version1 $inst -Version2 $lat -ToolName $_.Key) -ge 0
-        $age  = if (-not $currentOrNewer -and $null -ne $_.Value.AgeDays) { "$($_.Value.AgeDays)d" } else { "-" }
-        $cmd  = Get-UpdateCommand -ToolName $_.Key -Installed $inst -Latest $_.Value.Latest
-        # Only show release notes for tools with a pending update/install
-        $url  = if ($cmd -or $_.Key -in $actionableNames) { Get-ReleaseNotesUrl -ToolName $_.Key } else { "" }
-        $covered = $_.Value.Covered
-        $clr  = if ($_.Key -in $results.UpdateFailed) { $ColorRed }
-            elseif ($_.Value.CheckTimedOut) { $ColorRed }
+        $latestUnknown = $_.Cooldown -eq 'unknown'
+        $currentOrNewer = $null -ne $_.CooldownComparison -and $_.CooldownComparison -ge 0
+        $noSafeRelease = $_.Cooldown -eq '-' -and ($_.Row.ContainsKey('LatestCooldown') -or $_.Name -in $results.MaturityBlockedUpdates.Name -or ($_.Row.ContainsKey('Installable') -and -not $_.Row.Installable))
+        $clr  = if ($_.Name -in $results.UpdateFailed) { $ColorRed }
+            elseif ($_.Row.CheckTimedOut) { $ColorRed }
             elseif ($installedUnknown -or $latestUnknown) { $ColorYellow }
-            elseif ($lat -eq "-" -or $currentOrNewer -or $covered) { $ColorGreen }
-            elseif ($_.Key -in $results.MaturityBlockedUpdates.Name -or ($_.Value.ContainsKey('Installable') -and -not $_.Value.Installable)) { $ColorOrange }
+            elseif ($currentOrNewer -or $_.Row.Covered) { $ColorGreen }
+            elseif ($noSafeRelease) { $ColorOrange }
+            elseif ($_.Cooldown -eq '-') { $ColorGreen }
                 else { $ColorYellow }
-        $row  = ("  {0,-$maxName}  {1,-$maxInst}  {2,-$maxLat}  {3,$maxAge}  {4,-$maxUpd}  {5,-$maxUrl}" -f $_.Key,$inst,$lat,$age,$cmd,$url).TrimEnd()
-        Write-Host "$clr$row$ColorReset"
-
+        $cooldownCell = "{0,-$maxCooldown}" -f $_.CooldownDisplay
+        if ($_.CooldownComparison -gt 0) { $cooldownCell = "$ColorCyan$cooldownCell$ColorReset$clr" }
+        $row = "  {0,-$maxName}   {1,-$maxInst}   {2}   {3,$maxAge}" -f $_.Name,$inst,$cooldownCell,$_.Age
+        $releasedColor = if ($_.ReleasedComparison -gt 0) { $ColorCyan }
+            elseif ($null -ne $_.ReleasedComparison -and $_.ReleasedComparison -eq 0) { $ColorGreen } else { '' }
+        Write-Host "$clr$row$ColorReset   $releasedColor$($_.ReleasedDisplay)$ColorReset"
     }
     $installationOwners = @($results.ToolState.Keys | Where-Object {
         $results.ToolState[$_].ContainsKey('Installations') -and
@@ -151,6 +169,24 @@ function Show-ResultsTable {
         }
     }
     Write-Host ""
+}
+
+function Show-ToolDetails {
+    Write-Header 'Update / Install commands and Release Notes'
+    $names = @(@($results.Tools.Keys) + @($results.NotInstalled.Name) | Sort-Object -Unique)
+    if ($names.Count -eq 0) { Write-Host '  No tool details available.' }
+    foreach ($name in $names) {
+        $missing = $results.NotInstalled | Where-Object Name -eq $name | Select-Object -First 1
+        $row = $results.Tools[$name]
+        $command = if ($missing) { Get-InstallCommand -NotInstalledEntry $missing }
+            elseif ($row) { Get-UpdateCommand -ToolName $name -Installed $row.Installed -Latest $row.Latest }
+        $url = Get-ReleaseNotesUrl -ToolName $name
+        Write-Host "`n  $ColorCyan$name$ColorReset"
+        if ($command) { Write-Host "    Update / Install: $command" }
+        elseif ($missing) { Write-Host '    Update / Install: No install command for this platform' }
+        Write-Host "    Release Notes: $(if ($url) { $url } else { 'Not configured' })"
+    }
+    Write-Host ''
 }
 
 function Show-StartupInformation {

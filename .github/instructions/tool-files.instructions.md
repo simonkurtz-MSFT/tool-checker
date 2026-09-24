@@ -95,6 +95,11 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
 - Rows/actions carry ToolId and optional ItemId. Use Get-ToolState for owner-keyed
   inventory; never add product-specific fields to shared results. Preserve the
   latest known release during refresh and update detached visible rows explicitly.
+  Cooldown-aware rows/plans retain LatestCooldown (null if unverified) and
+  LatestReleased separately. LatestReleased is informational only; keep actions
+  tied to the checked candidate and preserve all release fields through refresh.
+  Optional LatestReleaseApiUrl supplies upstream GitHub release information for npm
+  catalog entries only; never redirect install metadata or commands to that source.
 - Resolve Executor, EntryPoint, Arguments, ExecutionMode, and OutcomePackageManager before
   returning action plans from checks. Catalog defaults support Windows overrides;
   explicit action metadata wins. Menu and Force paths use the same dispatcher.

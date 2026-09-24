@@ -89,9 +89,9 @@ Describe 'Tool definition loading' {
         }
     }
 
-    It 'does not load specialized tools into the main session or workers when only Git is selected' {
-        $selectionFile = Join-Path $TestDrive 'git-only.env'
-        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
+    It 'does not load specialized tools into the main session or workers when only GitHub CLI is selected' {
+        $selectionFile = Join-Path $TestDrive 'github-cli-only.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=github-cli'
         $session = [powershell]::Create()
         try {
             $null = $session.AddScript({

@@ -130,6 +130,11 @@ string parameters `Version1`, `Version2`, `Version1Source`, and `Version2Source`
 and must return exactly one integer: `-1` (older), `0` (equivalent), or `1` (newer).
 Keep it pure: no API calls, state mutations, or actions. Delegate ordinary cases
 to `Compare-SemanticVersions`, not back to the owner-aware dispatcher.
+Both latest-column status comparisons use this same override. Standard tools can
+declare a `ToolFile` containing only the comparison entry point without replacing
+their standard checks. For example, [tools/git.ps1](tools/git.ps1) treats
+`2.55.0.windows.3` and `2.55.0.3` as equivalent while preserving revision ordering
+and the original version strings for display.
 Standard checks record `InstalledVersionSource` and `LatestVersionSource` in
 owner-keyed `ToolState`: `command`, `api`, or the package-manager filename.
 Custom checks may supply the same metadata; sources can be empty. Planning,
@@ -250,6 +255,25 @@ legend, and summary. It renders existing state without changing results or runni
 checks, updates, or prompts. Update eligibility and action approval remain in the
 check/action infrastructure; the summary receives the already-filtered available update names.
 Operation-specific messages remain with their checks and actions.
+Keep the legend's cooldown, indented color key, and informational notes in
+separate groups, with one color-key entry per line.
+
+The table contains Name, Installed, Latest Cooldown, Age, and Latest Released only.
+Separate column fields with three spaces, retaining the two-space table indent.
+Age renders the checked candidate's `AgeDays` as right-aligned `Nd`, including `0d`
+for a newly published candidate. Show `-` when age is unavailable or Installed is
+current/newer than `Latest`; do not associate registry age with upstream Latest Released.
+`Show-ToolDetails` renders update/install commands and release-note links as labeled
+lines; `Invoke-ActionMenu` owns the read-only `[D]` selection. Normal interactive
+runs may offer details without executable actions; do not add prompts to check-only
+or Force runs. Latest Released is green when the owner-aware version comparison
+matches Installed; newer or unknown versions remain neutral. In both latest
+columns, versions older than Installed are cyan with an asterisk, using the same
+owner-aware comparison. Include the marker in column widths without changing
+stored version strings or action eligibility, and explain it in the legend. It never drives
+update status.
+Omit update command lines when no action is available. Interactive and parallel
+action execution print the tool name and planned command before starting it.
 
 The main script explicitly dot-sources the function-only file via `$PSScriptRoot`
 and fails startup if it is missing, independently of catalog selection. Preserve
@@ -292,6 +316,22 @@ names such as `Get-ReleasePlan-PackageManager`, `Invoke-Command-PackageManager`,
 stay local. Release plans carry the checked version, eligibility, blocking reason,
 and exact installable command. Do not reconstruct package-specific decisions in
 renderers, action menus, or background jobs.
+
+Cooldown-aware plans and rows also carry `LatestCooldown` (null when no safe release
+is verified) and `LatestReleased` (the newest informational release).
+Search for the newest safe release independently of the installed version, but only
+register upgrades, never downgrades. Keep `Latest` as the existing checked candidate
+for command planning; never substitute `LatestReleased` into actions. Checks without
+a cooldown policy may continue supplying only `Latest`. Preserve both additional
+fields across worker merges and installed-version refreshes.
+
+For npm-managed catalog entries, optional `LatestReleaseApiUrl` names the upstream
+GitHub latest-release endpoint. Its `tag_name` supplies only `LatestReleased`,
+respecting draft/production filtering; it never changes registry endpoint resolution,
+cooldown selection, or commands. Preserve upstream information even if the registry
+lookup fails. Report failed or invalid upstream responses and store `unknown`
+instead of silently substituting registry data. Without this property, existing
+registry-only behavior is unchanged.
 
 Rows carry `ToolId` and optional `ItemId`; use `Get-ToolState -ToolId <id>` for
 tool-private inventory. Dispatch stamps new unowned rows, but explicitly provide

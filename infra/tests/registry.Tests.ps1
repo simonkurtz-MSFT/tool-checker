@@ -24,8 +24,8 @@ Describe 'Registry infrastructure' {
     }
 
     It 'loads registry infrastructure independently of selected tool files' {
-        $selectionFile = Join-Path $TestDrive 'git.env'
-        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
+        $selectionFile = Join-Path $TestDrive 'github-cli.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=github-cli'
         $session = [powershell]::Create()
         try {
             $null = $session.AddScript({
@@ -160,7 +160,7 @@ Describe 'Registry endpoint resolution' {
     BeforeEach {
         $script:NpmRegistryResolution = @{ Source = 'tool-checker.json'; Url = $null; Details = $null }
         $toolsConfig = [ordered]@{
-            Example = @{ VersionExtractor = 'npmDistTagLatest'; NpmPackageName = '@example/cli'; ApiUrl = 'https://registry.npmjs.org/%40example%2Fcli' }
+            Example = @{ VersionExtractor = 'npmDistTagLatest'; NpmPackageName = '@example/cli'; ApiUrl = 'https://registry.npmjs.org/%40example%2Fcli'; LatestReleaseApiUrl = 'https://api.github.com/repos/example/cli/releases/latest' }
             Other = @{ ApiUrl = 'https://other.example/releases' }
         }
         $LASTEXITCODE = 0
@@ -171,6 +171,7 @@ Describe 'Registry endpoint resolution' {
         Mock npm { 'https://packages.example/npm/' }
         Set-NpmRegistryApiUrls
         $toolsConfig.Example.ApiUrl | Should Be 'https://packages.example/npm/%40example%2Fcli'
+        $toolsConfig.Example.LatestReleaseApiUrl | Should Be 'https://api.github.com/repos/example/cli/releases/latest'
         $toolsConfig.Other.ApiUrl | Should Be 'https://other.example/releases'
         $script:NpmRegistryResolution.Source | Should Be 'npm machine/user configuration'
     }

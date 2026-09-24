@@ -102,7 +102,7 @@ function Main {
     $availableUpdateNames = @($results.Updates | Where-Object { $_ -notin $results.MaturityBlockedUpdates.Name })
     Show-ResultsSummary -AvailableUpdateNames $availableUpdateNames
 
-    if (@(Get-AvailableActions).Count -eq 0) {
+    if (@(Get-AvailableActions).Count -eq 0 -and ($Force -or $SkipUpdate)) {
         Write-Host "`nNothing to do. Exiting.`n"
         return
     }

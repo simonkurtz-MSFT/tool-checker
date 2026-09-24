@@ -3,37 +3,48 @@ $scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) 'tool-checker-npm-global-tests-absent.env')
 
 Describe 'Global npm packages selected-only worker' {
-    It 'runs alone with CheckOnly=<CheckOnly>' -TestCases @(@{ CheckOnly = $false }, @{ CheckOnly = $true }) {
-        param($CheckOnly)
+    It 'runs alone with Installed=<Installed> and CheckOnly=<CheckOnly>' -TestCases @(
+        @{ Installed = '1.0.0'; CheckOnly = $false; ActionCount = 1 },
+        @{ Installed = '1.0.0'; CheckOnly = $true; ActionCount = 0 },
+        @{ Installed = '1.5.0'; CheckOnly = $false; ActionCount = 0 },
+        @{ Installed = '2.0.0'; CheckOnly = $false; ActionCount = 0 }
+    ) {
+        param($Installed, $CheckOnly, $ActionCount)
         $selectionFile = Join-Path $TestDrive 'npm-global-packages.env'
         Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=npm-global-packages'
         $session = [powershell]::Create()
         try {
             $null = $session.AddScript({
-                param($path, $envFile, $checkOnly)
+                param($path, $envFile, $checkOnly, $installed)
                 . $path -EnvFile $envFile -SkipUpdate:$checkOnly
-                $checks = @(@{ Name = 'Global npm packages'; Block = {
-                    function ncu { $global:LASTEXITCODE = 0; "example 1.0.0 $([char]0x2192) 2.0.0" }
+                $block = {
+                    function ncu { $global:LASTEXITCODE = 0; "example __INSTALLED__ $([char]0x2192) 2.0.0" }
                     function npm { if ($args -contains 'config') { 'https://registry.npmjs.org/' } else { throw 'Unexpected npm invocation' } }
                     function Invoke-SafeApiRequest {
                         [PSCustomObject]@{
-                            versions = [PSCustomObject]@{ '2.0.0' = @{} }
-                            time = [PSCustomObject]@{ '2.0.0' = '2020-01-01T00:00:00Z' }
+                            versions = [PSCustomObject]@{ '1.5.0' = @{}; '2.0.0' = @{} }
+                            time = [PSCustomObject]@{
+                                '1.5.0' = '2020-01-01T00:00:00Z'
+                                '2.0.0' = [DateTimeOffset]::UtcNow.ToString('O')
+                            }
                         }
                     }
                     Invoke-ToolEntryPoint -ToolId 'npm-global-packages' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
-                } })
+                }.ToString().Replace('__INSTALLED__', $installed)
+                $checks = @(@{ Name = 'Global npm packages'; Block = [scriptblock]::Create($block) })
                 Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 10
                 [PSCustomObject]@{ Ids = @($script:ToolDefinitions.Keys); Results = $results }
-            }).AddArgument($scriptPath).AddArgument($selectionFile).AddArgument($CheckOnly)
+            }).AddArgument($scriptPath).AddArgument($selectionFile).AddArgument($CheckOnly).AddArgument($Installed)
             $observed = @($session.Invoke())
             $session.HadErrors | Should Be $false
             $observed.Count | Should Be 1
             $observed[0].Ids | Should Be 'npm-global-packages'
-            $observed[0].Results.ToolState['npm-global-packages'].Packages[0].Current | Should Be '1.0.0'
-            $observed[0].Results.AvailableUpdates.Count | Should Be $(if ($CheckOnly) { 0 } else { 1 })
-            if (-not $CheckOnly) {
-                $observed[0].Results.AvailableUpdates[0].Command | Should Be 'npm install -g example@2.0.0 --loglevel=error'
+            $observed[0].Results.ToolState['npm-global-packages'].Packages[0].Current | Should Be $Installed
+            $observed[0].Results.Tools['npm: example'].LatestCooldown | Should Be '1.5.0'
+            $observed[0].Results.Tools['npm: example'].LatestReleased | Should Be '2.0.0'
+            $observed[0].Results.AvailableUpdates.Count | Should Be $ActionCount
+            if ($ActionCount -gt 0) {
+                $observed[0].Results.AvailableUpdates[0].Command | Should Be 'npm install -g example@1.5.0 --loglevel=error'
             }
             $observed[0].Results.Errors.Count | Should Be 0
         } finally { $session.Dispose() }
@@ -65,11 +76,15 @@ Describe 'Global npm package refresh' {
 
     It 'refreshes a global package through its owning tool' {
         Mock Get-GlobalNpmInstalledVersion { '2.0.0' }
-        (Get-ToolState 'npm-global-packages').Packages = @(@{ Name = 'example'; Current = '1.0.0'; Latest = '2.0.0' })
+        (Get-ToolState 'npm-global-packages').Packages = @(@{ Name = 'example'; Current = '1.0.0'; Latest = '2.0.0'; LatestCooldown = '2.0.0'; LatestReleased = '3.0.0' })
+        $results.Tools['npm: example'] = @{ ToolId = 'npm-global-packages'; Installed = '1.0.0'; Latest = '2.0.0'; LatestCooldown = '2.0.0'; LatestReleased = '3.0.0' }
         $results.Updates = @('ncu global packages', 'Other CLI')
         $results.AvailableUpdates = @(@{ Name = 'npm: example'; ToolId = 'npm-global-packages' })
         Refresh-ToolVersion -ToolName 'npm: example' | Should Be $true
         (Get-ToolState 'npm-global-packages').Packages[0].Current | Should Be '2.0.0'
+        $results.Tools['npm: example'].Installed | Should Be '2.0.0'
+        $results.Tools['npm: example'].LatestCooldown | Should Be '2.0.0'
+        $results.Tools['npm: example'].LatestReleased | Should Be '3.0.0'
         $results.Updates.Count | Should Be 1
         $results.Updates[0] | Should Be 'Other CLI'
     }

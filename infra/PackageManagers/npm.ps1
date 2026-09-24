@@ -27,11 +27,27 @@ function Get-ReleasePlan-PackageManager {
     param([string]$ToolName, [string]$InstalledVersion)
     $config = Get-ToolConfiguration -ToolName $ToolName
     $apiData = Invoke-SafeApiRequest -Uri $config.ApiUrl
-    if (-not $apiData) { return }
-    $latest = Get-LatestVersion-PackageManager -ApiData $apiData -ToolName $ToolName
-    if (-not $latest) { return }
-    # Prefer the newest mature upgrade, even when the latest tag is still cooling down.
-    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion $InstalledVersion -MaximumVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly
+    $latest = if ($apiData) { Get-LatestVersion-PackageManager -ApiData $apiData -ToolName $ToolName }
+    $latestReleased = $latest
+    if ($config.LatestReleaseApiUrl) {
+        # Upstream information must not change what the configured registry can install.
+        $latestReleased = 'unknown'
+        $upstreamRelease = Invoke-SafeApiRequest -Uri $config.LatestReleaseApiUrl
+        if ($upstreamRelease) {
+            $upstreamVersion = "$($upstreamRelease.tag_name)" -replace '^v', ''
+            if ([string]::IsNullOrWhiteSpace($upstreamVersion) -or $upstreamRelease.draft -or
+                ($config.ProductionReleasesOnly -and ($upstreamRelease.prerelease -or -not (Test-IsProductionVersion $upstreamVersion)))) {
+                $message = "Could not determine upstream release for $ToolName from $($config.LatestReleaseApiUrl): missing or ineligible release tag."
+                Write-Error $message
+                $results.Errors += $message
+            } else { $latestReleased = $upstreamVersion }
+        }
+    }
+    if (-not $latest) {
+        return @{ Latest = ''; LatestCooldown = $null; LatestReleased = $latestReleased }
+    }
+    # Include current/older releases so the safe version remains visible after an update.
+    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MaximumVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly
     if ($release) { $latest = $release.Version }
     else { $release = Get-NpmVersionReleaseInfo -PackageName $config.NpmPackageName -Version $latest }
     $ageDays = if ($release) { $release.AgeDays } else { $null }
@@ -40,6 +56,8 @@ function Get-ReleasePlan-PackageManager {
         elseif (-not $installable) { "this release is not installable until it is $($script:ReleaseCooldownDays) days old." }
     @{
         Latest = $latest
+        LatestReleased = $latestReleased
+        LatestCooldown = if ($installable) { $latest } else { $null }
         Installable = [bool]$installable
         AgeDays = $ageDays
         AgeLabel = if ($release) { " ($ageDays days old)" } else { ' (age unknown)' }

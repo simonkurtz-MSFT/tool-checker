@@ -68,6 +68,12 @@
     For npm maturity checks, reuse script:ReleaseCooldownDays, resolved from
     catalog settings.CooldownDays or the runtime -CooldownDays override. Do not
     hard-code a cooldown in tool files; workers receive the same resolved value.
+    Cooldown-aware rows also retain LatestReleased before filtering and LatestCooldown
+    (null if no safe release is verified). Latest remains the checked candidate used
+    for update planning; LatestReleased is informational only. Refresh only installed
+    state, preserving both release fields. Non-cooldown rows may supply only Latest.
+    npm-managed catalog entries may set LatestReleaseApiUrl to a GitHub latest-release
+    endpoint for informational LatestReleased; registry data still owns installability.
 
     After catalog selection, the main script loads only declared ToolFile files for
     selected, enabled tools in catalog-ID order into a per-tool definition registry.

@@ -46,6 +46,7 @@
       "UpdateType": "npm-global",
       "UpdateCommand": "npm install -g npm-check-updates@latest --loglevel=error",
       "ReleaseNotesUrl": "https://github.com/raineorshine/npm-check-updates/releases",
+      "LatestReleaseApiUrl": "https://api.github.com/repos/raineorshine/npm-check-updates/releases/latest",
       "ApiUrl": "https://registry.npmjs.org/npm-check-updates",
       "InstallCommands": {
         "Windows (amd64)": "npm install -g npm-check-updates@latest --loglevel=error",
@@ -86,6 +87,7 @@
       "UpdateType": "npm-global",
       "UpdateCommand": "npm install -g pnpm@latest --loglevel=error",
       "ReleaseNotesUrl": "https://github.com/pnpm/pnpm/releases",
+      "LatestReleaseApiUrl": "https://api.github.com/repos/pnpm/pnpm/releases/latest",
       "ApiUrl": "https://registry.npmjs.org/pnpm",
       "InstallCommands": {
         "Windows (amd64)": "npm install -g pnpm@latest --loglevel=error",
@@ -303,6 +305,7 @@
       }
     },
     "git": {
+      "ToolFile": "git.ps1",
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
       "WindowsPackageManagerFiles": ["winget.ps1"],
@@ -370,6 +373,7 @@
       "UpdateType": "npm-global",
       "UpdateCommand": "npm install -g @github/copilot@latest --loglevel=error",
       "ReleaseNotesUrl": "https://github.com/github/copilot-cli/releases",
+      "LatestReleaseApiUrl": "https://api.github.com/repos/github/copilot-cli/releases/latest",
       "ApiUrl": "https://registry.npmjs.org/%40github%2Fcopilot",
       "InstallCommands": {
         "Windows (amd64)": "npm install -g @github/copilot@latest --loglevel=error",

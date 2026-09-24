@@ -278,20 +278,25 @@ function Register-ReleasePlan {
     param([string]$ToolName, [string]$InstalledVersion, [hashtable]$Plan)
     $config = Get-ToolConfiguration -ToolName $ToolName
     $latest = $Plan.Latest
-    if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel $Plan.VersionLabel)) { return }
     $row = $results.Tools[$ToolName]
+    foreach ($property in @('LatestCooldown', 'LatestReleased')) {
+        if ($Plan.ContainsKey($property)) { $row[$property] = $Plan[$property] }
+    }
+    if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel $Plan.VersionLabel)) { return }
     $row.AgeDays = $Plan.AgeDays
     $row.Installable = $Plan.Installable
     $row.BlockReason = $Plan.BlockReason
     if (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $latest -ToolName $ToolName) {
-        $results.Updates += $ToolName
-        Write-Warning "  $ToolName has available updates$($Plan.SourceLabel): $InstalledVersion -> $latest$($Plan.AgeLabel)"
         if (-not $Plan.Installable) {
-            Write-Host "  FYI only: $($Plan.BlockReason)"
+            Write-Host "  FYI only: $ToolName release $latest$($Plan.AgeLabel); $($Plan.BlockReason)"
             if ($Plan.MaturityBlocked) { $results.MaturityBlockedUpdates += @{ Name = $ToolName; AgeDays = $Plan.AgeDays; RequiredAgeDays = $Plan.RequiredAgeDays } }
-        } elseif (-not $SkipUpdate) {
-            if ($config.ReleaseNotesUrl) { Write-Host "  Release notes: $($config.ReleaseNotesUrl)" }
-            Add-AvailableUpdate -Name $ToolName -Command $Plan.Command -Type $Plan.Type -Details "$InstalledVersion -> $latest" -Version $latest
+        } else {
+            $results.Updates += $ToolName
+            Write-Warning "  $ToolName has available updates$($Plan.SourceLabel): $InstalledVersion -> $latest$($Plan.AgeLabel)"
+            if (-not $SkipUpdate) {
+                if ($config.ReleaseNotesUrl) { Write-Host "  Release notes: $($config.ReleaseNotesUrl)" }
+                Add-AvailableUpdate -Name $ToolName -Command $Plan.Command -Type $Plan.Type -Details "$InstalledVersion -> $latest" -Version $latest
+            }
         }
     } else { Write-Success "$ToolName is up to date$($Plan.CurrentLabel)" }
 }

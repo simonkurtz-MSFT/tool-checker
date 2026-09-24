@@ -103,6 +103,10 @@
         "VersionExtractor": { "type": "string", "enum": ["jsonProperty", "npmDistTagLatest"] },
         "VersionProperty": { "$ref": "#/definitions/nonBlankString" },
         "ApiUrl": { "$ref": "#/definitions/uri" },
+        "LatestReleaseApiUrl": {
+          "$ref": "#/definitions/uri",
+          "description": "Optional GitHub latest-release endpoint for informational Latest Released on npm-managed tools. Registry metadata still controls cooldown-safe update targets."
+        },
         "ApiVersionProperty": { "$ref": "#/definitions/nonBlankString", "description": "Dot-separated property path in the API response." },
         "ApiVersionRegex": { "type": "string", "description": "PowerShell/.NET regex with the API tag version in capture group 1." },
         "UpdateParseRegex": { "type": "string", "description": "PowerShell/.NET regex extracting an available release from version-command output." },

@@ -28,7 +28,11 @@ Describe 'pnpm update planning' {
                         [PSCustomObject]@{ Source = '__COMMAND_PATH__' }
                     }
                     function Invoke-SafeApiRequest {
+                        param([string]$Uri)
                         if ($SkipUpdate) { throw 'Unexpected release lookup' }
+                        if ($Uri -eq 'https://api.github.com/repos/pnpm/pnpm/releases/latest') {
+                            return [PSCustomObject]@{ tag_name = 'v12.6.0'; draft = $false; prerelease = $false }
+                        }
                         [PSCustomObject]@{
                             'dist-tags' = [PSCustomObject]@{ latest = '12.2.0' }
                             versions = [PSCustomObject]@{ '12.1.0' = @{}; '12.2.0' = @{} }
@@ -65,6 +69,11 @@ Describe 'pnpm update planning' {
             $result = $observed[0].Results
             $result.Errors.Count | Should Be 0
             $result.Tools['pnpm'].Installed | Should Be '12.0.0'
+            if (-not $CheckOnly) {
+                $result.Tools['pnpm'].LatestReleased | Should Be '12.6.0'
+                if ($Mature) { $result.Tools['pnpm'].LatestCooldown | Should Be '12.1.0' }
+                else { $result.Tools['pnpm'].LatestCooldown | Should BeNullOrEmpty }
+            }
             if ($ExpectedCommand) {
                 $result.AvailableUpdates.Count | Should Be 1
                 $result.Tools['pnpm'].Latest | Should Be '12.1.0'

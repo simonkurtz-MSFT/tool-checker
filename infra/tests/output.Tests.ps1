@@ -45,7 +45,7 @@ Describe 'Output infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($outputPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 14
+        $ast.EndBlock.Statements.Count | Should Be 15
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $outputPath
         }
@@ -81,8 +81,8 @@ Describe 'Output infrastructure' {
     }
 
     It 'loads independently of selected tool files' {
-        $selectionFile = Join-Path $TestDrive 'git.env'
-        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=git'
+        $selectionFile = Join-Path $TestDrive 'github-cli.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=github-cli'
         $session = [powershell]::Create()
         try {
             $null = $session.AddScript({
@@ -183,8 +183,6 @@ Describe 'Output rendering' {
         $Force = $false
         $script:OutputLines = [System.Collections.Generic.List[string]]::new()
         Mock Write-Host { param($Object) $script:OutputLines.Add([string]$Object) }
-        Mock Get-UpdateCommand { '' }
-        Mock Get-ReleaseNotesUrl { '' }
     }
 
     It 'renders the application name and version banner' {
@@ -235,11 +233,173 @@ Describe 'Output rendering' {
         $before = ConvertTo-Json $results -Depth 10 -Compress
         Show-ResultsTable
         $rendered = $script:OutputLines -join "`n"
-        $rendered | Should Match ([regex]::Escape($ColorGreen) + '  Current\s+1.0.0\s+1.0.0\s+-')
+        $rendered | Should Match ([regex]::Escape($ColorGreen) + '  Current\s+1.0.0\s+1.0.0')
         $rendered | Should Match ([regex]::Escape($ColorYellow) + '  Unknown\s+1.0.0\s+unknown')
-        $rendered | Should Match ([regex]::Escape($ColorOrange) + '  Blocked\s+1.0.0\s+2.0.0\s+2d')
+        $rendered | Should Match ([regex]::Escape($ColorOrange) + '  Blocked\s+1.0.0\s+-')
         $rendered | Should Match ([regex]::Escape($ColorRed) + '  Failed')
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'renders exactly five columns and keeps newer released versions informational' {
+        $results.Tools = @{
+            Current = @{ Installed = '1.1.0'; Latest = '1.1.0'; LatestCooldown = '1.1.0'; LatestReleased = '1.2.0' }
+            Ready = @{ Installed = '1.0.0'; Latest = '1.1.0'; LatestCooldown = '1.1.0'; LatestReleased = '1.2.0' }
+            Unverified = @{ Installed = '1.0.0'; Latest = '1.2.0'; LatestCooldown = $null; LatestReleased = '1.2.0'; Installable = $false }
+        }
+        Mock Get-UpdateCommand { throw 'Table must not resolve commands' }
+        Mock Get-ReleaseNotesUrl { throw 'Table must not resolve links' }
+        Show-ResultsTable
+        $rendered = $script:OutputLines -join "`n"
+        $plain = $rendered -replace '\x1b\[[0-9;]*m', ''
+        $plain | Should Match 'Name\s+Installed\s+Latest Cooldown\s+Age\s+Latest Released'
+        $plain | Should Not Match 'Update / Install|Release Notes'
+        $plain | Should Match 'Current\s+1.1.0\s+1.1.0\s+-\s+1.2.0'
+        $plain | Should Match 'Unverified\s+1.0.0\s+-\s+-\s+1.2.0'
+        $rendered | Should Match ([regex]::Escape($ColorGreen) + '  Current')
+        $rendered | Should Match ([regex]::Escape($ColorYellow) + '  Ready')
+        $rendered | Should Match ([regex]::Escape($ColorReset) + '\s+1.2.0')
+    }
+
+    It 'preserves candidate age display for <Case>' -TestCases @(
+        @{ Case = 'safe update'; Installed = '1.0.0'; Latest = '1.1.0'; Cooldown = '1.1.0'; Age = 8; Expected = '8d'; Skip = $false },
+        @{ Case = 'zero-day blocked update'; Installed = '1.0.0'; Latest = '1.1.0'; Cooldown = $null; Age = 0; Expected = '0d'; Skip = $false },
+        @{ Case = 'young blocked update'; Installed = '1.0.0'; Latest = '1.1.0'; Cooldown = $null; Age = 2; Expected = '2d'; Skip = $false },
+        @{ Case = 'missing age'; Installed = '1.0.0'; Latest = '1.1.0'; Cooldown = '1.1.0'; Age = $null; Expected = '-'; Skip = $false },
+        @{ Case = 'current candidate'; Installed = '1.1.0'; Latest = '1.1.0'; Cooldown = '1.1.0'; Age = 8; Expected = '-'; Skip = $false },
+        @{ Case = 'newer installed version'; Installed = '1.2.0'; Latest = '1.1.0'; Cooldown = '1.1.0'; Age = 8; Expected = '-'; Skip = $false },
+        @{ Case = 'current blocked candidate'; Installed = '1.1.0'; Latest = '1.1.0'; Cooldown = $null; Age = 2; Expected = '-'; Skip = $false },
+        @{ Case = 'check-only'; Installed = '1.0.0'; Latest = ''; Cooldown = $null; Age = $null; Expected = '-'; Skip = $true }
+    ) {
+        param($Case, $Installed, $Latest, $Cooldown, $Age, $Expected, $Skip)
+        $SkipUpdate = $Skip
+        $results.Tools.Example = @{
+            Installed = $Installed; Latest = $Latest; LatestCooldown = $Cooldown
+            LatestReleased = '2.0.0'; AgeDays = $Age
+        }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ResultsTable
+        $row = ($script:OutputLines | Where-Object { $_ -match '  Example\s' }) -replace '\x1b\[[0-9;]*m', ''
+        ($row.Trim() -split '\s{2,}')[3] | Should Be $Expected
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'right-aligns ages and expands the column for large day counts' {
+        $results.Tools = @{
+            Short = @{ Installed = '1.0.0'; Latest = '1.1.0'; AgeDays = 8 }
+            Long = @{ Installed = '1.0.0'; Latest = '1.1.0'; AgeDays = 1000 }
+        }
+        Show-ResultsTable
+        $plain = @($script:OutputLines | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' })
+        $header = $plain | Where-Object { $_ -match 'Name\s+Installed' }
+        $short = $plain | Where-Object { $_ -match '  Short\s' }
+        $long = $plain | Where-Object { $_ -match '  Long\s' }
+        $short.IndexOf('8d') + 2 | Should Be ($long.IndexOf('1000d') + 5)
+        $short.IndexOf('8d') + 2 | Should Be ($header.IndexOf('Age') + 3)
+    }
+
+    It 'separates header divider and data columns with three spaces' {
+        $results.Tools.Example = @{ Installed = '1.0.0'; Latest = '1.1.0'; AgeDays = 8 }
+        Show-ResultsTable
+        $plain = @($script:OutputLines | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' })
+        $header = $plain | Where-Object { $_ -match 'Name\s+Installed' }
+        $divider = $plain | Where-Object { $_ -match '^  -{7} ' }
+        $row = $plain | Where-Object { $_ -match '^  Example ' }
+        $header | Should Be ('  ' + (@('Name'.PadRight(7), 'Installed', 'Latest Cooldown', 'Age', 'Latest Released') -join '   '))
+        $divider | Should Be ('  ' + (@(('-' * 7), ('-' * 9), ('-' * 15), ('-' * 3), ('-' * 15)) -join '   '))
+        $row | Should Be ('  ' + (@('Example', '1.0.0'.PadRight(9), '1.1.0'.PadRight(15), '8d'.PadLeft(3), '1.1.0') -join '   '))
+    }
+
+    It 'colors Latest Released by its relation to Installed (<Installed>, <Released>)' -TestCases @(
+        @{ Installed = '1.2.0'; Released = '1.2.0'; Green = $true },
+        @{ Installed = 'v1.2.0'; Released = '1.2.0'; Green = $true },
+        @{ Installed = '1.1.0'; Released = '1.2.0'; Green = $false },
+        @{ Installed = '1.3.0'; Released = '1.2.0'; Green = $false; Older = $true },
+        @{ Installed = 'unknown'; Released = 'unknown'; Green = $false },
+        @{ Installed = '-'; Released = '-'; Green = $false },
+        @{ Installed = ''; Released = '1.2.0'; Green = $false }
+    ) {
+        param($Installed, $Released, $Green, $Older = $false)
+        $results.Tools.Example = @{ Installed = $Installed; Latest = '1.1.0'; LatestReleased = $Released }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ResultsTable
+        $row = $script:OutputLines | Where-Object { $_ -match '  Example\s' }
+        $expectedColor = if ($Older) { $ColorCyan } elseif ($Green) { $ColorGreen } else { '' }
+        $expectedVersion = if ($Older) { "$Released*" } else { $Released }
+        $row | Should Match ([regex]::Escape("$ColorReset   $expectedColor$expectedVersion$ColorReset") + '$')
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'marks older latest cells independently for <Name> with installed <Installed>' -TestCases @(
+        @{ Name = 'WSL'; Installed = '2.9.13'; Cooldown = '2.9.12'; Released = '2.9.12'; ExpectedCooldown = '2.9.12*'; ExpectedReleased = '2.9.12*' },
+        @{ Name = 'Example'; Installed = '2.0.0'; Cooldown = '1.0.0'; Released = '3.0.0'; ExpectedCooldown = '1.0.0*'; ExpectedReleased = '3.0.0' },
+        @{ Name = 'Example'; Installed = 'unknown'; Cooldown = '1.0.0'; Released = '1.0.0'; ExpectedCooldown = '1.0.0'; ExpectedReleased = '1.0.0' },
+        @{ Name = 'Example'; Installed = 'Unable to retrieve version'; Cooldown = '1.0.0'; Released = '1.0.0'; ExpectedCooldown = '1.0.0'; ExpectedReleased = '1.0.0' },
+        @{ Name = 'Example'; Installed = '2.0.0'; Cooldown = $null; Released = 'unknown'; ExpectedCooldown = '-'; ExpectedReleased = 'unknown' },
+        @{ Name = 'Git'; Installed = '2.55.0.windows.3'; Cooldown = '2.55.0.3'; Released = '2.55.0.3'; ExpectedCooldown = '2.55.0.3'; ExpectedReleased = '2.55.0.3' }
+    ) {
+        param($Name, $Installed, $Cooldown, $Released, $ExpectedCooldown, $ExpectedReleased)
+        $results.Tools[$Name] = @{ Installed = $Installed; Latest = $Cooldown; LatestCooldown = $Cooldown; LatestReleased = $Released }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ResultsTable
+        $row = $script:OutputLines | Where-Object { $_ -match ('  ' + [regex]::Escape($Name) + '\s') }
+        $cells = (($row -replace '\x1b\[[0-9;]*m', '').Trim() -split '\s{3,}')
+        $cells[2] | Should Be $ExpectedCooldown
+        $cells[4] | Should Be $ExpectedReleased
+        foreach ($expected in @($ExpectedCooldown, $ExpectedReleased) | Where-Object { $_.EndsWith('*') }) {
+            $row | Should Match ([regex]::Escape("$ColorCyan$expected") + '\s*' + [regex]::Escape($ColorReset))
+        }
+        if (-not $ExpectedCooldown.EndsWith('*') -and -not $ExpectedReleased.EndsWith('*')) {
+            $row | Should Not Match '\*'
+        }
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'includes older markers in column widths and explains them in the legend' {
+        $version = '1234.1234.1234.12'
+        $results.Tools.Example = @{ Installed = '1234.1234.1234.13'; Latest = $version }
+        Show-ResultsTable
+        $plain = @($script:OutputLines | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' })
+        $header = $plain | Where-Object { $_ -match 'Name\s+Installed' }
+        $row = $plain | Where-Object { $_ -match '^  Example ' }
+        $divider = $plain | Where-Object { $_ -match '^  -+ ' }
+        $columns = [regex]::Matches($divider, '-+')
+        $columns[2].Length | Should Be ($version.Length + 1)
+        $columns[4].Length | Should Be ($version.Length + 1)
+        $row.LastIndexOf("$version*") | Should Be $header.IndexOf('Latest Released')
+        $row.Substring($columns[2].Index, $columns[2].Length + 3) | Should Be "$version*   "
+        Show-UpdateLegend
+        ($script:OutputLines -join "`n") | Should Match ([regex]::Escape("${ColorCyan}* Older than installed; informational only, no downgrade offered.$ColorReset"))
+    }
+
+    It 'lists pinned commands and release links outside the table without executing anything' {
+        $toolsConfig = @{
+            Ready = @{ Id = 'ready'; ReleaseNotesUrl = 'https://example.test/ready' }
+            Blocked = @{ Id = 'blocked'; ReleaseNotesUrl = 'https://example.test/blocked'; ReleasePackageManager = 'npm.ps1' }
+            Missing = @{ Id = 'missing'; ReleaseNotesUrl = 'https://example.test/missing' }
+        }
+        $results.Tools = @{
+            Ready = @{ ToolId = 'ready'; Installed = '1.0.0'; Latest = '1.1.0'; LatestReleased = '1.2.0' }
+            Blocked = @{ ToolId = 'blocked'; Installed = '1.0.0'; Latest = '1.2.0'; Installable = $false }
+        }
+        $results.AvailableUpdates = @(@{ Name = 'Ready'; Command = 'npm install -g ready@1.1.0' })
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Missing'; ToolId = 'missing'; InstallCommands = @{ $script:PlatformKey = 'install missing' } })
+        Mock Get-UpdateCommand {
+            if ($ToolName -eq 'Ready') { 'npm install -g ready@1.1.0' } else { '' }
+        }
+        Mock Get-ReleaseNotesUrl { "https://example.test/$($ToolName.ToLowerInvariant())" }
+        Mock Invoke-ActionCommand { throw 'Details must never execute actions' }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ToolDetails
+        $rendered = $script:OutputLines -join "`n"
+        $rendered | Should Match 'Update / Install: npm install -g ready@1.1.0'
+        $rendered | Should Match 'Update / Install: install missing'
+        $rendered | Should Not Match 'No action available'
+        @($script:OutputLines | Where-Object { $_ -match '^\s+Update / Install:' }).Count | Should Be 2
+        $rendered | Should Match 'Release Notes: https://example.test/blocked'
+        $rendered | Should Not Match 'ready@1.2.0'
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+        Assert-MockCalled Get-UpdateCommand 1 -Scope It -ParameterFilter { $ToolName -eq 'Ready' -and $Latest -eq '1.1.0' }
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It
     }
 
     It 'renders duplicate package inventories and command paths without probing or mutating state' {
@@ -367,14 +527,19 @@ Describe 'No-action workflow output' {
         Mock Invoke-ForceUpdates {}
     }
 
-    It 'prints a blank-line-delimited exit message when only cooldown-blocked updates exist' {
+    It 'keeps the details menu when only cooldown-blocked updates exist' {
         $results.Updates = @('pnpm')
         $results.MaturityBlockedUpdates = @(@{ Name = 'pnpm'; AgeDays = 7; RequiredAgeDays = 8 })
         Main
-        $script:OutputLines.Count | Should Be 1
+        Assert-MockCalled Invoke-ActionMenu 1 -Scope It
+        Assert-MockCalled Invoke-ForceUpdates 0 -Scope It
+    }
+
+    It 'exits without a new prompt in check-only mode when no actions exist' {
+        $SkipUpdate = $true
+        Main
         $script:OutputLines[0] | Should Be "`nNothing to do. Exiting.`n"
         Assert-MockCalled Invoke-ActionMenu 0 -Scope It
-        Assert-MockCalled Invoke-ForceUpdates 0 -Scope It
     }
 
     It 'prints the same exit message in Force mode when no actions exist' {
@@ -408,7 +573,7 @@ Describe 'Application banner' {
 
 Describe 'Update legend' {
     BeforeEach {
-        $results.Updates = @()
+        $results = New-ToolCheckResults
         Mock Write-Host { }
     }
 
@@ -423,6 +588,33 @@ Describe 'Update legend' {
 
         Show-UpdateLegend
 
-        Assert-MockCalled Write-Host 2
+        Assert-MockCalled Write-Host 9 -Exactly -Scope It
+    }
+
+    It 'groups the cooldown color key and notes with consistent indentation' {
+        $results.Tools.Example = @{ Installed = '1.0.0'; Latest = '1.0.0' }
+        $script:OutputLines = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { param($Object) $script:OutputLines.Add([string]$Object) }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-UpdateLegend
+        $expected = @(
+            "  npm release cooldown: $script:ReleaseCooldownDays full days"
+            ''
+            "  ${ColorCyan}Legend$ColorReset"
+            "    $ColorYellow■ Installable update / version unknown$ColorReset"
+            "    $ColorOrange■ No verified installable release$ColorReset"
+            "    ${ColorCyan}* Older than installed; informational only, no downgrade offered.$ColorReset"
+            ''
+            '  Latest Released is informational only.'
+            '  "-" means no verified cooldown-safe version or not checked.'
+        )
+        ($script:OutputLines -join "`n") | Should Be ($expected -join "`n")
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'explains informational releases even when the cooldown-safe version is already installed' {
+        $results.Tools.Example = @{ Installed = '1.0.0'; LatestCooldown = '1.0.0'; LatestReleased = '1.1.0' }
+        Show-UpdateLegend
+        Assert-MockCalled Write-Host 1 -ParameterFilter { $Object -like '*Latest Released is informational*' }
     }
 }

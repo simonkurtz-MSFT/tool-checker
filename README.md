@@ -2,7 +2,51 @@
 
 Tool Checker is a PowerShell 7 script that inventories development tools, compares installed versions with upstream releases, and optionally installs missing tools or applies updates. Checks run in parallel and are driven by [`tool-checker.json`](tool-checker.json).
 
-Checks npm releases from newest to oldest and selects the newest production version that has completed the catalog-configured cooldown (eight full days by default, overridable at runtime). If no newer mature version exists, the young latest release remains visible but cannot be selected until the cooldown expires. Incomplete version or release-age lookups are reported as `unknown` instead of appearing current.
+Checks npm releases from newest to oldest and selects the newest production version that has completed the catalog-configured cooldown (eight full days by default, overridable at runtime). The newest released version remains visible separately for information, but only a cooldown-safe upgrade can become an update action. Incomplete version lookups are reported as `unknown`; an unverified release age never qualifies a version as cooldown-safe.
+
+## Summary and details
+
+The summary table contains five columns:
+
+- **Name**: the tool or managed package.
+- **Installed**: the detected local version.
+- **Latest Cooldown**: the newest release that has completed the applicable cooldown,
+  even if it is already installed or older than the installed version. No downgrade
+  is offered. `-` means no verified safe release was found or the check was skipped.
+- **Age**: the checked registry candidate's age in full days (for example, `8d`),
+  preserving the previous behavior. Shows `-` when already current or newer, or when
+  age is unavailable. A blocked candidate can still show its age; this is not the
+  age of an independently sourced upstream release.
+- **Latest Released**: the newest version reported by the tool's configured release
+  source and channel, respecting its production-release policy. This column is
+  informational, never an update target by itself. It is green when it matches the
+  installed version; newer versions remain neutral, not highlighted as actionable.
+
+In either latest column, a version older than Installed appears in cyan with an
+asterisk (for example, `2.9.12*`). This is informational: the configured release
+source reports an older version, and no downgrade is offered.
+
+For sources without a cooldown policy, both latest columns show the same checked
+release. Existing source, platform, and release-channel restrictions still apply.
+
+For pnpm, npm-check-updates (`ncu`), and GitHub Copilot CLI, **Latest Released**
+comes from the upstream GitHub release endpoint, independently of the configured
+npm registry or proxy. **Latest Cooldown** and update commands still use versions
+available through that registry and never bypass it. This lets the table show a
+new upstream release even when a registry mirror has not exposed it yet.
+An upstream lookup failure is reported as an error and `unknown`, not replaced by
+a possibly stale registry version. Catalog entries without an upstream endpoint
+and dynamically discovered global npm packages continue using their existing source.
+
+Select **[D] Update / Install commands and Release Notes** to view commands and links
+as separate labeled lines for each tool, outside the table. Update commands retain
+their checked, cooldown-safe target; tools without an available update omit the
+command line.
+Viewing details never executes a command. Numeric action selections and `[0]` to
+exit are unchanged. A normal interactive run keeps this details option available
+even when no actions exist; check-only and Force runs do not gain an extra prompt.
+When an install/update action starts, the console prints the tool name and its
+command in both interactive and Force mode.
 
 The included configuration checks:
 
@@ -18,6 +62,9 @@ Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tool
 ## See it in action
 
 These images come from a **real Tool Checker 2.2.0 run on Windows**, captured on September 15, 2026—not fabricated terminal output. The unchanged script ran in a PowerShell pseudoterminal; recorded text, ANSI colors, versions, and timings were rendered to PNG. Setup, execution, summary, and action-menu views are cropped separately, with the recorded version banner retained for context.
+
+These historical captures predate the redesigned summary and `[D]` details option
+described above.
 
 The run used an isolated environment file, selected all 19 enabled catalog tools, and queried actual installed versions and upstream releases. Registry policy was left unset; metadata queries used the machine's configured npm proxy. The action menu was exited with `0`: **no installs, updates, or registry repairs were performed**. Versions, release ages, available actions, and timings will vary by machine and capture date.
 

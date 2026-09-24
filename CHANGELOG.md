@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Compare Git for Windows tags and numeric package versions through Git's tool-owned
+  version override, so equivalent Latest Released versions appear green and newer
+  package revisions remain actionable.
+
+### Changed
+
+- Mark versions older than Installed in both latest columns with a cyan asterisk,
+  explained in the legend as informational with no downgrade offered.
+- Simplify the summary to Name, Installed, Latest Cooldown, Age, and Latest Released.
+  Retain the checked candidate's age and existing current/unavailable dash behavior.
+  Preserve the newest release as information separately from cooldown-safe update
+  targets, including when the safe version is already installed. Show Latest
+  Released in green when it matches the installed version.
+- Move update/install commands and release-note links to the read-only `[D]`
+  details option. Keep this option available in normal interactive runs even when
+  no actions are available.
+- Print each tool's install/update command when its action starts, including in
+  Force mode.
+- Read informational Latest Released versions for pnpm, npm-check-updates, and
+  GitHub Copilot CLI from upstream GitHub releases, independently of registry
+  mirrors. Keep cooldown-safe targets and update commands on the configured registry.
+
 ## [2.4.0] - 2026-09-23
 
 ### Added

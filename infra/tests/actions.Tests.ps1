@@ -87,6 +87,77 @@ Describe 'Action planning' {
     }
 }
 
+Describe 'Read-only details menu' {
+    BeforeEach {
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
+        $script:MenuResponses = [System.Collections.Generic.Queue[string]]::new()
+        $script:MenuResponses.Enqueue(' d ')
+        $script:MenuResponses.Enqueue('0')
+        Mock Read-Host { $script:MenuResponses.Dequeue() }
+        Mock Write-Host {}
+        Mock Show-ToolDetails {}
+        Mock Invoke-ActionCommand { throw 'Details must not execute actions' }
+    }
+
+    It 'offers alphabetical details with no executable actions' {
+        Invoke-ActionMenu
+        Assert-MockCalled Show-ToolDetails 1 -Scope It
+        Assert-MockCalled Read-Host 2 -Scope It
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It
+    }
+
+    It 'separates Exit and details with exactly one blank line' {
+        $script:MenuLines = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { param($Object) $script:MenuLines.Add([string]$Object) }
+        $script:MenuResponses.Clear()
+        $script:MenuResponses.Enqueue('0')
+        Invoke-ActionMenu
+        $exitIndex = $script:MenuLines.IndexOf('  [0] Exit')
+        $exitIndex | Should BeGreaterThan -1
+        $script:MenuLines[$exitIndex + 1] | Should Be ''
+        $script:MenuLines[$exitIndex + 2] | Should Be '  [D] Update / Install commands and Release Notes'
+    }
+
+    It 'preserves numeric actions and approval-only restrictions after viewing details' {
+        $results.AvailableUpdates = @(
+            @{ Name = 'Example'; Command = 'example update'; Type = 'direct' },
+            @{ Name = 'npm registry'; Type = 'registry'; RegistryKey = 'npm' }
+        )
+        $script:MenuResponses.Clear()
+        foreach ($response in @('D', '1', '0')) { $script:MenuResponses.Enqueue($response) }
+        Mock Invoke-ActionCommand { @{ ExitCode = 0 } }
+        Mock Complete-RegistryExecution { $true }
+        Mock Show-ResultsTable {}
+        Invoke-ActionMenu -ApprovalOnly
+        Assert-MockCalled Show-ToolDetails 1 -Scope It
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Type -eq 'registry' }
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It -ParameterFilter { $Action.Type -eq 'direct' }
+    }
+
+    It 'prints the tool name and exact command for an interactive <Kind> action' -TestCases @(
+        @{ Kind = 'install' }, @{ Kind = 'update' }
+    ) {
+        param($Kind)
+        if ($Kind -eq 'install') {
+            $results.NotInstalled = @([pscustomobject]@{
+                Name = 'Example CLI'
+                InstallCommands = @{ $script:PlatformKey = 'example install --version 1.1.0' }
+            })
+        } else {
+            $results.AvailableUpdates = @(@{ Name = 'Example CLI'; Command = 'example update --version 1.1.0'; Type = 'direct' })
+        }
+        $script:MenuResponses.Clear()
+        $script:MenuResponses.Enqueue('1')
+        Mock Invoke-ActionCommand { @{ Output = ''; ExitCode = 0 } }
+        Mock Complete-InstallExecution { $true }
+        Mock Complete-UpdateExecution { $true }
+        Mock Show-ResultsTable {}
+        Invoke-ActionMenu
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter { $Object -eq "Executing Example CLI: example $Kind --version 1.1.0" }
+    }
+}
+
 Describe 'Action execution' {
     BeforeEach {
         $results.UpdateFailed = @()
@@ -197,11 +268,13 @@ Describe 'Action execution' {
 
     It 'completes an ordinary force-mode update through a background job' {
         $update = @{ Name = 'Synthetic CLI'; Command = "Write-Output 'job completed'"; Type = 'direct' }
+        Mock Write-Host {}
 
         Invoke-ParallelUpdates -Updates @($update)
 
         $results.UpdateFailed.Count | Should Be 0
         $results.Errors.Count | Should Be 0
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter { $Object -eq "Starting Synthetic CLI: Write-Output 'job completed'" }
     }
 
     It 'records a nonzero background update command as failed' {
@@ -214,6 +287,7 @@ Describe 'Action execution' {
     }
 
     It 'uses shared dispatch and completion for direct force-mode updates' {
+        Mock Write-Host {}
         Mock Invoke-ActionCommand { @{ Output = 'done'; ExitCode = 0 } }
         Mock Complete-UpdateExecution { $true }
         $update = @{ Name = 'NodeJS'; ToolId = 'nodejs'; Command = 'Node.js MSI'; Type = 'node-direct'; Executor = 'tool'; EntryPoint = 'Invoke-ToolUpdate'; Arguments = @{ Version = '26.8.1' }; ExecutionMode = 'CurrentSession' }
@@ -222,6 +296,7 @@ Describe 'Action execution' {
 
         Assert-MockCalled Invoke-ActionCommand 1 -ParameterFilter { $Action.Name -eq 'NodeJS' }
         Assert-MockCalled Complete-UpdateExecution 1 -ParameterFilter { $Action.Name -eq 'NodeJS' -and $Execution.ExitCode -eq 0 }
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter { $Object -eq 'Starting NodeJS: Node.js MSI' }
     }
 
     It 'excludes registry and cleanup actions in force mode' {

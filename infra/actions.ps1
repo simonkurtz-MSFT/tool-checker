@@ -236,7 +236,7 @@ function Invoke-ActionMenu {
     param([switch]$RegistryOnly, [switch]$ApprovalOnly)
 
     $actions = @(Get-AvailableActions -RegistryOnly:$RegistryOnly -ApprovalOnly:$ApprovalOnly)
-    if ($actions.Count -eq 0) { return }
+    if ($actions.Count -eq 0 -and ($RegistryOnly -or $ApprovalOnly -or $SkipUpdate)) { return }
 
     $completedIdx = @()
     while ($true) {
@@ -244,7 +244,7 @@ function Invoke-ActionMenu {
         for ($i = 0; $i -lt $actions.Count; $i++) {
             if ($i -notin $completedIdx) { $remaining += @{ Idx = $i; Action = $actions[$i] } }
         }
-        if ($remaining.Count -eq 0) {
+        if ($remaining.Count -eq 0 -and $completedIdx.Count -gt 0) {
             Write-Host "All actions completed.`n"
             break
         }
@@ -252,6 +252,8 @@ function Invoke-ActionMenu {
         Write-Header "Actions"
         Write-Host ""
         Write-Host "  [0] Exit"
+        Write-Host ""
+        Write-Host "  [D] Update / Install commands and Release Notes"
         Write-Host "  ----------------"
         for ($i = 0; $i -lt $remaining.Count; $i++) {
             if ($remaining[$i].Action.Name -in $results.UpdateFailed) {
@@ -266,6 +268,10 @@ function Invoke-ActionMenu {
         Write-Host ""
         
         if ($response -eq "0" -or [string]::IsNullOrWhiteSpace($response)) { break }
+        if ($response.Trim() -eq 'D') {
+            Show-ToolDetails
+            continue
+        }
 
         $selected = @()
         $response -split ',' | ForEach-Object {
@@ -289,7 +295,7 @@ function Invoke-ActionMenu {
             if ($a.Type -eq 'registry') {
                 Write-Host "Executing approved registry alignment: $($a.Name)"
             } else {
-                Write-Host "Executing: $($a.Command)"
+                Write-Host "Executing $($a.Name): $($a.Command)"
             }
             try {
                 $execution = Invoke-ActionCommand -Action $a
@@ -341,16 +347,15 @@ function Invoke-ParallelUpdates {
     $workerDefinitions = $null
     foreach ($u in $Updates) {
         $u = Resolve-ActionMetadata -Action $u
+        Write-Host "Starting $($u.Name): $($u.Command)"
         # Some installers must remain in this process; both modes share completion logic.
         if ($u.ExecutionMode -eq 'CurrentSession') {
-            Write-Host "Starting: $($u.Name)"
             $execution = Invoke-ActionCommand -Action $u
             Complete-UpdateExecution -Action $u -Execution $execution -Refresh | Out-Null
             Write-Host ''
             continue
         }
 
-        Write-Host "Starting: $($u.Name)"
         if (-not $workerDefinitions) { $workerDefinitions = Get-ActionWorkerDefinitions }
         $jobs += @{
             Job = Start-Job -ScriptBlock {

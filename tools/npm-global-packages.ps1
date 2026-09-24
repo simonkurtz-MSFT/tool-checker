@@ -73,8 +73,8 @@ function Test-Tool {
                 $pkg.Latest = Get-LatestProductionNpmVersion -ApiData $metadata
             }
             if (-not $pkg.Latest) { continue }
-            $minimumVersion = if ($pkg.Current -and $pkg.Current -ne '?') { $pkg.Current } else { $null }
-            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MinimumVersion $minimumVersion -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly
+            $pkg.LatestReleased = $pkg.Latest
+            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly
             if ($release) {
                 $pkg.Latest = $release.Version
             } else {
@@ -83,6 +83,7 @@ function Test-Tool {
             $pkg.PublishedAt = $release.PublishedAt
             $pkg.AgeDays = $release.AgeDays
             $pkg.Installable = $release -and $release.Installable
+            $pkg.LatestCooldown = if ($pkg.Installable) { $pkg.Latest } else { $null }
             if ($release -and -not $release.Installable) {
                 $results.MaturityBlockedUpdates += @{
                     Name = $pkg.Name
@@ -93,7 +94,7 @@ function Test-Tool {
         }
 
         $installablePackages = @((Get-ToolState 'npm-global-packages').Packages | Where-Object {
-            $_.Latest -and $_.Latest -ne "-" -and $_.Current -ne $_.Latest -and $_.Installable
+            $_.Installable -and ($_.Current -eq '?' -or (Test-UpdateAvailable -InstalledVersion $_.Current -LatestVersion $_.Latest -ToolName "npm: $($_.Name)"))
         })
         $actionable = $installablePackages.Count -gt 0
         foreach ($package in (Get-ToolState 'npm-global-packages').Packages) {
@@ -106,11 +107,12 @@ function Test-Tool {
         if ($outputString -match "All global packages are up-to-date") {
             Write-Success "All global npm packages are up to date"
         } elseif ((Get-ToolState 'npm-global-packages').Packages.Count -gt 0) {
-            Write-Warning "Global package updates available:"
+            Write-Host "  Global package release information:"
             foreach ($pkg in (Get-ToolState 'npm-global-packages').Packages) {
-                $status = if ($pkg.Installable) { "installable" } else { "FYI; $($script:ReleaseCooldownDays)-day cooldown" }
+                $status = if ($pkg -in $installablePackages) { "installable update" } else { "FYI only; no installable update" }
                 $age = if ($null -ne $pkg.AgeDays) { "$($pkg.AgeDays) days old" } else { "age unknown" }
-                Write-Host "    $($pkg.Name)  Installed: $($pkg.Current)  Latest: $($pkg.Latest)  ($age; $status)"
+                $safeVersion = if ($pkg.LatestCooldown) { $pkg.LatestCooldown } else { '-' }
+                Write-Host "    $($pkg.Name)  Installed: $($pkg.Current)  Latest Cooldown: $safeVersion  Latest Released: $($pkg.LatestReleased)  ($age; $status)"
             }
 
             if ($actionable) {

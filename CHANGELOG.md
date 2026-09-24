@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-24
+
 ### Fixed
 
 - Compare Git for Windows tags and numeric package versions through Git's tool-owned
@@ -228,7 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.4.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.5.0...HEAD
+[2.5.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.4.0...2.5.0
 [2.4.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.3.0...2.4.0
 [2.3.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.1.0...2.2.0

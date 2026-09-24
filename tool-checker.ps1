@@ -30,7 +30,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '2.4.0'
+$script:ToolCheckerVersion = '2.5.0'
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 if ($Version) {

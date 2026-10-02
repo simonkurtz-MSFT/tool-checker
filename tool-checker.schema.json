@@ -111,6 +111,14 @@
         "ApiVersionRegex": { "type": "string", "description": "PowerShell/.NET regex with the API tag version in capture group 1." },
         "UpdateParseRegex": { "type": "string", "description": "PowerShell/.NET regex extracting an available release from version-command output." },
         "NpmPackageName": { "$ref": "#/definitions/nonBlankString" },
+        "GitHubTagsApiUrl": {
+          "$ref": "#/definitions/uri",
+          "description": "GitHub tags endpoint used by tool-specific release checks."
+        },
+        "GitHubCloneUrl": {
+          "$ref": "#/definitions/uri",
+          "description": "Git URL used by tool-specific source builds."
+        },
         "PackageName": { "$ref": "#/definitions/nonBlankString" },
         "WingetId": { "$ref": "#/definitions/nonBlankString" },
         "UpdateType": { "$ref": "#/definitions/nonBlankString", "description": "Owner-defined update classification, not a fixed list of tool names." },

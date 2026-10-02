@@ -337,7 +337,7 @@ Describe 'Tool catalog selection' {
     It 'selects the complete catalog when no IDs are requested' {
         $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
 
-        $selection.CatalogToolIds.Count | Should Be 19
+        $selection.CatalogToolIds.Count | Should Be 20
         $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
     }
 
@@ -390,6 +390,7 @@ Describe 'Cooldown configuration' {
         New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
         Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'infra') -Destination $cooldownDirectory -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'tools') -Destination $cooldownDirectory -Recurse -Force
         $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
         $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')

@@ -296,6 +296,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `ApiVersionProperty`                                          | No                    | Dot-separated path to the API version, for example `info.version`; takes precedence over tag parsing.                                       |
 | `ApiVersionRegex`                                             | No                    | Regex whose first capture group extracts the version from an API `tag_name`.                                                                |
 | `ApiUrl`                                                      | Yes for update checks | Endpoint used to determine the latest release.                                                                                              |
+| `GitHubTagsApiUrl`, `GitHubCloneUrl`                          | No                    | Optional GitHub tag lookup and clone source used by tool-specific checks/updaters.                                                           |
 | `WingetId`                                                    | WinGet updates        | Exact package ID passed to `winget show --id ... -e` to determine the latest installable catalog version.                                   |
 | `ProductionReleasesOnly`                                      | No                    | Accepts optional `v` + `major.minor.patch[.0]`, without a suffix. Defaults to `true`; `false` permits prereleases.                          |
 | `UpdateParseRegex`                                            | No                    | Extracts an available version from a self-reporting version command instead of the API result.                                              |
@@ -328,6 +329,8 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 ### npm packages
 
 For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest`, provide `NpmPackageName`, and declare `PackageManagerFiles: ["npm.ps1"]`, `ReleasePackageManager: "npm.ps1"`, and `ApiVersionPackageManager: "npm.ps1"`. Set `InstallOutcomePackageManager` and `UpdateOutcomePackageManager` to `npm.ps1` for npm-specific diagnostics. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`. Numeric revision suffixes such as GitHub Copilot CLI's `1.0.83-2` are compared numerically when prereleases are enabled.
+
+Pi is a special case: Tool Checker compares the configured npm registry's `@earendil-works/pi-coding-agent` version with production tags from `earendil-works/pi`. If GitHub is ahead of the npm proxy, the update action clones that exact tag, installs dependencies using npm's configured registry, builds the monorepo, and links the resulting CLI. The build is staged in a versioned directory and verified before Pi is linked. If npm is ahead, the pinned npm version is installed through the configured registry instead.
 
 The catalog defines the npm release cooldown at the top level, alongside `tools`:
 

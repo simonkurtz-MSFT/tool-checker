@@ -181,7 +181,7 @@ The first-run setup creates `.env` from [`.env.example`](.env.example) and sets 
 `TOOL_CHECKER_TOOLS` accepts only the IDs defined in [`tool-checker.json`](tool-checker.json). Unknown IDs stop the run before tool checks start. The current catalog IDs are:
 
 ```text
-nodejs, npm-check-updates, npm-global-packages, pnpm, deno, uv
+nodejs, npm-check-updates, npm-global-packages, pi, pnpm, deno, uv
 azure-cli, azure-dev-cli, azure-cli-extensions, azure-bicep-cli
 dotnet-sdk, python-install-manager, python
 git, github-cli, github-copilot-cli, ripgrep, wsl, powershell

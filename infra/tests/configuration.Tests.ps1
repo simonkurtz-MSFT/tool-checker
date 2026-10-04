@@ -337,7 +337,7 @@ Describe 'Tool catalog selection' {
     It 'selects the complete catalog when no IDs are requested' {
         $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
 
-        $selection.CatalogToolIds.Count | Should Be 19
+        $selection.CatalogToolIds.Count | Should Be 20
         $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
     }
 

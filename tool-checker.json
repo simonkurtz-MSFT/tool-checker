@@ -382,6 +382,35 @@
         "Linux (arm64)": "npm install -g @github/copilot@latest --loglevel=error"
       }
     },
+    "pi": {
+      "InstallationsPackageManager": "npm.ps1",
+      "InstallOutcomePackageManager": "npm.ps1",
+      "UpdateOutcomePackageManager": "npm.ps1",
+      "InstalledVersionPackageManager": "npm.ps1",
+      "PackageManagerFiles": ["npm.ps1"],
+      "ReleasePackageManager": "npm.ps1",
+      "ApiVersionPackageManager": "npm.ps1",
+      "Name": "Pi",
+      "enabled": true,
+      "CheckType": "standard",
+      "ProductionReleasesOnly": true,
+      "Command": "pi",
+      "VersionFlag": "--version",
+      "VersionParseRegex": "^v?(\\d+\\.\\d+\\.\\d+(?:\\.0)?)$",
+      "VersionExtractor": "npmDistTagLatest",
+      "NpmPackageName": "@earendil-works/pi-coding-agent",
+      "UpdateType": "npm-global",
+      "UpdateCommand": "npm install -g @earendil-works/pi-coding-agent@latest --loglevel=error",
+      "ReleaseNotesUrl": "https://github.com/earendil-works/pi/releases",
+      "LatestReleaseApiUrl": "https://api.github.com/repos/earendil-works/pi/releases/latest",
+      "ApiUrl": "https://registry.npmjs.org/%40earendil-works%2Fpi-coding-agent",
+      "InstallCommands": {
+        "Windows (amd64)": "npm install -g @earendil-works/pi-coding-agent@latest --loglevel=error",
+        "Windows (arm64)": "npm install -g @earendil-works/pi-coding-agent@latest --loglevel=error",
+        "Linux (amd64)": "npm install -g @earendil-works/pi-coding-agent@latest --loglevel=error",
+        "Linux (arm64)": "npm install -g @earendil-works/pi-coding-agent@latest --loglevel=error"
+      }
+    },
     "ripgrep": {
       "WindowsPackageManagerFiles": ["winget.ps1"],
       "WindowsReleasePackageManager": "winget.ps1",

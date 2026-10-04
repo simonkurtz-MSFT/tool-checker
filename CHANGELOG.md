@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add Pi (pi.dev) inventory and npm updates through the configured registry, pinned
+  to cooldown-safe production releases. Show upstream GitHub releases separately
+  for information without a Git clone/build fallback.
+
 ## [2.5.0] - 2026-09-24
 
 ### Fixed

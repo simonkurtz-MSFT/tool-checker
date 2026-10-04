@@ -29,7 +29,7 @@ source reports an older version, and no downgrade is offered.
 For sources without a cooldown policy, both latest columns show the same checked
 release. Existing source, platform, and release-channel restrictions still apply.
 
-For pnpm, npm-check-updates (`ncu`), and GitHub Copilot CLI, **Latest Released**
+For pnpm, npm-check-updates (`ncu`), Pi, and GitHub Copilot CLI, **Latest Released**
 comes from the upstream GitHub release endpoint, independently of the configured
 npm registry or proxy. **Latest Cooldown** and update commands still use versions
 available through that registry and never bypass it. This lets the table show a
@@ -181,7 +181,7 @@ The first-run setup creates `.env` from [`.env.example`](.env.example) and sets 
 `TOOL_CHECKER_TOOLS` accepts only the IDs defined in [`tool-checker.json`](tool-checker.json). Unknown IDs stop the run before tool checks start. The current catalog IDs are:
 
 ```text
-nodejs, npm-check-updates, npm-global-packages, pnpm, deno, uv
+nodejs, npm-check-updates, npm-global-packages, pi, pnpm, deno, uv
 azure-cli, azure-dev-cli, azure-cli-extensions, azure-bicep-cli
 dotnet-sdk, python-install-manager, python
 git, github-cli, github-copilot-cli, ripgrep, wsl, powershell
@@ -328,6 +328,12 @@ If the exact architecture is absent, Tool Checker falls back to the first comman
 ### npm packages
 
 For an npm-hosted CLI, set `VersionExtractor` to `npmDistTagLatest`, provide `NpmPackageName`, and declare `PackageManagerFiles: ["npm.ps1"]`, `ReleasePackageManager: "npm.ps1"`, and `ApiVersionPackageManager: "npm.ps1"`. Set `InstallOutcomePackageManager` and `UpdateOutcomePackageManager` to `npm.ps1` for npm-specific diagnostics. Tool Checker uses the user's configured npm registry when possible and pins updates to the version it checked. When `ProductionReleasesOnly` is enabled, a prerelease `latest` tag falls back to the highest published version matching `major.minor.patch`. Numeric revision suffixes such as GitHub Copilot CLI's `1.0.83-2` are compared numerically when prereleases are enabled.
+
+Pi ([pi.dev](https://pi.dev)) uses the `@earendil-works/pi-coding-agent` npm package.
+Its updates are pinned to the newest production version available through the
+configured npm registry that has completed the cooldown. Upstream GitHub releases
+are informational only: Tool Checker never clones or builds Pi from Git to bypass
+the registry or cooldown.
 
 The catalog defines the npm release cooldown at the top level, alongside `tools`:
 

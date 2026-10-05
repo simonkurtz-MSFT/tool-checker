@@ -223,4 +223,101 @@ Describe 'Parallel check orchestration' {
         $results.Updates[1] | Should Be 'Second CLI'
         $results.Errors.Count | Should Be 0
     }
+
+    It 'returns promptly after timing out a check blocked in <BlockingKind>' -TestCases @(
+        @{ BlockingKind = 'managed code' }
+        @{ BlockingKind = 'a native process tree' }
+    ) {
+        param($BlockingKind)
+
+        $results.Tools = @{}
+        $results.Errors = @()
+        $block = if ($BlockingKind -eq 'managed code') {
+            { [System.Threading.Thread]::Sleep(8000) }
+        } else {
+            {
+                $executable = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
+                & (Join-Path $PSHOME $executable) -NoProfile -NonInteractive -Command '[System.Threading.Thread]::Sleep(8000)'
+            }
+        }
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+
+        Invoke-ParallelChecks -Total 2 -TimeoutSec 2 -Checks @(
+            @{ Name = 'Blocked CLI'; Block = $block }
+            @{ Name = 'Healthy CLI'; Block = { $results.Tools['Healthy CLI'] = @{ Installed = '1.0.0'; Latest = '' } } }
+        )
+
+        $clock.Elapsed.TotalSeconds | Should BeLessThan 6
+        $results.Tools['Blocked CLI'].CheckTimedOut | Should Be $true
+        $results.Tools['Healthy CLI'].Installed | Should Be '1.0.0'
+        $results.Errors.Count | Should Be 1
+        $results.Errors[0] | Should Be 'Blocked CLI check timed out after 2s'
+    }
+
+    It 'terminates the owned check process and native descendants and removes temporary files' {
+        $results.Tools = @{}
+        $results.Errors = @()
+        $ownerPath = Join-Path $TestDrive 'owner.txt'
+        $childPath = Join-Path $TestDrive 'child.txt'
+        $directoryPath = Join-Path $TestDrive 'directory.txt'
+        $toolsConfig['TimeoutTest'] = @{
+            OwnerPath = $ownerPath; ChildPath = $childPath; DirectoryPath = $directoryPath
+        }
+        try {
+            Invoke-ParallelChecks -Total 1 -TimeoutSec 3 -Checks @(
+                @{
+                    Name = 'Native CLI'
+                    Block = {
+                        $PID | Set-Content -LiteralPath $toolsConfig.TimeoutTest.OwnerPath
+                        $workerPath = [System.Environment]::GetCommandLineArgs() |
+                            Where-Object { [System.IO.Path]::GetFileName($_) -eq 'worker.ps1' } |
+                            Select-Object -First 1
+                        (Split-Path -Parent $workerPath) | Set-Content -LiteralPath $toolsConfig.TimeoutTest.DirectoryPath
+                        $childPath = $toolsConfig.TimeoutTest.ChildPath.Replace("'", "''")
+                        $command = "`$PID | Set-Content -LiteralPath '$childPath'; [System.Threading.Thread]::Sleep(8000)"
+                        $executable = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
+                        & (Join-Path $PSHOME $executable) -NoProfile -NonInteractive -Command $command
+                    }
+                }
+            )
+
+            $results.Tools['Native CLI'].CheckTimedOut | Should Be $true
+            foreach ($path in @($ownerPath, $childPath)) {
+                Test-Path -LiteralPath $path | Should Be $true
+                $processId = [int](Get-Content -LiteralPath $path)
+                @(Get-Process -Id $processId -ErrorAction SilentlyContinue).Count | Should Be 0
+            }
+            Test-Path -LiteralPath (Get-Content -LiteralPath $directoryPath) | Should Be $false
+        } finally {
+            $toolsConfig.Remove('TimeoutTest')
+            foreach ($path in @($ownerPath, $childPath)) {
+                if (Test-Path -LiteralPath $path) {
+                    $processId = [int](Get-Content -LiteralPath $path)
+                    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+                        Stop-Process -Id $processId -ErrorAction Stop
+                    }
+                }
+
+            }
+        }
+    }
+
+    It 'preserves nonterminating check errors across the process boundary' {
+        $results.Tools = @{}
+        $results.Errors = @()
+
+        Invoke-ParallelChecks -Total 1 -TimeoutSec 5 -Checks @(
+            @{
+                Name = 'Error CLI'
+                Block = {
+                    Microsoft.PowerShell.Utility\Write-Error 'Synthetic worker error' -ErrorAction Continue
+                    $results.Tools['Error CLI'] = @{ Installed = '1.0.0'; Latest = '' }
+                }
+            }
+        )
+
+        $results.Tools['Error CLI'].Installed | Should Be '1.0.0'
+        $results.Errors.Count | Should Be 1
+        $results.Errors[0] | Should Match 'Parallel check error \(job 0\): Synthetic worker error'
+    }
 }

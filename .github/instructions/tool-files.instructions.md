@@ -130,6 +130,9 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   Track check workers immediately after creation; protect pool opening, startup,
   and collection with guaranteed cleanup. Attempt every disposal without masking
   the original failure, and cover the lifecycle with synthetic real-runspace tests.
+  Run checks in owned child processes with cancellable runspace supervisors;
+  terminate the owned process tree and remove temporary serialization files on
+  timeout. Cover blocking managed calls, native descendants, and error transport.
 - Whenever tool-file conventions, helper contracts, loading, worker dependencies,
   or validation practices change, review and update the template and the relevant
   contribution guidance in the same change. Keep these instructions aligned and

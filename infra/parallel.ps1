@@ -50,7 +50,7 @@ function Merge-ParallelCheckResult {
     $results.MaturityBlockedUpdates  += $CheckResult.MaturityBlockedUpdates
 }
 
-function Get-ParallelCheckWorkerScript {
+function Get-ParallelCheckProcessScript {
     {
         param($fnBlock, $checkStr, $progress, $idx,
             $toolsConfig, $SkipUpdate, $PlatformKey, $ReleaseCooldownDays, $ApiRequestTimeout,
@@ -107,6 +107,79 @@ $ColorBlue = $Global:ColorBlue
             AvailableUpdates        = $Global:results.AvailableUpdates
             MaturityBlockedUpdates  = $Global:results.MaturityBlockedUpdates
             UpdateFailed            = $Global:results.UpdateFailed
+        }
+    }
+}
+
+function Get-ParallelCheckWorkerScript {
+    {
+        param($fnBlock, $checkStr, $progress, $idx,
+            $toolsConfig, $SkipUpdate, $PlatformKey, $ReleaseCooldownDays, $ApiRequestTimeout,
+            $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue,
+            $processScript)
+
+        # Runspaces cannot interrupt blocking managed calls or reliably stop native descendants.
+        # Keep the supervisor cancellable and give each check its own process tree.
+        $directory = Join-Path ([System.IO.Path]::GetTempPath()) "tool-checker-$([guid]::NewGuid())"
+        $inputPath = Join-Path $directory 'input.clixml'
+        $outputPath = Join-Path $directory 'output.clixml'
+        $scriptPath = Join-Path $directory 'worker.ps1'
+        $process = $null
+        try {
+            $null = [System.IO.Directory]::CreateDirectory($directory)
+            @{
+                Script = $processScript
+                Arguments = @($fnBlock, $checkStr, $progress, $idx,
+                    $toolsConfig, $SkipUpdate, $PlatformKey, $ReleaseCooldownDays, $ApiRequestTimeout,
+                    $ColorReset, $ColorGreen, $ColorYellow, $ColorRed, $ColorCyan, $ColorBlue)
+            } | Export-Clixml -LiteralPath $inputPath -Depth 100
+            @'
+param($InputPath, $OutputPath)
+$inputData = Import-Clixml -LiteralPath $InputPath -ErrorAction Stop
+$worker = [scriptblock]::Create($inputData.Script)
+$workerArguments = $inputData.Arguments
+$workerOutput = @(& $worker @workerArguments 2>&1)
+$workerResults = @($workerOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+foreach ($workerError in $workerOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) {
+    $workerResults[0].Errors += "Parallel check error (job $($workerArguments[3])): $workerError"
+}
+$workerResults | Export-Clixml -LiteralPath $OutputPath -Depth 100 -ErrorAction Stop
+'@ | Set-Content -LiteralPath $scriptPath
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $executable = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
+            $startInfo.FileName = Join-Path $PSHOME $executable
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $scriptPath, $inputPath, $outputPath)) {
+                $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($startInfo)
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            while (-not $process.HasExited) { Start-Sleep -Milliseconds 50 }
+            if ($process.ExitCode -ne 0) {
+                throw "Check process exited with code $($process.ExitCode): $($stderr.GetAwaiter().GetResult()) $($stdout.GetAwaiter().GetResult())"
+            }
+            Import-Clixml -LiteralPath $outputPath
+        } finally {
+            try {
+                if ($null -ne $process) {
+                    try {
+                        if (-not $process.HasExited) {
+                            $process.Kill($true)
+                            $process.WaitForExit()
+                        }
+                    } finally { $process.Dispose() }
+                }
+            } finally {
+                foreach ($path in @($inputPath, $outputPath, $scriptPath)) {
+                    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -ErrorAction Stop }
+                }
+                if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -ErrorAction Stop }
+            }
         }
     }
 }
@@ -196,6 +269,7 @@ function Invoke-ParallelChecks {
             [void]$ps.AddArgument($snap_ColorRed)
             [void]$ps.AddArgument($snap_ColorCyan)
             [void]$ps.AddArgument($snap_ColorBlue)
+            [void]$ps.AddArgument((Get-ParallelCheckProcessScript).ToString())
 
             $runningJobs += @{ PS = $ps; Handle = $ps.BeginInvoke(); Index = $idx; StartTime = [System.Diagnostics.Stopwatch]::StartNew(); Name = $toolName }
         }

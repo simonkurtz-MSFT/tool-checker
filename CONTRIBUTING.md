@@ -301,10 +301,16 @@ action planning/execution in `infra/actions.ps1`, and check workers in
 
 Check-worker resources must be tracked as soon as they are created, before setup
 or invocation can fail. Keep pool opening, worker startup, and result collection
-inside guaranteed cleanup. Stop and dispose outstanding workers, close and dispose
+inside guaranteed cleanup. Each runspace supervises an isolated PowerShell check
+process using serialized input and results. Keep the supervisor cancellable; on
+timeout, terminate only its owned process tree before disposing it and removing
+its temporary files. Do not execute checks directly in supervisor runspaces:
+blocking managed calls and native descendants can prevent `PowerShell.Stop()`
+from returning. Stop and dispose outstanding workers, close and dispose
 the pool, and restore the cursor even on exceptions. A cleanup failure must not
 skip remaining resources or replace the original operation error. Validate success,
-timeout, startup, collection, and cleanup failures with synthetic workers in
+timeout (including blocking managed calls and native process trees), startup,
+collection, and cleanup failures with synthetic workers in
 [infra/tests/parallel.Tests.ps1](infra/tests/parallel.Tests.ps1).
 
 Declare shared dependencies with `PackageManagerFiles` and `WindowsPackageManagerFiles`.

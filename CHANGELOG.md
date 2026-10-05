@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-05
+
 ### Added
 
 - Add Pi (pi.dev) inventory and npm updates through the configured registry, pinned
   to cooldown-safe production releases. Show upstream GitHub releases separately
   for information without a Git clone/build fallback.
+
+### Fixed
+
+- Stop timed-out checks promptly, including checks blocked in managed code or native
+  process trees, while preserving nonterminating errors from parallel workers.
 
 ## [2.5.0] - 2026-09-24
 
@@ -236,7 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.5.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.6.0...HEAD
+[2.6.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.4.0...2.5.0
 [2.4.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.3.0...2.4.0
 [2.3.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.2.0...2.3.0

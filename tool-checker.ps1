@@ -30,7 +30,7 @@ param(
     [switch]$Version
 )
 
-$script:ToolCheckerVersion = '2.6.0'
+$script:ToolCheckerVersion = '2.6.1'
 $script:ApiRequestTimeout = $Timeout
 $script:IsDotSourced = $MyInvocation.InvocationName -eq '.'
 if ($Version) {
@@ -89,10 +89,13 @@ $script:PackageManagerDefinitions = Read-DefinitionRegistry -Files @(Get-Package
 . ([scriptblock]::Create((@(Get-SharedPackageManagerDefinitions) -join "`n`n")))
 Initialize-RegistryContext -ResolveEndpoints:(-not $script:IsDotSourced)
 
-function Main {
-    # Checks produce inventory/action plans; rendering does not decide eligibility.
-    Assert-ToolConfigurations
-    Show-StartupInformation -IsElevated (Test-IsAdministrator)
+function Invoke-CheckWorkflow {
+    param([switch]$ResetResults)
+
+    if ($ResetResults) {
+        $script:results = New-ToolCheckResults
+    }
+
     Test-RegistryConfiguration -EnvironmentConfig $script:RegistryEnvironment
     Show-RegistryMetadata
 
@@ -101,6 +104,13 @@ function Main {
     Invoke-ParallelChecks -Checks $checks -Total $checks.Count -TimeoutSec $Timeout
     $availableUpdateNames = @($results.Updates | Where-Object { $_ -notin $results.MaturityBlockedUpdates.Name })
     Show-ResultsSummary -AvailableUpdateNames $availableUpdateNames
+}
+
+function Main {
+    # Checks produce inventory/action plans; rendering does not decide eligibility.
+    Assert-ToolConfigurations
+    Show-StartupInformation -IsElevated (Test-IsAdministrator)
+    Invoke-CheckWorkflow
 
     if (@(Get-AvailableActions).Count -eq 0 -and ($Force -or $SkipUpdate)) {
         Write-Host "`nNothing to do. Exiting.`n"

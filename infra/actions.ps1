@@ -254,6 +254,7 @@ function Invoke-ActionMenu {
         Write-Host "  [0] Exit"
         Write-Host ""
         Write-Host "  [D] Update / Install commands and Release Notes"
+        Write-Host "  [R] Re-check"
         Write-Host "  ----------------"
         for ($i = 0; $i -lt $remaining.Count; $i++) {
             if ($remaining[$i].Action.Name -in $results.UpdateFailed) {
@@ -268,8 +269,15 @@ function Invoke-ActionMenu {
         Write-Host ""
         
         if ($response -eq "0" -or [string]::IsNullOrWhiteSpace($response)) { break }
-        if ($response.Trim() -eq 'D') {
+        $normalizedResponse = $response.Trim()
+        if ($normalizedResponse -eq 'D') {
             Show-ToolDetails
+            continue
+        }
+        if ($normalizedResponse -eq 'R') {
+            Invoke-CheckWorkflow -ResetResults
+            $actions = @(Get-AvailableActions -RegistryOnly:$RegistryOnly -ApprovalOnly:$ApprovalOnly)
+            $completedIdx = @()
             continue
         }
 

@@ -97,6 +97,7 @@ Describe 'Read-only details menu' {
         Mock Read-Host { $script:MenuResponses.Dequeue() }
         Mock Write-Host {}
         Mock Show-ToolDetails {}
+        Mock Invoke-CheckWorkflow {}
         Mock Invoke-ActionCommand { throw 'Details must not execute actions' }
     }
 
@@ -117,6 +118,25 @@ Describe 'Read-only details menu' {
         $exitIndex | Should BeGreaterThan -1
         $script:MenuLines[$exitIndex + 1] | Should Be ''
         $script:MenuLines[$exitIndex + 2] | Should Be '  [D] Update / Install commands and Release Notes'
+        $script:MenuLines[$exitIndex + 3] | Should Be '  [R] Re-check'
+    }
+
+    It 're-checks tools and rebuilds actions from fresh results' {
+        $results.AvailableUpdates = @(@{ Name = 'Old CLI'; Command = 'old update'; Type = 'direct' })
+        $script:MenuResponses.Clear()
+        foreach ($response in @(' R ', '1')) { $script:MenuResponses.Enqueue($response) }
+        Mock Invoke-CheckWorkflow {
+            $results.AvailableUpdates = @(@{ Name = 'Fresh CLI'; Command = 'fresh update'; Type = 'direct' })
+        }
+        Mock Invoke-ActionCommand { @{ ExitCode = 0 } }
+        Mock Complete-UpdateExecution { $true }
+        Mock Show-ResultsTable {}
+
+        Invoke-ActionMenu
+
+        Assert-MockCalled Invoke-CheckWorkflow 1 -Scope It -ParameterFilter { $ResetResults }
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Name -eq 'Fresh CLI' }
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It -ParameterFilter { $Action.Name -eq 'Old CLI' }
     }
 
     It 'preserves numeric actions and approval-only restrictions after viewing details' {

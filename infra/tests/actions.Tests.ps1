@@ -94,7 +94,7 @@ Describe 'Read-only details menu' {
         $script:MenuResponses = [System.Collections.Generic.Queue[string]]::new()
         $script:MenuResponses.Enqueue(' d ')
         $script:MenuResponses.Enqueue('0')
-        Mock Read-Host { $script:MenuResponses.Dequeue() }
+        Mock Read-ActionMenuResponse { $script:MenuResponses.Dequeue() }
         Mock Write-Host {}
         Mock Show-ToolDetails {}
         Mock Invoke-CheckWorkflow {}
@@ -104,7 +104,7 @@ Describe 'Read-only details menu' {
     It 'offers alphabetical details with no executable actions' {
         Invoke-ActionMenu
         Assert-MockCalled Show-ToolDetails 1 -Scope It
-        Assert-MockCalled Read-Host 2 -Scope It
+        Assert-MockCalled Read-ActionMenuResponse 2 -Scope It
         Assert-MockCalled Invoke-ActionCommand 0 -Scope It
     }
 
@@ -175,6 +175,33 @@ Describe 'Read-only details menu' {
         Mock Show-ResultsTable {}
         Invoke-ActionMenu
         Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter { $Object -eq "Executing Example CLI: example $Kind --version 1.1.0" }
+    }
+}
+
+Describe 'Action menu input' {
+    It 'returns hotkeys immediately without reading Enter' -TestCases @(
+        @{ Key = 'r'; Expected = 'R' },
+        @{ Key = 'D'; Expected = 'D' },
+        @{ Key = '0'; Expected = '0' }
+    ) {
+        param($Key, $Expected)
+        $script:Keys = [System.Collections.Generic.Queue[object]]::new()
+        $script:Keys.Enqueue([pscustomobject]@{ Character = [char]$Key })
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ReadKey { $script:Keys.Dequeue() } | Should Be $Expected
+
+        $script:Keys.Count | Should Be 0
+    }
+
+    It 'retains Enter-based multi-digit and comma-separated selections' {
+        $script:Keys = [System.Collections.Generic.Queue[object]]::new()
+        foreach ($character in @('1', '2', ',', '3', [char]13)) {
+            $script:Keys.Enqueue([pscustomobject]@{ Character = [char]$character })
+        }
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ReadKey { $script:Keys.Dequeue() } | Should Be '12,3'
     }
 }
 

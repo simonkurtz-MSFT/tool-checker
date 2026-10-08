@@ -232,6 +232,40 @@ function Complete-InstallExecution {
     $false
 }
 
+function Read-ActionMenuResponse {
+    param([scriptblock]$ReadKey = { $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') })
+
+    Write-Host 'Select option: ' -NoNewline
+    $buffer = [System.Text.StringBuilder]::new()
+    while ($true) {
+        $key = & $ReadKey
+        $character = [char]$key.Character
+
+        if ($character -eq [char]3) { throw [System.Management.Automation.PipelineStoppedException]::new() }
+        if ($character -in @([char]13, [char]10)) {
+            Write-Host ''
+            return $buffer.ToString()
+        }
+        if ($character -eq [char]8) {
+            if ($buffer.Length -gt 0) {
+                $buffer.Length--
+                Write-Host "`b `b" -NoNewline
+            }
+            continue
+        }
+
+        $normalizedCharacter = [char]::ToUpperInvariant($character)
+        if ($buffer.Length -eq 0 -and $normalizedCharacter -in @('0', 'D', 'R')) {
+            Write-Host $normalizedCharacter
+            return [string]$normalizedCharacter
+        }
+        if ([char]::IsDigit($character) -or $character -eq ',') {
+            [void]$buffer.Append($character)
+            Write-Host $character -NoNewline
+        }
+    }
+}
+
 function Invoke-ActionMenu {
     param([switch]$RegistryOnly, [switch]$ApprovalOnly)
 
@@ -265,7 +299,7 @@ function Invoke-ActionMenu {
         }
         Write-Host ""
 
-        $response = Read-Host "Select option"
+        $response = Read-ActionMenuResponse
         Write-Host ""
         
         if ($response -eq "0" -or [string]::IsNullOrWhiteSpace($response)) { break }

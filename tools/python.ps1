@@ -9,7 +9,7 @@ function Refresh-ToolStatus {
     $major = ($results.Tools[$ToolName].Installed -split '\.')[0..1] -join '.'
     $out = py --list-paths 2>$null
     foreach ($line in $out) {
-        if ($line.ToString().Trim() -match '^\s*(\d+\.\d+)\[?-?\d*\]?\s+.*Python\s+(\d+\.\d+\.\d+)') {
+        if ($line.ToString().Trim() -match '^\s*(\d+\.\d+)(?:\[[^\]]+\]|-\S+)?\s+.*Python\s+(\d+\.\d+\.\d+)') {
             if ($Matches[1] -eq $major) { $results.Tools[$ToolName].Installed = $Matches[2]; break }
         }
     }
@@ -60,7 +60,7 @@ function ConvertFrom-PythonLauncherList {
 
     @($OutputLines | ForEach-Object {
         $line = $_.ToString()
-        if ($line -match '^\s*(?<Channel>\d+\.\d+)\[?-?\d*\]?\s+(?<Default>\*)?\s*Python\s+(?<Version>\d+\.\d+\.\d+)') {
+        if ($line -match '^\s*(?<Channel>\d+\.\d+)(?:\[[^\]]+\]|-\S+)?\s+(?<Default>\*)?\s*Python\s+(?<Version>\d+\.\d+\.\d+)') {
             [PSCustomObject]@{
                 Channel = $Matches.Channel
                 Version = $Matches.Version

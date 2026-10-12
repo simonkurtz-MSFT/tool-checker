@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-12
+
+### Changed
+
+- Run the `0`, `D`, and `R` action-menu options immediately without requiring
+  Enter, while retaining comma-separated numeric action selection.
+
+### Fixed
+
+- Include Python installations whose manager tags use named architectures such as
+  `[-arm64]`, including Python 3.15, in inventory and post-update refresh results.
+
 ## [2.6.1] - 2026-10-08
 
 ### Added
@@ -250,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.6.1...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.0...HEAD
+[2.7.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.6.1...2.7.0
 [2.6.1]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.6.0...2.6.1
 [2.6.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.4.0...2.5.0

@@ -41,15 +41,19 @@ Describe 'Python launcher planning' {
 
     It 'parses current and legacy installed-list formats' {
         $versions = ConvertFrom-PythonLauncherList -OutputLines @(
+            '3.15[-arm64] * Python 3.15.0 (ARM64)',
             '3.13[-64] * Python 3.13.7',
             '-V:3.12-64 * C:\Python312\python.exe',
             'launcher heading'
         )
-        $versions.Count | Should Be 2
-        $versions[0].Channel | Should Be '3.13'
-        $versions[0].Version | Should Be '3.13.7'
+        $versions.Count | Should Be 3
+        $versions[0].Channel | Should Be '3.15'
+        $versions[0].Version | Should Be '3.15.0'
         $versions[0].IsDefault | Should Be $true
-        $versions[1].Version | Should Be '3.12-64'
+        $versions[1].Channel | Should Be '3.13'
+        $versions[1].Version | Should Be '3.13.7'
+        $versions[1].IsDefault | Should Be $true
+        $versions[2].Version | Should Be '3.12-64'
     }
 
     It 'normalizes legacy online rows and selects same-channel updates' {
@@ -66,17 +70,19 @@ Describe 'Python launcher planning' {
         $available = ConvertFrom-PythonLauncherList -OutputLines @(
             '3.12[-64] Python 3.12.9',
             '3.13[-64] Python 3.13.2',
-            '3.14[-64] Python 3.14.0'
+            '3.14[-64] Python 3.14.0',
+            '3.15[-64] Python 3.15.0'
         ) -Online
         $plan = Get-PythonLauncherUpdatePlan -InstalledVersions $installed -AvailableVersions $available
         $plan.Updates[0].Latest | Should Be '3.12.9'
-        $plan.NewerChannel | Should Be '3.14'
-        $plan.LatestByChannel['3.14'] | Should Be '3.14.0'
+        $plan.NewerChannel | Should Be '3.15'
+        $plan.LatestByChannel['3.15'] | Should Be '3.15.0'
     }
 
     It 'compares conventional release cycles as versions on non-Windows platforms' {
         Mock Test-IsWindowsPlatform { $false }
         Mock Invoke-SafeApiRequest { @(
+            [PSCustomObject]@{ cycle = '3.15'; latest = '3.15.0'; eol = $false },
             [PSCustomObject]@{ cycle = '3.14'; latest = '3.14.1'; eol = $false },
             [PSCustomObject]@{ cycle = '3.10'; latest = '3.10.12'; eol = $false },
             [PSCustomObject]@{ cycle = '3.9'; latest = '3.9.25'; eol = $false }
@@ -90,7 +96,7 @@ Describe 'Python launcher planning' {
 
         $results.Tools['Python 3.10'].Latest | Should Be '3.10.12'
         $results.AvailableUpdates.Count | Should Be 1
-        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -match 'Newer Python major version available: 3\.14 ' }
+        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -match 'Newer Python major version available: 3\.15 ' }
         Assert-MockCalled Write-Warning 0 -Scope It -ParameterFilter { $Text -match 'major version available: 3\.9 ' }
     }
 }
@@ -104,9 +110,9 @@ Describe 'Python version refresh' {
     It 'refreshes a dynamic Python row without a direct catalog entry' {
         Mock Test-CommandExists { $true }
         function py { }
-        Mock py { '3.12[-64] Python 3.12.2' }
-        $results.Tools['Python 3.12'] = @{ ToolId = 'python'; Installed = '3.12.1'; Latest = '3.12.2' }
-        Refresh-ToolVersion -ToolName 'Python 3.12' | Should Be $true
-        $results.Tools['Python 3.12'].Installed | Should Be '3.12.2'
+        Mock py { '3.15[-arm64] * Python 3.15.0 (ARM64)' }
+        $results.Tools['Python 3.15'] = @{ ToolId = 'python'; Installed = '3.15.0rc3'; Latest = '3.15.0' }
+        Refresh-ToolVersion -ToolName 'Python 3.15' | Should Be $true
+        $results.Tools['Python 3.15'].Installed | Should Be '3.15.0'
     }
 }

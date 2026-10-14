@@ -170,6 +170,33 @@ Describe 'Upstream npm tool release information' {
         Assert-MockCalled Invoke-SafeApiRequest 1 -Scope It -ParameterFilter { $Uri -eq $toolsConfig[$ToolName].LatestReleaseApiUrl }
     }
 
+    It 'excludes unstable Copilot builds while retaining numeric-suffixed releases' {
+        $script:UpstreamRegistryFixture = [pscustomobject]@{
+            'dist-tags' = [pscustomobject]@{ latest = '1.0.93-unstable.r38480845218.gd06f261' }
+            versions = [pscustomobject]@{
+                '1.0.92-1' = @{}
+                '1.0.93-unstable.r38480845218.gd06f261' = @{}
+                '1.0.97-unstable.r38449241139.g37ffbf5' = @{}
+            }
+            time = [pscustomobject]@{
+                '1.0.92-1' = [DateTimeOffset]::UtcNow.AddDays(-9).ToString('O')
+                '1.0.93-unstable.r38480845218.gd06f261' = [DateTimeOffset]::UtcNow.AddDays(-9).ToString('O')
+                '1.0.97-unstable.r38449241139.g37ffbf5' = [DateTimeOffset]::UtcNow.AddDays(-9).ToString('O')
+            }
+        }
+
+        $plan = Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-ReleasePlan' -Arguments @{
+            ToolName = 'GitHub Copilot CLI'
+            InstalledVersion = '1.0.91-1'
+        }
+
+        $plan.Latest | Should Be '1.0.92-1'
+        $plan.LatestCooldown | Should Be '1.0.92-1'
+        $plan.Command | Should Match '@github/copilot@1\.0\.92-1 '
+        $plan.Command | Should Not Match 'unstable'
+        $results.Errors.Count | Should Be 0
+    }
+
     It 'retains upstream information when registry metadata is unavailable' {
         $script:UpstreamRegistryFixture = $null
         $plan = Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-ReleasePlan' -Arguments @{ ToolName = 'pnpm'; InstalledVersion = '1.0.0' }

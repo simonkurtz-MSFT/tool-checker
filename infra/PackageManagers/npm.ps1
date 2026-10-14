@@ -17,8 +17,8 @@ function Get-LatestVersion-PackageManager {
     param([object]$ApiData, [string]$ToolName)
     $config = Get-ToolConfiguration -ToolName $ToolName
     $latest = if ($ApiData.'dist-tags') { $ApiData.'dist-tags'.latest } else { $null }
-    if ($config.ProductionReleasesOnly -and -not (Test-IsProductionVersion $latest)) {
-        return Get-LatestProductionNpmVersion -ApiData $ApiData
+    if (-not (Test-IsEligibleNpmVersion -Version $latest -ProductionReleasesOnly $config.ProductionReleasesOnly)) {
+        return Get-LatestEligibleNpmVersion -ApiData $ApiData -ProductionReleasesOnly $config.ProductionReleasesOnly
     }
     $latest
 }
@@ -151,12 +151,25 @@ function Get-NpmVersionReleaseInfo {
 function Get-LatestProductionNpmVersion {
     param([object]$ApiData)
 
+    Get-LatestEligibleNpmVersion -ApiData $ApiData -ProductionReleasesOnly $true
+}
+
+function Test-IsEligibleNpmVersion {
+    param([string]$Version, [bool]$ProductionReleasesOnly = $true)
+
+    -not [string]::IsNullOrWhiteSpace($Version) -and
+        $Version -notmatch '(?i)(?:^|[.-])unstable(?:[.-]|$)' -and
+        (-not $ProductionReleasesOnly -or (Test-IsProductionVersion $Version))
+}
+
+function Get-LatestEligibleNpmVersion {
+    param([object]$ApiData, [bool]$ProductionReleasesOnly = $true)
+
     if (-not $ApiData -or -not $ApiData.versions) { return $null }
-    $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object { Test-IsProductionVersion $_ })
-    $versions |
-        ForEach-Object { $_ -replace '^v', '' } |
-        Sort-Object { [version]$_ } -Descending |
-        Select-Object -First 1
+    $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object {
+        Test-IsEligibleNpmVersion -Version $_ -ProductionReleasesOnly $ProductionReleasesOnly
+    } | ForEach-Object { $_ -replace '^v', '' })
+    Sort-SemanticVersions -Versions $versions -Descending | Select-Object -First 1
 }
 
 function Get-LatestMatureNpmRelease {
@@ -170,8 +183,9 @@ function Get-LatestMatureNpmRelease {
 
     if (-not $ApiData -or -not $ApiData.versions -or -not $ApiData.time) { return $null }
     $versions = @($ApiData.versions.PSObject.Properties.Name | Where-Object {
-        -not $ProductionReleasesOnly -or (Test-IsProductionVersion $_)
-    }) | ForEach-Object { $_ -replace '^v', '' } | Sort-Object { [version](ConvertTo-CanonicalSemanticVersion $_) } -Descending
+        Test-IsEligibleNpmVersion -Version $_ -ProductionReleasesOnly $ProductionReleasesOnly
+    } | ForEach-Object { $_ -replace '^v', '' })
+    $versions = @(Sort-SemanticVersions -Versions $versions -Descending)
 
     foreach ($version in $versions) {
         if ($MinimumVersion -and (Compare-SemanticVersions $MinimumVersion $version) -ne -1) { continue }

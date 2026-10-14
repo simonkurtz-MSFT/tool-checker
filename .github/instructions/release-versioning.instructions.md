@@ -44,7 +44,9 @@ applyTo: "tool-checker.ps1,CHANGELOG.md"
   5. Stage the release files and commit them with `Set <version>`.
   6. Create an annotated `<version>` tag on the release commit and verify it resolves
     to that commit.
-  7. Only when the user explicitly requests publication, push the release commit and
-    tag, then create a non-draft, non-prerelease GitHub release from the tag using the
-    matching changelog section as release notes.
+  7. Treat a direct request to version or release the application as approval to
+    publish. Push the release commit and tag, then create a non-draft,
+    non-prerelease GitHub release from the tag using the matching changelog section
+    as release notes. For a local-only version bump, the user must explicitly request
+    that publication be skipped.
   8. Verify the remote tag and GitHub release, then report their URLs.

@@ -73,6 +73,26 @@ Describe 'Configuration snapshots' {
         Set-Content -LiteralPath $fixtureEnv -Value ''
     }
 
+    It 'preserves unattended booleans without converting explicit false values' {
+        $catalog.tools.alpha.InstallUnattended = $true
+        $catalog.tools.alpha.WindowsInstallUnattended = $false
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        $snapshot = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv
+        $snapshot.ToolsConfiguration['Alpha CLI'].InstallUnattended | Should Be $true
+        $snapshot.ToolsConfiguration['Alpha CLI'].WindowsInstallUnattended | Should Be $false
+    }
+
+    It 'rejects non-boolean <Property> at runtime' -TestCases @(
+        @{ Property = 'InstallUnattended' }, @{ Property = 'UpdateUnattended' },
+        @{ Property = 'WindowsInstallUnattended' }, @{ Property = 'WindowsUpdateUnattended' }
+    ) {
+        param($Property)
+        $catalog.tools.alpha[$Property] = 'false'
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        { Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv } |
+            Should Throw "Tool 'Alpha CLI' property '$Property' must be a boolean."
+    }
+
     It 'reads configuration standalone without loading the main script or tool definitions' {
         $session = [powershell]::Create()
         try {
@@ -390,6 +410,7 @@ Describe 'Cooldown configuration' {
         New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
         Copy-Item -LiteralPath $scriptPath -Destination $cooldownDirectory
         Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'infra') -Destination $cooldownDirectory -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'tools') -Destination $cooldownDirectory -Recurse -Force
         $cooldownCatalog = Get-Content (Join-Path (Split-Path -Parent $scriptPath) 'tool-checker.json') -Raw | ConvertFrom-Json -AsHashtable
         $cooldownCatalog.tools = @{ git = $cooldownCatalog.tools.git }
         $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')

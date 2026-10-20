@@ -12,8 +12,9 @@ Describe 'Generic architecture contracts' {
         $source | Should Not Match '(?i)npm|winget|dotnet|nodejs|python|uv\b'
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
         $functions = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] })
-        $functions.Count | Should Be 1
-        $functions[0].Name | Should Be 'Main'
+        $functions.Count | Should Be 2
+        $functions[0].Name | Should Be 'Invoke-CheckWorkflow'
+        $functions[1].Name | Should Be 'Main'
     }
 
     It 'keeps product names out of generic <File> infrastructure' -TestCases @(
@@ -95,7 +96,7 @@ Describe 'Generic architecture contracts' {
     }
 
     It 'serializes selected package manager decisions and action metadata into check workers' {
-        $toolsConfig = @{ Example = @{ Id = 'example'; Enabled = $true; UpdateExecutor = 'synthetic.ps1' } }
+        $toolsConfig = @{ Example = @{ Id = 'example'; Enabled = $true; UpdateExecutor = 'synthetic.ps1'; UpdateUnattended = $true } }
         $script:PackageManagerDefinitions = @{
             'synthetic.ps1' = @{ 'Get-LatestVersion-PackageManager' = 'function Get-LatestVersion-PackageManager { "2.0.0" }' }
         }
@@ -111,6 +112,7 @@ Describe 'Generic architecture contracts' {
         $results.Tools.Example.Latest | Should Be '2.0.0'
         $results.AvailableUpdates[0].Executor | Should Be 'synthetic.ps1'
         $results.AvailableUpdates[0].ToolId | Should Be 'example'
+        $results.AvailableUpdates[0].Unattended | Should Be $true
     }
 
     It 'does not flatten compound commands in the WinGet executor' {

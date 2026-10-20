@@ -48,6 +48,14 @@ even when no actions exist; check-only and Force runs do not gain an extra promp
 When an install/update action starts, the console prints the tool name and its
 command in both interactive and Force mode.
 
+When at least two runnable installs or updates remain, select **[A] Install /
+Update all** to run them sequentially, with unattended operations first and
+potentially interactive operations last. Catalog order is preserved within each
+group. Failed actions remain available to retry; the batch continues with the
+next action. Registry alignment, duplicate cleanup, and missing platform commands
+are excluded. Numeric selections retain their requested order. This does not
+change the parallel, update-only behavior of `-Force`.
+
 The included configuration checks:
 
 - Node.js and global npm packages
@@ -303,6 +311,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `UpdateCommand`                                               | Yes for updates       | PowerShell command executed to update the tool.                                                                                             |
 | `WindowsUpdateCommand`                                        | No                    | Windows-only override for `UpdateCommand`.                                                                                                  |
 | `InstallCommands`                                             | No                    | Platform-specific commands offered when the tool is missing.                                                                                |
+| `InstallUnattended`, `UpdateUnattended`                       | No                    | Boolean ordering hints for bulk actions; omitted means `false`. Supports `Windows` prefix overrides, including explicit `false`. |
 | `ReleaseNotesUrl`                                             | No                    | Link displayed when an update is actionable.                                                                                                |
 | `ToolFile`                                                    | No for standard tools | Filename under `tools/`. Required for `custom` checks (must define `Test-Tool`); a loaded `Refresh-ToolStatus` overrides standard refresh.  |
 | `PackageManagerFiles`, `WindowsPackageManagerFiles`           | No                    | Explicit filenames under `infra/PackageManagers/`, loaded only for selected tools and applicable platforms.                                 |

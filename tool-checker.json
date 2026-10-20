@@ -5,6 +5,8 @@
   },
   "tools": {
     "nodejs": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -28,6 +30,8 @@
       }
     },
     "npm-check-updates": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
@@ -56,6 +60,8 @@
       }
     },
     "npm-global-packages": {
+      "InstallUnattended": false,
+      "UpdateUnattended": true,
       "UpdateOutcomePackageManager": "npm.ps1",
       "PackageManagerFiles": ["npm.ps1"],
       "Name": "Global npm packages",
@@ -68,6 +74,8 @@
       "ReleaseNotesUrl": ""
     },
     "pnpm": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
@@ -97,6 +105,9 @@
       }
     },
     "deno": {
+      "InstallUnattended": true,
+      "WindowsInstallUnattended": false,
+      "UpdateUnattended": true,
       "WindowsPackageManagerFiles": ["winget.ps1"],
       "Name": "Deno",
       "enabled": true,
@@ -117,6 +128,8 @@
       }
     },
     "uv": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "WindowsInstallExecutor": "tool",
       "WindowsInstallEntryPoint": "Invoke-ToolInstall",
       "WindowsInstallExecutionMode": "CurrentSession",
@@ -149,6 +162,8 @@
       }
     },
     "azure-cli": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
       "WindowsPackageManagerFiles": ["winget.ps1"],
@@ -176,6 +191,8 @@
       }
     },
     "azure-dev-cli": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "ToolFile": "azure-dev-cli.ps1",
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -203,6 +220,8 @@
       }
     },
     "azure-cli-extensions": {
+      "InstallUnattended": false,
+      "UpdateUnattended": true,
       "RequiredProperties": ["Command"],
       "SortGroup": "Azure CLI",
       "SortOrder": 1,
@@ -217,6 +236,8 @@
       "ReleaseNotesUrl": "https://learn.microsoft.com/en-us/cli/azure/azure-cli-extensions-list"
     },
     "azure-bicep-cli": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "ToolFile": "azure-bicep-cli.ps1",
       "Name": "Azure Bicep CLI",
       "enabled": true,
@@ -239,6 +260,8 @@
       }
     },
     "dotnet-sdk": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "SortGroup": ".NET SDK",
       "SortVersionsDescending": true,
@@ -263,6 +286,8 @@
       }
     },
     "python-install-manager": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "PackageName", "WingetId"],
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -284,6 +309,8 @@
       }
     },
     "python": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "SortGroup": "Python",
       "SortVersionsDescending": true,
@@ -305,6 +332,8 @@
       }
     },
     "git": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "ToolFile": "git.ps1",
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -330,6 +359,8 @@
       }
     },
     "github-cli": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
       "WindowsPackageManagerFiles": ["winget.ps1"],
@@ -354,6 +385,8 @@
       }
     },
     "github-copilot-cli": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
@@ -383,6 +416,8 @@
       }
     },
     "pi": {
+      "InstallUnattended": true,
+      "UpdateUnattended": true,
       "InstallationsPackageManager": "npm.ps1",
       "InstallOutcomePackageManager": "npm.ps1",
       "UpdateOutcomePackageManager": "npm.ps1",
@@ -412,6 +447,8 @@
       }
     },
     "ripgrep": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "WindowsPackageManagerFiles": ["winget.ps1"],
       "WindowsReleasePackageManager": "winget.ps1",
       "WindowsInstallExecutor": "winget.ps1",
@@ -436,6 +473,8 @@
       }
     },
     "wsl": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "VersionCommand", "VersionParseRegex", "ApiUrl"],
       "Name": "WSL",
       "enabled": true,
@@ -451,6 +490,8 @@
       "ApiUrl": "https://api.github.com/repos/microsoft/WSL/releases?per_page=100"
     },
     "powershell": {
+      "InstallUnattended": false,
+      "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "WindowsPackageManagerFiles": ["winget.ps1"],
       "WindowsUpdateExecutor": "winget.ps1",

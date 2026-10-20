@@ -30,6 +30,13 @@ Describe 'Catalog JSON Schema' {
     It 'accepts <Name>' -TestCases @(
         @{ Name = 'omitted enabled and production defaults'; Change = { param($catalog) } },
         @{ Name = 'zero cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 0 } },
+        @{ Name = 'unattended operation hints and false Windows overrides'; Change = {
+            param($catalog)
+            $catalog.tools.example.InstallUnattended = $true
+            $catalog.tools.example.UpdateUnattended = $false
+            $catalog.tools.example.WindowsInstallUnattended = $false
+            $catalog.tools.example.WindowsUpdateUnattended = $true
+        } },
         @{ Name = 'maximum cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 2147483647 } },
         @{ Name = 'an upstream informational release endpoint'; Change = { param($catalog) $catalog.tools.example.LatestReleaseApiUrl = 'https://api.github.com/repos/example/cli/releases/latest' } },
         @{ Name = 'an explicit version command'; Change = { param($catalog) $catalog.tools.example.Remove('VersionFlag'); $catalog.tools.example.VersionCommand = 'example version --json' } },
@@ -70,6 +77,10 @@ Describe 'Catalog JSON Schema' {
         @{ Name = 'blank display name'; Change = { param($catalog) $catalog.tools.example.Name = '  ' } },
         @{ Name = 'misspelled tool properties'; Change = { param($catalog) $catalog.tools.example.UpdateComand = 'typo' } },
         @{ Name = 'string booleans'; Change = { param($catalog) $catalog.tools.example.enabled = 'false' } },
+        @{ Name = 'string install unattended hints'; Change = { param($catalog) $catalog.tools.example.InstallUnattended = 'false' } },
+        @{ Name = 'numeric update unattended hints'; Change = { param($catalog) $catalog.tools.example.UpdateUnattended = 1 } },
+        @{ Name = 'string Windows install unattended hints'; Change = { param($catalog) $catalog.tools.example.WindowsInstallUnattended = 'true' } },
+        @{ Name = 'null Windows update unattended hints'; Change = { param($catalog) $catalog.tools.example.WindowsUpdateUnattended = $null } },
         @{ Name = 'missing check type'; Change = { param($catalog) $catalog.tools.example.Remove('CheckType') } },
         @{ Name = 'unsupported check type'; Change = { param($catalog) $catalog.tools.example.CheckType = 'other' } },
         @{ Name = 'missing standard command'; Change = { param($catalog) $catalog.tools.example.Remove('Command') } },

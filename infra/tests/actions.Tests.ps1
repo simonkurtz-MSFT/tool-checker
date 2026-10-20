@@ -183,6 +183,7 @@ Describe 'Action menu input' {
         @{ Key = 'r'; Expected = 'R' },
         @{ Key = 'D'; Expected = 'D' },
         @{ Key = '0'; Expected = '0' }
+        @{ Key = 'a'; Expected = 'A' }
     ) {
         param($Key, $Expected)
         $script:Keys = [System.Collections.Generic.Queue[object]]::new()
@@ -202,6 +203,135 @@ Describe 'Action menu input' {
         Mock Write-Host {}
 
         Read-ActionMenuResponse -ReadKey { $script:Keys.Dequeue() } | Should Be '12,3'
+    }
+}
+
+Describe 'Unattended action metadata' {
+    It 'resolves install and update hints independently with a false Windows override' {
+        Mock Get-OwnedConfiguration { @{
+            InstallUnattended = $true
+            UpdateUnattended = $true
+            WindowsInstallUnattended = $false
+        } }
+        Mock Test-IsWindowsPlatform { $true }
+        (Resolve-ActionMetadata @{ Name = 'Synthetic'; Type = 'install' }).Unattended | Should Be $false
+        (Resolve-ActionMetadata @{ Name = 'Synthetic'; Type = 'direct' }).Unattended | Should Be $true
+        Mock Test-IsWindowsPlatform { $false }
+        (Resolve-ActionMetadata @{ Name = 'Synthetic'; Type = 'install' }).Unattended | Should Be $true
+    }
+
+    It 'defaults unknown operations to potentially interactive and preserves explicit action hints' {
+        Mock Get-OwnedConfiguration { @{} }
+        (Resolve-ActionMetadata @{ Name = 'Synthetic'; Type = 'install' }).Unattended | Should Be $false
+        Mock Get-OwnedConfiguration { @{ UpdateUnattended = $true } }
+        (Resolve-ActionMetadata @{ Name = 'Synthetic'; Type = 'direct'; Unattended = $false }).Unattended | Should Be $false
+    }
+
+    It 'supports ordered plans produced by update checks' {
+        Mock Get-OwnedConfiguration { @{ UpdateUnattended = $true } }
+        $action = Resolve-ActionMetadata ([ordered]@{ Name = 'Synthetic'; Type = 'direct' })
+        $action.Unattended | Should Be $true
+    }
+}
+
+Describe 'Sequential bulk actions' {
+    BeforeEach {
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
+        $script:BulkActions = @(
+            @{ Name = 'Interactive install'; Type = 'install'; Command = 'synthetic'; Unattended = $false },
+            @{ Name = 'Unattended update'; Type = 'direct'; Command = 'synthetic'; Unattended = $true },
+            @{ Name = 'Unattended install'; Type = 'install'; Command = 'synthetic'; Unattended = $true },
+            @{ Name = 'Unknown update'; Type = 'direct'; Command = 'synthetic' },
+            @{ Name = 'Registry'; Type = 'registry'; Command = 'synthetic' },
+            @{ Name = 'Cleanup'; Type = 'cleanup'; Command = 'synthetic' },
+            @{ Name = 'Unsupported'; Type = 'install'; Command = '' }
+        )
+        $script:BulkResponses = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($response in @('A', '0')) { $script:BulkResponses.Enqueue($response) }
+        $script:BulkEvents = [System.Collections.Generic.List[string]]::new()
+        Mock Get-AvailableActions { $script:BulkActions }
+        Mock Read-ActionMenuResponse { $script:BulkResponses.Dequeue() }
+        Mock Write-Host {}
+        Mock Show-ResultsTable {}
+        Mock Invoke-ActionCommand {
+            $script:BulkEvents.Add("start:$($Action.Name)")
+            @{ ExitCode = 0 }
+        }
+        Mock Complete-InstallExecution {
+            $script:BulkEvents.Add("complete:$($Action.Name)")
+            $true
+        }
+        Mock Complete-UpdateExecution {
+            $script:BulkEvents.Add("complete:$($Action.Name)")
+            $true
+        }
+        Mock Invoke-ParallelUpdates { throw 'Bulk actions must not run in parallel' }
+    }
+
+    It 'finishes each operation before starting the next, with unattended actions first and stable ordering' {
+        Invoke-ActionMenu
+
+        ($script:BulkEvents -join ',') | Should Be (
+            'start:Unattended update,complete:Unattended update,' +
+            'start:Unattended install,complete:Unattended install,' +
+            'start:Interactive install,complete:Interactive install,' +
+            'start:Unknown update,complete:Unknown update'
+        )
+        Assert-MockCalled Invoke-ActionCommand 4 -Scope It
+        Assert-MockCalled Invoke-ParallelUpdates 0 -Scope It
+        Assert-MockCalled Complete-UpdateExecution 2 -Scope It -ParameterFilter { $Refresh }
+    }
+
+    It 'offers all only when at least two runnable install or update actions remain' -TestCases @(
+        @{ Count = 0 }, @{ Count = 1 }, @{ Count = 2 }
+    ) {
+        param($Count)
+        $script:BulkActions = @($script:BulkActions | Select-Object -First $Count) + @(
+            @{ Name = 'Registry'; Type = 'registry'; Command = 'synthetic' },
+            @{ Name = 'Cleanup'; Type = 'cleanup'; Command = 'synthetic' },
+            @{ Name = 'Unsupported'; Type = 'install'; Command = '' }
+        )
+        $script:BulkResponses.Clear()
+        $script:BulkResponses.Enqueue('0')
+        Invoke-ActionMenu
+        $expected = if ($Count -gt 1) { 1 } else { 0 }
+        Assert-MockCalled Write-Host $expected -Scope It -ParameterFilter { $Object -eq '  [A] Install / Update all (sequential, unattended first)' }
+    }
+
+    It 'keeps failed actions retryable without rerunning successful actions' {
+        Mock Complete-UpdateExecution { $Action.Name -ne 'Unattended update' }
+        $script:BulkResponses.Clear()
+        foreach ($response in @('A', '1', '0')) { $script:BulkResponses.Enqueue($response) }
+        Invoke-ActionMenu
+        Assert-MockCalled Invoke-ActionCommand 2 -Scope It -ParameterFilter { $Action.Name -eq 'Unattended update' }
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Name -eq 'Unattended install' }
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Name -eq 'Unknown update' }
+    }
+
+    It 'continues after an executor exception and reports the failure' {
+        Mock Invoke-ActionCommand {
+            if ($Action.Name -eq 'Unattended update') { throw 'synthetic failure' }
+            @{ ExitCode = 0 }
+        }
+        Invoke-ActionMenu
+        ($results.UpdateFailed -contains 'Unattended update') | Should Be $true
+        $results.Errors[0] | Should Match 'synthetic failure'
+        Assert-MockCalled Invoke-ActionCommand 4 -Scope It
+    }
+
+    It 'preserves explicitly selected numeric order' {
+        $script:BulkResponses.Clear()
+        foreach ($response in @('1,3', '0')) { $script:BulkResponses.Enqueue($response) }
+        Invoke-ActionMenu
+        ($script:BulkEvents -join ',') | Should Be 'start:Interactive install,complete:Interactive install,start:Unattended install,complete:Unattended install'
+    }
+
+    It 'does not enable bulk approval of registry alignment or cleanup' {
+        $script:BulkActions = @($script:BulkActions | Where-Object { $_.Type -in @('registry', 'cleanup') })
+        Invoke-ActionMenu -ApprovalOnly
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It
+        Assert-MockCalled Write-Host 0 -Scope It -ParameterFilter { $Object -eq '  [A] Install / Update all (sequential, unattended first)' }
     }
 }
 

@@ -43,6 +43,9 @@ function Resolve-ActionMetadata {
             if (-not $Action[$property] -and $value) { $Action[$property] = $value }
         }
     }
+    if ('Unattended' -notin $Action.Keys) {
+        $Action.Unattended = $config -and (Get-PlatformConfigurationValue -Configuration $config -Property "$($Action.Operation)Unattended") -eq $true
+    }
     if (-not $Action.Executor) { $Action.Executor = 'command' }
     if (-not $Action.ExecutionMode) { $Action.ExecutionMode = 'Job' }
     if (-not $Action.OutcomePackageManager -and $Action.Executor -notin @('command','tool')) { $Action.OutcomePackageManager = $Action.Executor }
@@ -255,7 +258,7 @@ function Read-ActionMenuResponse {
         }
 
         $normalizedCharacter = [char]::ToUpperInvariant($character)
-        if ($buffer.Length -eq 0 -and $normalizedCharacter -in @('0', 'D', 'R')) {
+        if ($buffer.Length -eq 0 -and $normalizedCharacter -in @('0', 'D', 'R', 'A')) {
             Write-Host $normalizedCharacter
             return [string]$normalizedCharacter
         }
@@ -282,6 +285,10 @@ function Invoke-ActionMenu {
             Write-Host "All actions completed.`n"
             break
         }
+        $bulkSelections = @(for ($i = 0; $i -lt $remaining.Count; $i++) {
+            $action = $remaining[$i].Action
+            if ($action.Type -notin @('registry', 'cleanup') -and -not [string]::IsNullOrWhiteSpace($action.Command)) { $i + 1 }
+        })
 
         Write-Header "Actions"
         Write-Host ""
@@ -289,6 +296,9 @@ function Invoke-ActionMenu {
         Write-Host ""
         Write-Host "  [D] Update / Install commands and Release Notes"
         Write-Host "  [R] Re-check"
+        if ($bulkSelections.Count -gt 1) {
+            Write-Host "  [A] Install / Update all (sequential, unattended first)"
+        }
         Write-Host "  ----------------"
         for ($i = 0; $i -lt $remaining.Count; $i++) {
             if ($remaining[$i].Action.Name -in $results.UpdateFailed) {
@@ -316,11 +326,15 @@ function Invoke-ActionMenu {
         }
 
         $selected = @()
-        $response -split ',' | ForEach-Object {
-            $t = $_.Trim()
-            if ($t -match '^\d+$') {
-                $n = [int]$t
-                if ($n -ge 1 -and $n -le $remaining.Count) { $selected += $n }
+        if ($normalizedResponse -eq 'A' -and $bulkSelections.Count -gt 1) {
+            $selected = @($bulkSelections | Sort-Object @{ Expression = { if ($remaining[$_ - 1].Action.Unattended) { 0 } else { 1 } } }, @{ Expression = { $_ } })
+        } else {
+            $response -split ',' | ForEach-Object {
+                $t = $_.Trim()
+                if ($t -match '^\d+$') {
+                    $n = [int]$t
+                    if ($n -ge 1 -and $n -le $remaining.Count) { $selected += $n }
+                }
             }
         }
         if ($selected.Count -eq 0) { Write-Host "No valid selection. Please try again.`n"; continue }

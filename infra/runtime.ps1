@@ -5,7 +5,7 @@ function Test-IsWindowsPlatform { $IsWindows -or $env:OS -eq 'Windows_NT' }
 function Get-PlatformConfigurationValue {
     # A Windows<Property> override wins on Windows; otherwise the base property applies.
     param([object]$Configuration, [string]$Property)
-    if ((Test-IsWindowsPlatform) -and $Configuration["Windows$Property"]) { return $Configuration["Windows$Property"] }
+    if ((Test-IsWindowsPlatform) -and ($Configuration["Windows$Property"] -or $Configuration["Windows$Property"] -is [bool])) { return $Configuration["Windows$Property"] }
     $Configuration[$Property]
 }
 

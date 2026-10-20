@@ -27,6 +27,12 @@ the tool, such as a tool that manages several installed release channels.
 4. Provide non-interactive install and update commands for each supported OS
    and architecture. Omit unsupported platform keys instead of adding commands
    that have not been verified.
+   Set `InstallUnattended` and `UpdateUnattended` to describe each operation
+   separately, using `WindowsInstallUnattended` / `WindowsUpdateUnattended` when
+   needed. Use `false` (also the default) if input, agreements, sudo credentials,
+   or elevation prompts may be required; silent installer flags alone do not
+   guarantee unattended execution. These flags only prioritize bulk actions;
+   they do not suppress prompts or authorize registry repairs and duplicate cleanup.
 5. Set `ProductionReleasesOnly` deliberately. Keep it enabled unless users are
    expected to track prerelease versions.
 6. Add or update focused Pester coverage. Put new custom checks in

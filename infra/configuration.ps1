@@ -196,6 +196,11 @@ function Read-ToolCheckerConfiguration {
             }
         }
         $toolEntry['Id'] = $catalogEntry.Id
+        foreach ($property in @('InstallUnattended', 'UpdateUnattended', 'WindowsInstallUnattended', 'WindowsUpdateUnattended')) {
+            if ($toolEntry.ContainsKey($property) -and $toolEntry[$property] -isnot [bool]) {
+                throw "Tool '$toolName' property '$property' must be a boolean."
+            }
+        }
         # Default only missing keys so an explicit false value survives configuration loading.
         if (-not $toolEntry.ContainsKey('ProductionReleasesOnly')) {
             $toolEntry['ProductionReleasesOnly'] = $true

@@ -51,10 +51,12 @@ command in both interactive and Force mode.
 When at least two runnable installs or updates remain, select **[A] Install /
 Update all** to run them sequentially, with unattended operations first and
 potentially interactive operations last. Catalog order is preserved within each
-group. Failed actions remain available to retry; the batch continues with the
-next action. Registry alignment, duplicate cleanup, and missing platform commands
-are excluded. Numeric selections retain their requested order. This does not
-change the parallel, update-only behavior of `-Force`.
+group. Each action starts with its batch progress, operation, tool name, and
+command, for example `1/3: Installing Git: <command>` or
+`2/3: Updating NodeJS: <command>`. Failed actions remain available to retry; the
+batch continues with the next action. Registry alignment, duplicate cleanup, and
+missing platform commands are excluded. Numeric selections retain their requested
+order. This does not change the parallel, update-only behavior of `-Force`.
 
 The included configuration checks:
 

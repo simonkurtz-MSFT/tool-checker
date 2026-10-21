@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Show `x/y` progress with the operation, tool name, and command when running
+  install/update-all batches.
+
 ## [2.8.0] - 2026-10-20
 
 ### Added

@@ -326,7 +326,8 @@ function Invoke-ActionMenu {
         }
 
         $selected = @()
-        if ($normalizedResponse -eq 'A' -and $bulkSelections.Count -gt 1) {
+        $isBulkSelection = $normalizedResponse -eq 'A' -and $bulkSelections.Count -gt 1
+        if ($isBulkSelection) {
             $selected = @($bulkSelections | Sort-Object @{ Expression = { if ($remaining[$_ - 1].Action.Unattended) { 0 } else { 1 } } }, @{ Expression = { $_ } })
         } else {
             $response -split ',' | ForEach-Object {
@@ -339,7 +340,9 @@ function Invoke-ActionMenu {
         }
         if ($selected.Count -eq 0) { Write-Host "No valid selection. Please try again.`n"; continue }
 
+        $actionIndex = 0
         foreach ($num in $selected) {
+            $actionIndex++
             $ri = $num - 1
             $a  = $remaining[$ri].Action
 
@@ -348,7 +351,10 @@ function Invoke-ActionMenu {
                 continue
             }
 
-            if ($a.Type -eq 'registry') {
+            if ($isBulkSelection) {
+                $verb = if ($a.Type -eq 'install') { 'Installing' } else { 'Updating' }
+                Write-Host "$actionIndex/$($selected.Count): $verb $($a.Name): $($a.Command)"
+            } elseif ($a.Type -eq 'registry') {
                 Write-Host "Executing approved registry alignment: $($a.Name)"
             } else {
                 Write-Host "Executing $($a.Name): $($a.Command)"

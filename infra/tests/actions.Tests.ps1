@@ -250,9 +250,10 @@ Describe 'Sequential bulk actions' {
         $script:BulkResponses = [System.Collections.Generic.Queue[string]]::new()
         foreach ($response in @('A', '0')) { $script:BulkResponses.Enqueue($response) }
         $script:BulkEvents = [System.Collections.Generic.List[string]]::new()
+        $script:BulkMessages = [System.Collections.Generic.List[string]]::new()
         Mock Get-AvailableActions { $script:BulkActions }
         Mock Read-ActionMenuResponse { $script:BulkResponses.Dequeue() }
-        Mock Write-Host {}
+        Mock Write-Host { param($Object) $script:BulkMessages.Add([string]$Object) }
         Mock Show-ResultsTable {}
         Mock Invoke-ActionCommand {
             $script:BulkEvents.Add("start:$($Action.Name)")
@@ -281,6 +282,30 @@ Describe 'Sequential bulk actions' {
         Assert-MockCalled Invoke-ActionCommand 4 -Scope It
         Assert-MockCalled Invoke-ParallelUpdates 0 -Scope It
         Assert-MockCalled Complete-UpdateExecution 2 -Scope It -ParameterFilter { $Refresh }
+    }
+
+    It 'numbers runnable actions in execution order with the operation, tool name, and command' {
+        Invoke-ActionMenu
+
+        ($script:BulkMessages -match '^\d+/\d+: ' -join ',') | Should Be (
+            '1/4: Updating Unattended update: synthetic,' +
+            '2/4: Installing Unattended install: synthetic,' +
+            '3/4: Installing Interactive install: synthetic,' +
+            '4/4: Updating Unknown update: synthetic'
+        )
+    }
+
+    It 'restarts progress with the remaining runnable action count when retrying a batch' {
+        Mock Complete-UpdateExecution { $false }
+        $script:BulkResponses.Clear()
+        foreach ($response in @('A', 'A', '0')) { $script:BulkResponses.Enqueue($response) }
+
+        Invoke-ActionMenu
+
+        $progress = @($script:BulkMessages -match '^\d+/\d+: ')
+        $progress.Count | Should Be 6
+        $progress[4] | Should Be '1/2: Updating Unattended update: synthetic'
+        $progress[5] | Should Be '2/2: Updating Unknown update: synthetic'
     }
 
     It 'offers all only when at least two runnable install or update actions remain' -TestCases @(
@@ -318,6 +343,8 @@ Describe 'Sequential bulk actions' {
         ($results.UpdateFailed -contains 'Unattended update') | Should Be $true
         $results.Errors[0] | Should Match 'synthetic failure'
         Assert-MockCalled Invoke-ActionCommand 4 -Scope It
+        ($script:BulkMessages -match '^\d+/\d+: ').Count | Should Be 4
+        ($script:BulkMessages -contains '4/4: Updating Unknown update: synthetic') | Should Be $true
     }
 
     It 'preserves explicitly selected numeric order' {
@@ -325,6 +352,7 @@ Describe 'Sequential bulk actions' {
         foreach ($response in @('1,3', '0')) { $script:BulkResponses.Enqueue($response) }
         Invoke-ActionMenu
         ($script:BulkEvents -join ',') | Should Be 'start:Interactive install,complete:Interactive install,start:Unattended install,complete:Unattended install'
+        ($script:BulkMessages -match '^\d+/\d+: ').Count | Should Be 0
     }
 
     It 'does not enable bulk approval of registry alignment or cleanup' {

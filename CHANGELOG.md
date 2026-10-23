@@ -9,10 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-10-23
+
 ### Changed
 
 - Show `x/y` progress with the operation, tool name, and command when running
   install/update-all batches.
+- Accept unambiguous numeric menu choices without Enter, recalculating choices as
+  actions complete or checks rerun. Start with a comma for multi-action selections.
+
+### Fixed
+
+- Refresh Python versions from the installed runtime inventory after updates,
+  including conventional installations, and verify the planned version before
+  reporting success so the final summary does not silently retain an old version.
 
 ## [2.8.0] - 2026-10-20
 
@@ -282,7 +292,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.8.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.9.0...HEAD
+[2.9.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.1...2.8.0
 [2.7.1]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.0...2.7.1
 [2.7.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.6.1...2.7.0

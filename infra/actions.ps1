@@ -236,9 +236,13 @@ function Complete-InstallExecution {
 }
 
 function Read-ActionMenuResponse {
-    param([scriptblock]$ReadKey = { $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') })
+    param(
+        [int]$ActionCount = 0,
+        [scriptblock]$ReadKey = { $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') }
+    )
 
     Write-Host 'Select option: ' -NoNewline
+    $options = @(for ($i = 1; $i -le $ActionCount; $i++) { [string]$i })
     $buffer = [System.Text.StringBuilder]::new()
     while ($true) {
         $key = & $ReadKey
@@ -265,6 +269,11 @@ function Read-ActionMenuResponse {
         if ([char]::IsDigit($character) -or $character -eq ',') {
             [void]$buffer.Append($character)
             Write-Host $character -NoNewline
+            $selection = $buffer.ToString()
+            if ($selection -in $options -and @($options | Where-Object { $_.StartsWith($selection) }).Count -eq 1) {
+                Write-Host ''
+                return $selection
+            }
         }
     }
 }
@@ -309,7 +318,7 @@ function Invoke-ActionMenu {
         }
         Write-Host ""
 
-        $response = Read-ActionMenuResponse
+        $response = Read-ActionMenuResponse -ActionCount $remaining.Count
         Write-Host ""
         
         if ($response -eq "0" -or [string]::IsNullOrWhiteSpace($response)) { break }

@@ -42,8 +42,12 @@ Select **[D] Update / Install commands and Release Notes** to view commands and 
 as separate labeled lines for each tool, outside the table. Update commands retain
 their checked, cooldown-safe target; tools without an available update omit the
 command line.
-Viewing details never executes a command. Numeric action selections and `[0]` to
-exit are unchanged. A normal interactive run keeps this details option available
+Viewing details never executes a command. `[0]` exits immediately. Numeric choices
+run immediately once they identify a unique option: with three actions, `1` runs
+without Enter; with ten, `1` waits for Enter or another digit, while `10` runs
+immediately. Choices are recalculated whenever the menu is rebuilt. To select
+multiple actions, start with a comma (for example, `,1,3`) and press Enter.
+A normal interactive run keeps this details option available
 even when no actions exist; check-only and Force runs do not gain an extra prompt.
 When an install/update action starts, the console prints the tool name and its
 command in both interactive and Force mode.
@@ -116,7 +120,7 @@ From PowerShell, run:
 ./tool-checker.ps1
 ```
 
-Checks run concurrently, followed by a summary showing installed and latest versions, release age, available commands, and release-note links. If actions are available, an interactive menu lets you select one or more comma-separated action numbers. Press Enter or select `0` to exit without making further changes.
+Checks run concurrently, followed by a summary showing installed and latest versions, release age, available commands, and release-note links. If actions are available, an interactive menu accepts unique action numbers immediately. Start with a comma to select multiple action numbers, then press Enter. Press Enter on an empty selection or select `0` to exit without making further changes.
 
 For an inventory-only run, omit `-Force` and exit the action menu without selecting anything. First-run setup can still create the selected environment file; it does not install or update tools.
 

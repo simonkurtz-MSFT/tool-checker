@@ -5,14 +5,46 @@
 #region Public entry points
 function Refresh-ToolStatus {
     param([string]$ToolName)
-    if (-not (Test-CommandExists "py") -or -not $ToolName.StartsWith("Python")) { return }
-    $major = ($results.Tools[$ToolName].Installed -split '\.')[0..1] -join '.'
-    $out = py --list-paths 2>$null
-    foreach ($line in $out) {
-        if ($line.ToString().Trim() -match '^\s*(\d+\.\d+)(?:\[[^\]]+\]|-\S+)?\s+.*Python\s+(\d+\.\d+\.\d+)') {
-            if ($Matches[1] -eq $major) { $results.Tools[$ToolName].Installed = $Matches[2]; break }
+    $channel = if ($ToolName -match '^Python (?<Channel>\d+\.\d+)$') { $Matches.Channel } else { $null }
+    if (Test-CommandExists 'py') {
+        $global:LASTEXITCODE = 0
+        $out = @(py list 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "Unable to list installed Python versions: $($out -join "`n")" }
+        $versions = @(ConvertFrom-PythonLauncherList -OutputLines $out)
+        if ($channel) { $versions = @($versions | Where-Object Channel -eq $channel) }
+        if ($versions.Count -eq 0) { throw "Installed Python version not found for $ToolName." }
+        foreach ($version in $versions) {
+            $installed = $version.Version
+            if ($installed -notmatch '^\d+\.\d+\.\d+$') {
+                # Legacy launcher rows contain a channel and path, not a patch version.
+                $global:LASTEXITCODE = 0
+                $versionOutput = py "-V:$($version.Channel)" --version 2>&1
+                if ($LASTEXITCODE -ne 0 -or "$versionOutput" -notmatch '^Python (\d+\.\d+\.\d+\S*)$') {
+                    throw "Unable to retrieve the installed version for Python $($version.Channel): $versionOutput"
+                }
+                $installed = $Matches[1]
+            }
+            $name = "Python $($version.Channel)"
+            if (-not $results.Tools.ContainsKey($name)) { $results.Tools[$name] = @{ Installed = ''; Latest = '' } }
+            $results.Tools[$name].Installed = $installed
         }
+        return
     }
+
+    $command = @('python', 'python3') | Where-Object { Test-CommandExists $_ } | Select-Object -First 1
+    if (-not $command) { throw "No Python command found while refreshing $ToolName." }
+    $versionOutput = Get-CommandVersion $command '--version'
+    if ($versionOutput -notmatch '^Python ((\d+\.\d+)\.\d+\S*)$') {
+        throw "Unable to retrieve the installed version for ${ToolName}: $versionOutput"
+    }
+    $installed = $Matches[1]
+    $installedChannel = $Matches[2]
+    if ($channel -and $installedChannel -ne $channel) {
+        throw "Expected Python $channel, but '$command' reports Python $installedChannel."
+    }
+    $name = "Python $installedChannel"
+    if (-not $results.Tools.ContainsKey($name)) { $results.Tools[$name] = @{ Installed = ''; Latest = '' } }
+    $results.Tools[$name].Installed = $installed
 }
 
 function Test-Tool {
@@ -145,7 +177,7 @@ function Get-PythonUpdateViaPy {
         foreach ($update in $plan.Updates) {
             Write-Warning "  Python $($update.Channel) has update available: $($update.Installed) -> $($update.Latest)"
             $results.Updates += "Python $($update.Channel)"; $found = $true
-            Add-AvailableUpdate -Name "Python $($update.Channel)" -Command "py install $($update.Channel) --update --quiet" -Type 'py' -Details "$($update.Installed) -> $($update.Latest)"
+            Add-AvailableUpdate -Name "Python $($update.Channel)" -Command "py install $($update.Channel) --update --quiet" -Type 'py' -Details "$($update.Installed) -> $($update.Latest)" -Version $update.Latest
         }
         if (-not $found) { Write-Success "All Python versions are up to date" }
         if ($plan.NewerChannel) {
@@ -179,7 +211,7 @@ function Get-PythonUpdateConventional {
                 Write-Warning "  Python $major has update available${sourceLabel}: $InstalledVersion -> $latest"
                 $results.Updates += "Python $major"
                 if (!$SkipUpdate) {
-                    Add-AvailableUpdate -Name "Python $major" -Command ($config.UpdateCommand -replace '\{version\}',$major) -Type $config.UpdateType -Details "$InstalledVersion -> $latest"
+                    Add-AvailableUpdate -Name "Python $major" -Command ($config.UpdateCommand -replace '\{version\}',$major) -Type $config.UpdateType -Details "$InstalledVersion -> $latest" -Version $latest
                 }
             } else { Write-Success "Python $major is up to date" }
         }

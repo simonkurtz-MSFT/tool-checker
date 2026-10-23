@@ -139,6 +139,23 @@ Describe 'Read-only details menu' {
         Assert-MockCalled Invoke-ActionCommand 0 -Scope It -ParameterFilter { $Action.Name -eq 'Old CLI' }
     }
 
+    It 'recalculates numeric input choices after completed actions are removed' {
+        $results.AvailableUpdates = @(1..10 | ForEach-Object { @{ Name = "CLI $_"; Command = "update $_"; Type = 'direct' } })
+        $script:MenuResponses.Clear()
+        foreach ($response in @('10', '1', '0')) { $script:MenuResponses.Enqueue($response) }
+        Mock Invoke-ActionCommand { @{ ExitCode = 0 } }
+        Mock Complete-UpdateExecution { $true }
+        Mock Show-ResultsTable {}
+
+        Invoke-ActionMenu
+
+        foreach ($count in @(10, 9, 8)) {
+            Assert-MockCalled Read-ActionMenuResponse 1 -Scope It -ParameterFilter { $ActionCount -eq $count }
+        }
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Name -eq 'CLI 10' }
+        Assert-MockCalled Invoke-ActionCommand 1 -Scope It -ParameterFilter { $Action.Name -eq 'CLI 1' }
+    }
+
     It 'preserves numeric actions and approval-only restrictions after viewing details' {
         $results.AvailableUpdates = @(
             @{ Name = 'Example'; Command = 'example update'; Type = 'direct' },
@@ -179,6 +196,17 @@ Describe 'Read-only details menu' {
 }
 
 Describe 'Action menu input' {
+    It 'shows only a concise selection prompt' {
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ActionCount 3 -ReadKey { [pscustomobject]@{ Character = [char]'0' } } | Should Be '0'
+
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter {
+            $Object -eq 'Select option: ' -and $NoNewline
+        }
+        Assert-MockCalled Write-Host 2 -Exactly -Scope It
+    }
+
     It 'returns hotkeys immediately without reading Enter' -TestCases @(
         @{ Key = 'r'; Expected = 'R' },
         @{ Key = 'D'; Expected = 'D' },
@@ -195,14 +223,65 @@ Describe 'Action menu input' {
         $script:Keys.Count | Should Be 0
     }
 
-    It 'retains Enter-based multi-digit and comma-separated selections' {
+    It 'accepts a unique numeric option without Enter' -TestCases @(
+        @{ Count = 3; InputText = '1'; Expected = '1' },
+        @{ Count = 9; InputText = '9'; Expected = '9' },
+        @{ Count = 10; InputText = '2'; Expected = '2' },
+        @{ Count = 10; InputText = '10'; Expected = '10' },
+        @{ Count = 100; InputText = '100'; Expected = '100' },
+        @{ Count = 119; InputText = '12'; Expected = '12' }
+    ) {
+        param($Count, $InputText, $Expected)
         $script:Keys = [System.Collections.Generic.Queue[object]]::new()
-        foreach ($character in @('1', '2', ',', '3', [char]13)) {
-            $script:Keys.Enqueue([pscustomobject]@{ Character = [char]$character })
+        foreach ($character in $InputText.ToCharArray()) {
+            $script:Keys.Enqueue([pscustomobject]@{ Character = $character })
         }
         Mock Write-Host {}
 
-        Read-ActionMenuResponse -ReadKey { $script:Keys.Dequeue() } | Should Be '12,3'
+        Read-ActionMenuResponse -ActionCount $Count -ReadKey { $script:Keys.Dequeue() } | Should Be $Expected
+        $script:Keys.Count | Should Be 0
+    }
+
+    It 'waits for Enter for ambiguous or invalid numbers' -TestCases @(
+        @{ Count = 10; InputText = '1'; Expected = '1' },
+        @{ Count = 100; InputText = '10'; Expected = '10' },
+        @{ Count = 3; InputText = '4'; Expected = '4' },
+        @{ Count = 0; InputText = '1'; Expected = '1' }
+    ) {
+        param($Count, $InputText, $Expected)
+        $script:Keys = [System.Collections.Generic.Queue[object]]::new()
+        foreach ($character in ($InputText + "`r").ToCharArray()) {
+            $script:Keys.Enqueue([pscustomobject]@{ Character = $character })
+        }
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ActionCount $Count -ReadKey { $script:Keys.Dequeue() } | Should Be $Expected
+        $script:Keys.Count | Should Be 0
+    }
+
+    It 'retains comma-separated selections after an ambiguous prefix or a leading comma' -TestCases @(
+        @{ Count = 120; InputText = '12,3'; Expected = '12,3' },
+        @{ Count = 3; InputText = ',1,3'; Expected = ',1,3' }
+    ) {
+        param($Count, $InputText, $Expected)
+        $script:Keys = [System.Collections.Generic.Queue[object]]::new()
+        foreach ($character in ($InputText + "`r").ToCharArray()) {
+            $script:Keys.Enqueue([pscustomobject]@{ Character = $character })
+        }
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ActionCount $Count -ReadKey { $script:Keys.Dequeue() } | Should Be $Expected
+        $script:Keys.Count | Should Be 0
+    }
+
+    It 'supports editing a pending selection with Backspace' {
+        $script:Keys = [System.Collections.Generic.Queue[object]]::new()
+        foreach ($character in "1`b2".ToCharArray()) {
+            $script:Keys.Enqueue([pscustomobject]@{ Character = $character })
+        }
+        Mock Write-Host {}
+
+        Read-ActionMenuResponse -ActionCount 10 -ReadKey { $script:Keys.Dequeue() } | Should Be '2'
     }
 }
 

@@ -164,6 +164,10 @@ the optional `[string]$ToolName` parameter. A handler may refresh one row or its
 whole inventory. Dynamic SDK, Python, and npm rows route to their owning tool.
 No `RefreshMethod` field or named-handler switch is needed. Specialized actions
 remain behind the shared dispatcher and approval gates.
+Python refresh uses the same `py list` parser as discovery, queries legacy launcher
+rows for their runtime patch version, and falls back to `python`/`python3` when
+no launcher exists. Preserve release metadata and verify the refreshed version
+against the planned Python update target.
 
 Keep cross-tool npm release metadata helpers in [infra/PackageManagers/npm.ps1](infra/PackageManagers/npm.ps1), declared through
 `PackageManagerFiles`. In particular, a pnpm-only selection must not depend on the global npm tool file.
@@ -278,6 +282,11 @@ columns, versions older than Installed are cyan with an asterisk, using the same
 owner-aware comparison. Include the marker in column widths without changing
 stored version strings or action eligibility, and explain it in the legend. It never drives
 update status.
+
+Pass the current remaining action count to `Read-ActionMenuResponse` on every menu
+rebuild. Numeric choices execute as soon as they match an option with no longer
+matching option; ambiguous prefixes wait for Enter or more digits. A leading comma
+keeps multi-selection input Enter-confirmed even when single choices are immediate.
 Omit update command lines when no action is available. Interactive and parallel
 action execution print the tool name and planned command before starting it.
 

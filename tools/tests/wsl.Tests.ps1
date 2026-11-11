@@ -2,6 +2,20 @@
 $scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 
 Describe 'WSL selected-only worker' {
+    It 'blocks a young release while retaining the upstream version for information' {
+        . $scriptPath -EnvFile (Join-Path $TestDrive 'absent.env')
+        Mock Test-IsWindowsPlatform { $true }
+        Mock Test-CommandExists { $true }
+        Mock Invoke-Expression { 'wslc 1.0.0.0' }
+        Mock Invoke-SafeApiRequest {
+            @([PSCustomObject]@{ tag_name = 'v2.0.0'; published_at = [DateTimeOffset]::UtcNow.AddDays(-2).ToString('O') })
+        }
+        Invoke-ToolEntryPoint -ToolId 'wsl' -EntryPoint 'Test-Tool' -Arguments @{ Progress = '1/1' }
+        $results.Tools.WSL.LatestReleased | Should Be '2.0.0'
+        $results.Tools.WSL.LatestCooldown | Should BeNullOrEmpty
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+
     It 'runs alone with CheckOnly=<CheckOnly>' -TestCases @(@{ CheckOnly = $false }, @{ CheckOnly = $true }) {
         param($CheckOnly)
         $selectionFile = Join-Path $TestDrive 'wsl.env'

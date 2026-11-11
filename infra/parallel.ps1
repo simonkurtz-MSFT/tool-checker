@@ -9,7 +9,7 @@ function Get-ParallelCheckFunctionBlock {
         'Test-CommandExists','Get-DetailedErrorMessage','Get-ToolConfiguration','Get-CommandVersion',
         'Test-IsWindowsPlatform','Get-PlatformConfigurationValue',
         'ConvertTo-CanonicalSemanticVersion','Compare-SemanticVersions','Sort-SemanticVersions','Compare-OwnedToolVersions','Test-UpdateAvailable',
-        'Test-IsProductionVersion','Set-LatestToolVersion',
+        'Test-IsProductionVersion','Set-LatestToolVersion','Get-ReleaseAgeInfo','Set-ToolReleaseInformation','Get-ApiReleasePublishedAt',
         'Invoke-SafeApiRequest','Add-NotInstalledTool','Add-AvailableUpdate','Register-ToolUpdate',
         'Test-StandardTool','Update-ToolInstallationDiscovery','Get-InstalledVersionFromOutput','Get-LatestVersionFromApi','Get-UpdateCommand','Get-StandardToolUpdates'
     ))

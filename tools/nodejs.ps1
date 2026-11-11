@@ -90,13 +90,19 @@ function Test-Tool {
         $latestLTSMajor = $releasePlan.LatestLTSMajor
         $latestCurrentVersion = $releasePlan.LatestCurrentVersion
         $latestCurrentMajor = $releasePlan.LatestCurrentMajor
+        $candidateDate = ($distIndex | Where-Object { ($_.version -replace '^v', '') -eq $latestInMajor } | Select-Object -First 1).date
+        $installable = $true
 
         if ($latestInMajor) {
             $results.Tools['NodeJS'].Latest = "v$latestCurrentVersion"
-            if ($releasePlan.UpdateKind) {
+            if ($candidateDate) {
+                $installable = Set-ToolReleaseInformation -ToolName 'NodeJS' -LatestVersion "v$latestInMajor" -PublishedAt $candidateDate -CooldownDays $config.CooldownDays
+                $results.Tools['NodeJS'].LatestReleased = "v$latestCurrentVersion"
+            }
+            if ($releasePlan.UpdateKind -and $installable) {
                 Write-Warning "  $($releasePlan.UpdateKind.Substring(0, 1).ToUpper())$($releasePlan.UpdateKind.Substring(1)) update available in v${currentMajor}: v$currentVersion -> v$latestInMajor"
                 $results.Updates += "NodeJS ($($releasePlan.UpdateKind))"
-            } else {
+            } elseif (-not $releasePlan.UpdateKind) {
                 Write-Success "NodeJS v$currentMajor is up to date (latest patch)"
             }
         }
@@ -125,7 +131,8 @@ function Test-Tool {
                 Write-Host "  - Using winget: $($config.UpdateCommand)"
                 Write-Host "  - Download: https://nodejs.org/"
                 Write-Host "  Release notes: $($config.ReleaseNotesUrl)"
-                Add-AvailableUpdate -Name 'NodeJS' -Command $config.UpdateCommand -Type $config.UpdateType -Details "v$currentVersion -> v$latestInMajor"
+                $updateCommand = if ($candidateDate -and (Test-IsWindowsPlatform)) { "$($config.UpdateCommand) --version $latestInMajor" } else { $config.UpdateCommand }
+                Add-AvailableUpdate -Name 'NodeJS' -Command $updateCommand -Type $config.UpdateType -Details "v$currentVersion -> v$latestInMajor" -Version $latestInMajor
             } else {
                 $catalogVersion = if ($wingetLatestVersion) { "v$wingetLatestVersion" } else { 'unknown' }
                 Write-Warning "  NodeJS v$latestInMajor is available upstream but not yet in WinGet (catalog: $catalogVersion); using the official installer."

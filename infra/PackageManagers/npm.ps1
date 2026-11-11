@@ -47,13 +47,13 @@ function Get-ReleasePlan-PackageManager {
         return @{ Latest = ''; LatestCooldown = $null; LatestReleased = $latestReleased }
     }
     # Include current/older releases so the safe version remains visible after an update.
-    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MaximumVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly
+    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MaximumVersion $latest -ProductionReleasesOnly $config.ProductionReleasesOnly -CooldownDays $config.CooldownDays
     if ($release) { $latest = $release.Version }
-    else { $release = Get-NpmVersionReleaseInfo -PackageName $config.NpmPackageName -Version $latest }
+    else { $release = Get-NpmVersionReleaseInfo -PackageName $config.NpmPackageName -Version $latest -CooldownDays $config.CooldownDays }
     $ageDays = if ($release) { $release.AgeDays } else { $null }
     $installable = $release -and $release.Installable
     $reason = if (-not $release) { 'the release age could not be verified.' }
-        elseif (-not $installable) { "this release is not installable until it is $($script:ReleaseCooldownDays) days old." }
+        elseif (-not $installable) { "this release is not installable until it is $($config.CooldownDays) days old." }
     @{
         Latest = $latest
         LatestReleased = $latestReleased
@@ -63,7 +63,7 @@ function Get-ReleasePlan-PackageManager {
         AgeLabel = if ($release) { " ($ageDays days old)" } else { ' (age unknown)' }
         BlockReason = $reason
         MaturityBlocked = $release -and -not $installable
-        RequiredAgeDays = $script:ReleaseCooldownDays
+        RequiredAgeDays = $config.CooldownDays
         # Pin the release whose age was checked so execution cannot follow a newer tag.
         Command = $config.UpdateCommand.Replace("$($config.NpmPackageName)@latest", "$($config.NpmPackageName)@$latest")
         Type = $config.UpdateType
@@ -129,7 +129,7 @@ function Get-GlobalNpmInstalledVersion {
 }
 
 function Get-NpmVersionReleaseInfo {
-    param([string]$PackageName, [string]$Version)
+    param([string]$PackageName, [string]$Version, [int]$CooldownDays = $script:ReleaseCooldownDays)
 
     try {
         $json = npm view "$PackageName@$Version" time --json 2>$null
@@ -140,7 +140,7 @@ function Get-NpmVersionReleaseInfo {
         [PSCustomObject]@{
             PublishedAt = $publishedAt
             AgeDays     = [Math]::Max(0, [Math]::Floor($age.TotalDays))
-            Installable = $age.TotalDays -ge $script:ReleaseCooldownDays
+            Installable = $age.TotalDays -ge $CooldownDays
         }
     } catch {
         Write-Warning "Could not determine publish time for $PackageName@$Version"
@@ -178,7 +178,8 @@ function Get-LatestMatureNpmRelease {
         [object]$ApiData,
         [string]$MinimumVersion,
         [string]$MaximumVersion,
-        [bool]$ProductionReleasesOnly = $true
+        [bool]$ProductionReleasesOnly = $true,
+        [int]$CooldownDays = $script:ReleaseCooldownDays
     )
 
     if (-not $ApiData -or -not $ApiData.versions -or -not $ApiData.time) { return $null }
@@ -195,7 +196,7 @@ function Get-LatestMatureNpmRelease {
         try {
             $publishedAt = [DateTimeOffset]::Parse("$($publishedProperty.Value)").ToUniversalTime()
             $age = [DateTimeOffset]::UtcNow - $publishedAt
-            if ($age.TotalDays -ge $script:ReleaseCooldownDays) {
+            if ($age.TotalDays -ge $CooldownDays) {
                 return [PSCustomObject]@{
                     Version     = $version
                     PublishedAt = $publishedAt

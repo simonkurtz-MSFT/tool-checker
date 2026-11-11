@@ -6,7 +6,7 @@ $catalogPath = Join-Path $repositoryPath 'tool-checker.json'
 Describe 'Catalog JSON Schema' {
     BeforeEach {
         $catalog = @{
-            settings = @{ CooldownDays = 8 }
+            settings = @{ CooldownDays = 8; MaximumCooldownDays = 30 }
             tools = @{
                 example = @{
                     Name = 'Example CLI'
@@ -30,6 +30,10 @@ Describe 'Catalog JSON Schema' {
     It 'accepts <Name>' -TestCases @(
         @{ Name = 'omitted enabled and production defaults'; Change = { param($catalog) } },
         @{ Name = 'zero cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 0 } },
+        @{ Name = 'a catalog-defined maximum'; Change = { param($catalog) $catalog.settings.MaximumCooldownDays = 45; $catalog.settings.CooldownDays = 40; $catalog.tools.example.CooldownDays = 45 } },
+        @{ Name = 'per-tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = 12 } },
+        @{ Name = 'zero-day tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = 0 } },
+        @{ Name = 'maximum tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = 30 } },
         @{ Name = 'unattended operation hints and false Windows overrides'; Change = {
             param($catalog)
             $catalog.tools.example.InstallUnattended = $true
@@ -37,7 +41,7 @@ Describe 'Catalog JSON Schema' {
             $catalog.tools.example.WindowsInstallUnattended = $false
             $catalog.tools.example.WindowsUpdateUnattended = $true
         } },
-        @{ Name = 'maximum cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 2147483647 } },
+        @{ Name = 'maximum cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 30 } },
         @{ Name = 'an upstream informational release endpoint'; Change = { param($catalog) $catalog.tools.example.LatestReleaseApiUrl = 'https://api.github.com/repos/example/cli/releases/latest' } },
         @{ Name = 'an explicit version command'; Change = { param($catalog) $catalog.tools.example.Remove('VersionFlag'); $catalog.tools.example.VersionCommand = 'example version --json' } },
         @{ Name = 'a custom checker without standard-only fields'; Change = { param($catalog) $catalog.tools.example = @{ Name = 'Custom'; CheckType = 'custom'; ToolFile = 'different.filename.ps1'; UpdateType = 'custom'; UpdateCommand = 'custom update'; ReleaseNotesUrl = '' } } },
@@ -64,13 +68,22 @@ Describe 'Catalog JSON Schema' {
 
     It 'rejects <Name>' -TestCases @(
         @{ Name = 'unknown root properties'; Change = { param($catalog) $catalog.setting = @{} } },
-        @{ Name = 'missing settings'; Change = { param($catalog) $catalog.Remove('settings') } },
         @{ Name = 'missing tools'; Change = { param($catalog) $catalog.Remove('tools') } },
-        @{ Name = 'missing cooldown'; Change = { param($catalog) $catalog.settings.Remove('CooldownDays') } },
+        @{ Name = 'missing settings'; Change = { param($catalog) $catalog.Remove('settings') } },
+        @{ Name = 'missing default cooldown'; Change = { param($catalog) $catalog.settings.Remove('CooldownDays') } },
+        @{ Name = 'missing maximum cooldown'; Change = { param($catalog) $catalog.settings.Remove('MaximumCooldownDays') } },
+        @{ Name = 'negative maximum cooldown'; Change = { param($catalog) $catalog.settings.MaximumCooldownDays = -1 } },
+        @{ Name = 'fractional maximum cooldown'; Change = { param($catalog) $catalog.settings.MaximumCooldownDays = 1.5 } },
+        @{ Name = 'string maximum cooldown'; Change = { param($catalog) $catalog.settings.MaximumCooldownDays = '30' } },
+        @{ Name = 'null maximum cooldown'; Change = { param($catalog) $catalog.settings.MaximumCooldownDays = $null } },
+        @{ Name = 'negative tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = -1 } },
+        @{ Name = 'fractional tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = 1.5 } },
+        @{ Name = 'string tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = '8' } },
+        @{ Name = 'null tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = $null } },
+        @{ Name = 'boolean tool cooldown'; Change = { param($catalog) $catalog.tools.example.CooldownDays = $true } },
         @{ Name = 'negative cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = -1 } },
         @{ Name = 'fractional cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 1.5 } },
         @{ Name = 'string cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = '8' } },
-        @{ Name = 'out-of-range cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 2147483648 } },
         @{ Name = 'unknown settings'; Change = { param($catalog) $catalog.settings.CooldownDay = 8 } },
         @{ Name = 'invalid catalog IDs'; Change = { param($catalog) $catalog.tools['Bad_ID'] = $catalog.tools.example; $catalog.tools.Remove('example') } },
         @{ Name = 'missing display name'; Change = { param($catalog) $catalog.tools.example.Remove('Name') } },

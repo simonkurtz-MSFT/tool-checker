@@ -50,14 +50,25 @@ Describe 'npm release selection' {
     }
 
     It 'uses the same version in both columns with a zero-day cooldown' {
-        $script:ReleaseCooldownDays = 0
+        $toolsConfig['ncu'].CooldownDays = 0
         try {
             $plan = Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-ReleasePlan' -Arguments @{ ToolName = 'ncu'; InstalledVersion = '1.0.0' }
             $plan.LatestCooldown | Should Be '1.2.0'
             $plan.LatestReleased | Should Be '1.2.0'
-        } finally { $script:ReleaseCooldownDays = 8 }
+        } finally { $toolsConfig['ncu'].CooldownDays = 8 }
     }
 
+    It 'uses an independent cooldown for each tool without changing the catalog default' {
+        $toolsConfig['ncu'].CooldownDays = 7
+        try {
+            $fast = Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-ReleasePlan' -Arguments @{ ToolName = 'ncu'; InstalledVersion = '1.0.0' }
+            $normal = Invoke-PackageManagerOperation -PackageManager 'npm.ps1' -Operation 'Get-ReleasePlan' -Arguments @{ ToolName = 'pnpm'; InstalledVersion = '1.0.0' }
+            $fast.LatestCooldown | Should Be '1.2.0'
+            $normal.LatestCooldown | Should Be '1.1.0'
+            $fast.RequiredAgeDays | Should Be 7
+            $normal.RequiredAgeDays | Should Be 8
+        } finally { $toolsConfig['ncu'].CooldownDays = 8 }
+    }
     It 'does not label an unverified release as cooldown-safe' {
         Mock Invoke-SafeApiRequest { [pscustomobject]@{ 'dist-tags' = [pscustomobject]@{ latest = '1.2.0' } } }
         Mock Get-NpmVersionReleaseInfo { $null }

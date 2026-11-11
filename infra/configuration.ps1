@@ -1,5 +1,17 @@
 # Catalog/env parsing, selection, defaults, and validation. Readers return snapshots
 # without loading tools or publishing shared state; bootstrap owns those later steps.
+function Assert-CooldownDays {
+    param(
+        [object]$Value,
+        [Parameter(Mandatory)][long]$MaximumCooldownDays,
+        [string]$Context = 'CooldownDays'
+    )
+
+    if (($Value -isnot [int] -and $Value -isnot [long]) -or $Value -lt 0 -or $Value -gt $MaximumCooldownDays) {
+        throw "$Context must be a nonnegative integer no greater than $MaximumCooldownDays."
+    }
+}
+
 function Get-ToolSortKey {
     param([string]$ToolName, [object]$Configuration, [object]$Row)
     $group = if ($Configuration.SortGroup) { $Configuration.SortGroup } else { $ToolName }
@@ -159,17 +171,19 @@ function Read-ToolCheckerConfiguration {
         [Parameter(Mandatory)][string]$ConfigPath,
         [Parameter(Mandatory)][string]$EnvFile,
         [bool]$HasCooldownOverride = $false,
-        [ValidateRange(0, 2147483647)][int]$CooldownDays
+        [int]$CooldownDays
     )
 
     $toolsConfig = [ordered]@{}
     $toolsJson = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $maximumCooldownDays = $toolsJson.settings.MaximumCooldownDays
+    if (($maximumCooldownDays -isnot [int] -and $maximumCooldownDays -isnot [long]) -or $maximumCooldownDays -lt 0) {
+        throw 'Catalog settings.MaximumCooldownDays must be a nonnegative integer.'
+    }
     $catalogCooldownDays = $toolsJson.settings.CooldownDays
     # Validate the catalog even with an override; explicit presence makes zero meaningful.
-    if (($catalogCooldownDays -isnot [int] -and $catalogCooldownDays -isnot [long]) -or
-        $catalogCooldownDays -lt 0 -or $catalogCooldownDays -gt [int]::MaxValue) {
-        throw 'Catalog settings.CooldownDays must be a nonnegative integer no greater than 2147483647.'
-    }
+    Assert-CooldownDays -Value $catalogCooldownDays -MaximumCooldownDays $maximumCooldownDays -Context 'Catalog settings.CooldownDays'
+    Assert-CooldownDays -Value $CooldownDays -MaximumCooldownDays $maximumCooldownDays -Context 'Runtime CooldownDays'
     $resolvedCooldownDays = if ($HasCooldownOverride) { $CooldownDays } else { [int]$catalogCooldownDays }
     $resolvedEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
     $registryEnvironment = Read-DotEnvFile -Path $resolvedEnvFile
@@ -196,6 +210,12 @@ function Read-ToolCheckerConfiguration {
             }
         }
         $toolEntry['Id'] = $catalogEntry.Id
+        if ($toolEntry.ContainsKey('CooldownDays')) {
+            Assert-CooldownDays -Value $toolEntry.CooldownDays -MaximumCooldownDays $maximumCooldownDays -Context "Tool '$toolName' property 'CooldownDays'"
+        }
+        if ($HasCooldownOverride -or -not $toolEntry.ContainsKey('CooldownDays')) {
+            $toolEntry['CooldownDays'] = $resolvedCooldownDays
+        }
         foreach ($property in @('InstallUnattended', 'UpdateUnattended', 'WindowsInstallUnattended', 'WindowsUpdateUnattended')) {
             if ($toolEntry.ContainsKey($property) -and $toolEntry[$property] -isnot [bool]) {
                 throw "Tool '$toolName' property '$property' must be a boolean."
@@ -217,6 +237,7 @@ function Read-ToolCheckerConfiguration {
         ResolvedEnvFile = $resolvedEnvFile
         RegistryEnvironment = $registryEnvironment
         CooldownDays = $resolvedCooldownDays
+        MaximumCooldownDays = $maximumCooldownDays
     }
 }
 

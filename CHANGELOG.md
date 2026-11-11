@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Allow per-tool release cooldowns with the default and maximum defined in the
+  catalog (shipped as eight and 30 days). The runtime override still takes
+  precedence for every tool.
+- Apply cooldowns to non-npm release sources that provide publish dates, preserving
+  informational release versions while withholding updates until they mature.
+
+### Fixed
+
+- Reject update registration for cooldown-blocked releases, keeping them out of
+  interactive and automatic updates, including when both PowerShell rows are shown.
+
 ## [2.9.0] - 2026-10-23
 
 ### Changed

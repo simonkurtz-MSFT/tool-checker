@@ -45,6 +45,31 @@ Describe 'Node release planning' {
 }
 
 Describe 'Node.js tool integration' {
+    It 'enforces a <Days>-day cooldown on a release aged <Age> days' -TestCases @(
+        @{ Days = 8; Age = 7.5; Actions = 0 },
+        @{ Days = 8; Age = 8; Actions = 1 },
+        @{ Days = 0; Age = 0; Actions = 1 }
+    ) {
+        param($Days, $Age, $Actions)
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
+        $toolsConfig.NodeJS.CooldownDays = $Days
+        $script:NodePublishedAt = [DateTimeOffset]::UtcNow.AddDays(-$Age).ToString('O')
+        Mock Test-CommandExists { $true }
+        Mock Test-IsWindowsPlatform { $true }
+        Mock Get-CommandVersion { 'v22.1.0' }
+        Mock Get-WingetLatestVersion { '22.1.1' }
+        Mock Invoke-SafeApiRequest {
+            @([PSCustomObject]@{ version = 'v22.1.1'; lts = 'Example'; date = $script:NodePublishedAt })
+        }
+        try {
+            Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = '1/1' }
+            $results.Tools.NodeJS.LatestReleased | Should Be 'v22.1.1'
+            $results.AvailableUpdates.Count | Should Be $Actions
+            if ($Actions -gt 0) { $results.AvailableUpdates[0].Command | Should Match '\-\-version 22\.1\.1' }
+        } finally { $toolsConfig.NodeJS.CooldownDays = 8 }
+    }
+
     It 'runs the extracted Node.js checker and release planner in a network-free worker' {
         $previousResults = $results
         $results = New-ToolCheckResults

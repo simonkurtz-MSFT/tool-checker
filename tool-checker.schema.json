@@ -14,14 +14,15 @@
     "settings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["CooldownDays"],
+      "required": ["CooldownDays", "MaximumCooldownDays"],
       "properties": {
         "CooldownDays": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 2147483647,
-          "default": 8,
-          "description": "Release cooldown in days. The runtime -CooldownDays option overrides this value, including with zero."
+          "$ref": "#/definitions/cooldownDays",
+          "description": "Default release cooldown in full days when a tool has no override. Runtime validates this against settings.MaximumCooldownDays. Runtime -CooldownDays overrides all tools, including with zero."
+        },
+        "MaximumCooldownDays": {
+          "$ref": "#/definitions/cooldownDays",
+          "description": "Maximum allowed default, per-tool, or runtime cooldown. Runtime enforces this catalog-defined limit."
         }
       }
     },
@@ -35,6 +36,7 @@
     }
   },
   "definitions": {
+    "cooldownDays": { "type": "integer", "minimum": 0 },
     "nonBlankString": { "type": "string", "pattern": "\\S" },
     "uri": { "type": "string", "minLength": 1, "format": "uri" },
     "packageManagerFile": {
@@ -81,6 +83,10 @@
         "enabled": { "type": "boolean", "default": true, "description": "Whether the selected tool is checked and its definitions loaded." },
         "CheckType": { "type": "string", "enum": ["standard", "custom"] },
         "ProductionReleasesOnly": { "type": "boolean", "default": true },
+        "CooldownDays": {
+          "$ref": "#/definitions/cooldownDays",
+          "description": "Optional tool-specific release cooldown in full days. Defaults to settings.CooldownDays; runtime -CooldownDays takes precedence. Runtime validates against settings.MaximumCooldownDays. Applied where the release source provides publish dates."
+        },
         "ToolFile": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*\\.ps1$",

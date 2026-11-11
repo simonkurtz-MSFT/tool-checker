@@ -21,8 +21,9 @@ function Get-InstalledVersion-PackageManager {
 function Get-ReleasePlan-PackageManager {
     param([string]$ToolName, [string]$InstalledVersion)
     $config = Get-ToolConfiguration -ToolName $ToolName
-    @{
-        Latest = Get-WingetLatestVersion -ToolName $ToolName -PackageId $config.WingetId
+    $latest = Get-WingetLatestVersion -ToolName $ToolName -PackageId $config.WingetId
+    $plan = @{
+        Latest = $latest
         Installable = $true
         Command = if ($config.WindowsUpdateCommand) { $config.WindowsUpdateCommand } else { $config.UpdateCommand }
         Type = $config.UpdateType
@@ -30,6 +31,28 @@ function Get-ReleasePlan-PackageManager {
         SourceLabel = ' in WinGet'
         CurrentLabel = ' with WinGet'
     }
+    $publishedAt = Get-WingetReleaseDate -ToolName $ToolName -PackageId $config.WingetId -Version $latest
+    if ($publishedAt) {
+        $age = Get-ReleaseAgeInfo -PublishedAt $publishedAt -CooldownDays $config.CooldownDays
+        $plan.Installable = $null -ne $age -and $age.Installable
+        $plan.LatestReleased = $latest
+        $plan.LatestCooldown = if ($plan.Installable) { $latest } else { $null }
+        $plan.AgeDays = if ($age) { $age.AgeDays } else { $null }
+        $plan.RequiredAgeDays = $config.CooldownDays
+        $plan.MaturityBlocked = $null -ne $age -and -not $age.Installable
+        $plan.BlockReason = if ($age) { "this release requires $($config.CooldownDays) full days of cooldown." } else { 'the release age could not be verified.' }
+    }
+    $plan
+}
+
+function Get-WingetReleaseDate {
+    param([string]$ToolName, [string]$PackageId, [string]$Version)
+    $owner = Get-ResultToolId -Name $ToolName
+    if (-not $owner) { return $null }
+    $releases = $results.ToolState[$owner].WingetReleases
+    if (-not $releases) { return $null }
+    $release = $releases[$PackageId]
+    if ($release -and $release.Version -eq $Version) { $release.PublishedAt }
 }
 
 function Get-WingetInstalledVersion {
@@ -75,7 +98,15 @@ function Get-WingetLatestVersion {
         if (-not $versionMatch.Success) {
             throw 'Could not parse the package version from winget output.'
         }
-        $versionMatch.Groups[1].Value
+        $version = $versionMatch.Groups[1].Value
+        $owner = Get-ResultToolId -Name $ToolName
+        if ($owner) {
+            $state = Get-ToolState -ToolId $owner
+            if (-not $state.WingetReleases) { $state.WingetReleases = @{} }
+            $dateMatch = [regex]::Match($metadataText, '(?m)^\s*Release Date:\s*(\S+)\s*$')
+            $state.WingetReleases[$PackageId] = @{ Version = $version; PublishedAt = if ($dateMatch.Success) { $dateMatch.Groups[1].Value } else { $null } }
+        }
+        $version
     } catch {
         $message = "Could not check $ToolName in WinGet. $(Get-DetailedErrorMessage $_)"
         Write-Warning "  $message"

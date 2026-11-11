@@ -68,8 +68,8 @@ Describe 'Available update construction' {
 
 Describe 'Tool update registration' {
     BeforeEach {
-        $results.Updates = @()
-        $results.AvailableUpdates = @()
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
     }
 
     It 'registers a newer version in both update collections' {
@@ -89,6 +89,30 @@ Describe 'Tool update registration' {
         $registered | Should Be $false
         $results.Updates.Count | Should Be 0
         $results.AvailableUpdates.Count | Should Be 0
+    }
+
+    It 'withholds registration and menu actions for a <Case>' -TestCases @(
+        @{ Case = 'young release'; PublishedAt = [DateTimeOffset]::UtcNow.AddDays(-7.999).ToString('O') },
+        @{ Case = 'release with an invalid date'; PublishedAt = 'invalid' }
+    ) {
+        param($Case, $PublishedAt)
+        $results.Tools['Example CLI'] = @{ Installed = '1.0.0'; Latest = '' }
+        Set-ToolReleaseInformation -ToolName 'Example CLI' -LatestVersion '1.1.0' -PublishedAt $PublishedAt -CooldownDays 8 | Out-Null
+
+        $registered = Register-ToolUpdate -Name 'Example CLI' -InstalledVersion '1.0.0' -LatestVersion '1.1.0' -Command 'example update' -Type 'direct'
+
+        $registered | Should Be $false
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+        @(Get-AvailableActions).Count | Should Be 0
+    }
+
+    It 'registers a release once its full cooldown is satisfied' {
+        $results.Tools['Example CLI'] = @{ Installed = '1.0.0'; Latest = '' }
+        Set-ToolReleaseInformation -ToolName 'Example CLI' -LatestVersion '1.1.0' -PublishedAt ([DateTimeOffset]::UtcNow.AddDays(-8)) -CooldownDays 8 | Out-Null
+
+        Register-ToolUpdate -Name 'Example CLI' -InstalledVersion '1.0.0' -LatestVersion '1.1.0' -Command 'example update' -Type 'direct' | Should Be $true
+        @(Get-AvailableActions).Count | Should Be 1
     }
 }
 
@@ -137,6 +161,7 @@ Describe 'Standard tool update flow' {
         $results.Updates = @()
         $results.AvailableUpdates = @()
         $results.MaturityBlockedUpdates = @()
+        Mock Invoke-SafeApiRequest { [PSCustomObject]@{ tag_name = 'v0.46.1'; published_at = '2020-01-01' } }
     }
 
     It 'pins a self-reported Bicep update to the reported version' {
@@ -155,6 +180,13 @@ Describe 'Standard tool update flow' {
 
         $results.Tools['Azure Bicep CLI'].Latest | Should Be '0.45.0'
         $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+
+    It 'applies release dates to a self-reported candidate without substituting a newer API version' {
+        Mock Invoke-SafeApiRequest { [PSCustomObject]@{ tag_name = 'v0.46.1'; published_at = [DateTimeOffset]::UtcNow.ToString('O') } }
+        Get-StandardToolUpdates -ToolName 'Azure Bicep CLI' -InstalledVersion '0.45.0' -RawOutput 'A new Bicep release is available: v0.46.1'
+        $results.Tools['Azure Bicep CLI'].LatestReleased | Should Be '0.46.1'
         $results.AvailableUpdates.Count | Should Be 0
     }
 
@@ -204,4 +236,72 @@ Describe 'Platform configuration' {
 
         Get-UpdateCommand -ToolName 'Unknown CLI' -Installed '1.0.0' -Latest '2.0.0' | Should Be ''
     }
+}
+
+Describe 'Dated release cooldowns' {
+        BeforeEach {
+            $results = New-ToolCheckResults
+            $results.Tools.Deno = @{ ToolId = 'deno'; Installed = '2.0.0'; Latest = '' }
+            $SkipUpdate = $false
+            Mock Invoke-SafeApiRequest {
+                [PSCustomObject]@{ tag_name = 'v2.1.0'; published_at = $script:CandidatePublishedAt }
+            }
+        }
+
+        It 'applies the tool cooldown for <Case>' -TestCases @(
+            @{ Case = 'a release younger than eight full days'; Age = 7.999; Days = 8; Actions = 0 },
+            @{ Case = 'exactly eight full days'; Age = 8; Days = 8; Actions = 1 },
+            @{ Case = 'a shorter tool override'; Age = 3; Days = 2; Actions = 1 },
+            @{ Case = 'a longer tool override'; Age = 9; Days = 12; Actions = 0 },
+            @{ Case = 'zero delay'; Age = 0; Days = 0; Actions = 1 },
+            @{ Case = 'a future date even with zero delay'; Age = -1; Days = 0; Actions = 0 }
+        ) {
+            param($Case, $Age, $Days, $Actions)
+            $script:CandidatePublishedAt = [DateTimeOffset]::UtcNow.AddDays(-$Age).ToString('O')
+            $toolsConfig.Deno.CooldownDays = $Days
+            try {
+                Get-StandardToolUpdates -ToolName 'Deno' -InstalledVersion '2.0.0'
+                $results.AvailableUpdates.Count | Should Be $Actions
+                $results.Tools.Deno.LatestReleased | Should Be '2.1.0'
+                $results.Tools.Deno.Installable | Should Be ([bool]$Actions)
+                if ($Actions -eq 0) {
+                    $results.Tools.Deno.LatestCooldown | Should BeNullOrEmpty
+                    $results.MaturityBlockedUpdates[0].RequiredAgeDays | Should Be $Days
+                    Get-UpdateCommand -ToolName Deno -Installed '2.0.0' -Latest '2.1.0' | Should Be ''
+                } else {
+                    $results.Tools.Deno.LatestCooldown | Should Be '2.1.0'
+                }
+            } finally { $toolsConfig.Deno.CooldownDays = 8 }
+        }
+
+        It 'blocks an invalid supplied date instead of offering an unverified update' {
+            $script:CandidatePublishedAt = 'invalid'
+            Get-StandardToolUpdates -ToolName 'Deno' -InstalledVersion '2.0.0'
+            $results.Tools.Deno.Installable | Should Be $false
+            $results.AvailableUpdates.Count | Should Be 0
+            Get-UpdateCommand -ToolName Deno -Installed '2.0.0' -Latest '2.1.0' | Should Be ''
+        }
+
+        It 'preserves existing update behavior for a source without publish dates' {
+            $script:CandidatePublishedAt = $null
+            Get-StandardToolUpdates -ToolName 'Deno' -InstalledVersion '2.0.0'
+            $results.AvailableUpdates.Count | Should Be 1
+            $results.Tools.Deno.ContainsKey('LatestCooldown') | Should Be $false
+        }
+
+        It 'uses the earliest package upload for the exact checked release' {
+            $metadata = '{"releases":{"2.1.0":[{"upload_time_iso_8601":"2020-01-02T00:00:00Z"},{"upload_time_iso_8601":"2020-01-01T00:00:00Z"}]}}' | ConvertFrom-Json
+            $publishedAt = Get-ApiReleasePublishedAt -ApiData $metadata -Version '2.1.0' -ToolName Deno
+            ([DateTimeOffset]$publishedAt).ToUniversalTime().ToString('yyyy-MM-dd') | Should Be '2020-01-01'
+        }
+
+        It 'accepts dates already deserialized by the API client without culture-dependent formatting' {
+            $age = Get-ReleaseAgeInfo -PublishedAt ([DateTime]::UtcNow.AddDays(-8)) -CooldownDays 8
+            $age.Installable | Should Be $true
+        }
+
+        It 'does not use a different upstream versions publish date' {
+            $metadata = [PSCustomObject]@{ tag_name = 'v2.2.0'; published_at = '2020-01-01' }
+            Get-ApiReleasePublishedAt -ApiData $metadata -Version '2.1.0' -ToolName Deno | Should BeNullOrEmpty
+        }
 }

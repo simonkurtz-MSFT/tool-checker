@@ -32,6 +32,8 @@ function Test-Tool {
     Write-Host "  Checking for $toolName updates..."
     $latestVersion = Get-WingetLatestVersion -ToolName $toolName -PackageId $config.WingetId
     if (-not (Set-LatestToolVersion -ToolNames $toolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel 'WinGet version')) { return }
+    $publishedAt = Get-WingetReleaseDate -ToolName $toolName -PackageId $config.WingetId -Version $latestVersion
+    if (-not (Set-ToolReleaseInformation -ToolName $toolName -LatestVersion $latestVersion -PublishedAt $publishedAt -CooldownDays $config.CooldownDays)) { return }
 
     if (Register-ToolUpdate -Name $toolName -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
         Write-Warning "  $toolName has available updates in WinGet: $installedVersion -> $latestVersion"

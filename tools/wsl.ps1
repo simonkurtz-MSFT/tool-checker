@@ -68,6 +68,7 @@ function Test-Tool {
     $latestRelease = $latestVersionedRelease.Release
     $latestVersion = ConvertTo-CanonicalSemanticVersion $latestVersionedRelease.VersionText
     $results.Tools["WSL"].Latest = $latestVersion
+    if (-not (Set-ToolReleaseInformation -ToolName 'WSL' -LatestVersion $latestVersion -PublishedAt $latestRelease.published_at -CooldownDays $config.CooldownDays)) { return }
 
     if (Register-ToolUpdate -Name 'WSL' -InstalledVersion $installedVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
         $releaseType = if ($latestRelease.prerelease) { "prerelease" } else { "release" }

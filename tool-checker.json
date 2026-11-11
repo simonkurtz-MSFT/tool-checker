@@ -1,7 +1,8 @@
 {
   "$schema": "./tool-checker.schema.json",
   "settings": {
-    "CooldownDays": 8
+    "CooldownDays": 8,
+    "MaximumCooldownDays": 30
   },
   "tools": {
     "nodejs": {
@@ -162,6 +163,7 @@
       }
     },
     "azure-cli": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
@@ -191,6 +193,7 @@
       }
     },
     "azure-dev-cli": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "ToolFile": "azure-dev-cli.ps1",
@@ -220,6 +223,7 @@
       }
     },
     "azure-cli-extensions": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": true,
       "RequiredProperties": ["Command"],
@@ -236,6 +240,7 @@
       "ReleaseNotesUrl": "https://learn.microsoft.com/en-us/cli/azure/azure-cli-extensions-list"
     },
     "azure-bicep-cli": {
+      "CooldownDays": 0,
       "InstallUnattended": true,
       "UpdateUnattended": true,
       "ToolFile": "azure-bicep-cli.ps1",
@@ -260,6 +265,7 @@
       }
     },
     "dotnet-sdk": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
@@ -332,6 +338,7 @@
       }
     },
     "git": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "ToolFile": "git.ps1",
@@ -359,6 +366,7 @@
       }
     },
     "github-cli": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
@@ -385,6 +393,7 @@
       }
     },
     "github-copilot-cli": {
+      "CooldownDays": 0,
       "InstallUnattended": true,
       "UpdateUnattended": true,
       "InstallationsPackageManager": "npm.ps1",
@@ -473,6 +482,7 @@
       }
     },
     "wsl": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "VersionCommand", "VersionParseRegex", "ApiUrl"],
@@ -490,6 +500,7 @@
       "ApiUrl": "https://api.github.com/repos/microsoft/WSL/releases?per_page=100"
     },
     "powershell": {
+      "CooldownDays": 0,
       "InstallUnattended": false,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],

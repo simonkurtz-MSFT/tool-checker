@@ -95,6 +95,7 @@ function Get-DotNetSDKReleasePlan {
         $latestSdkByChannel[$channel.'channel-version'] = @{
             LatestSdk = $channel.'latest-sdk'
             SupportPhase = $channel.'support-phase'
+            PublishedAt = $channel.'latest-release-date'
         }
     }
 
@@ -123,6 +124,14 @@ function Get-DotNetSDKReleasePlan {
         MaxInstalledMajor = $maxInstalledMajor
         NewerMajors = @($availableMajors | Where-Object { $_ -gt $maxInstalledMajor } | Sort-Object -Descending)
     }
+}
+
+function Get-DotNetSDKPublishedAt {
+    param([string]$Version, [hashtable]$LatestSdkByChannel)
+
+    # Channel dates describe the channel's latest SDK, not a lagging WinGet package.
+    $release = $LatestSdkByChannel.Values | Where-Object { $_.LatestSdk -eq $Version } | Select-Object -First 1
+    if ($release) { $release.PublishedAt }
 }
 #endregion
 
@@ -160,6 +169,7 @@ function Test-Tool {
         $latestSdkByChannel = $releasePlan.LatestSdkByChannel
         $byMajor = $releasePlan.ByMajor
         $latestSdkByMajor = @{}
+        $publishedAtByMajor = @{}
 
         Write-Host "`n  Version Summary:"
         $maxLen = ($byMajor.Keys | ForEach-Object { ".NET $_".Length } | Measure-Object -Maximum).Maximum
@@ -181,9 +191,8 @@ function Test-Tool {
                 $isGoLive = $latestSdkByChannel[$chVer].SupportPhase -eq 'go-live'
                 if ($config.ProductionReleasesOnly -and -not $isGoLive -and -not (Test-IsProductionVersion $latestSdk)) { continue }
                 $latestSdkByMajor[$maj] = $latestSdk
-                if ((Compare-SemanticVersions $latestSdk $highest) -gt 0) {
-                    Write-Warning "    .NET $highest -> $latestSdk (update available)"
-                    $results.Updates += ".NET SDK: $highest -> $latestSdk"
+                if (Test-IsWindowsPlatform) {
+                    $publishedAtByMajor[$maj] = Get-WingetReleaseDate -ToolName ".NET SDK $maj" -PackageId $wingetId -Version $latestSdk
                 }
             }
         }
@@ -191,6 +200,30 @@ function Test-Tool {
         $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel -LatestSdkByMajor $latestSdkByMajor
         foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { (Get-ToolState 'dotnet-sdk')[$entry.Key] = $entry.Value }
         foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
+        $eligibleByMajor = @{}
+        $hasBlockedRelease = $false
+        foreach ($maj in $byMajor.Keys) {
+            $highest = Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1
+            foreach ($version in $byMajor[$maj]) {
+                $name = ".NET SDK $version"
+                $latest = $results.Tools[$name].Latest
+                if (-not $latest) { continue }
+                $publishedAt = $publishedAtByMajor[$maj]
+                if (-not $publishedAt) { $publishedAt = Get-DotNetSDKPublishedAt -Version $latest -LatestSdkByChannel $latestSdkByChannel }
+                $eligible = Set-ToolReleaseInformation -ToolName $name -LatestVersion $latest -PublishedAt $publishedAt -CooldownDays $config.CooldownDays
+                if (-not $eligible) { $hasBlockedRelease = $true }
+                foreach ($property in @('Latest', 'LatestCooldown', 'LatestReleased', 'AgeDays', 'Installable', 'BlockReason')) {
+                    if ($results.Tools[$name].ContainsKey($property)) {
+                        (Get-ToolState 'dotnet-sdk')[$version][$property] = $results.Tools[$name][$property]
+                    }
+                }
+                if ($version -eq $highest) { $eligibleByMajor[$maj] = $eligible -and $latestSdkByMajor.ContainsKey($maj) }
+            }
+            if ($eligibleByMajor[$maj] -and (Compare-SemanticVersions $latestSdkByMajor[$maj] $highest) -gt 0) {
+                Write-Warning "    .NET $highest -> $($latestSdkByMajor[$maj]) (update available)"
+                $results.Updates += ".NET SDK: $highest -> $($latestSdkByMajor[$maj])"
+            }
+        }
 
         # New-major suggestions on Windows require a version available in WinGet.
         $maxInstalledMajor = $releasePlan.MaxInstalledMajor
@@ -204,6 +237,23 @@ function Test-Tool {
                 if ($wingetVersion) { $newerMajorVersions[$_] = $wingetVersion; $true } else { $false }
             })
         }
+        $newerMajors = @($newerMajors | Where-Object {
+            $major = $_
+            $channel = $latestSdkByChannel.Keys | Where-Object { ($_ -split '\.')[0] -eq "$major" } |
+                Sort-Object -Descending | Select-Object -First 1
+            $candidate = if ($newerMajorVersions[$major]) { $newerMajorVersions[$major] } else { $latestSdkByChannel[$channel].LatestSdk }
+            $name = ".NET SDK $major (new major version)"
+            $results.Tools[$name] = @{ ToolId = 'dotnet-sdk'; ItemId = "$major"; Installed = ''; Latest = $candidate }
+            $publishedAt = if (Test-IsWindowsPlatform) {
+                $packageId = $releasePlan.WingetPackageIds["$major"]
+                if (-not $packageId) { $packageId = "Microsoft.DotNet.SDK.$major" }
+                Get-WingetReleaseDate -ToolName $name -PackageId $packageId -Version $candidate
+            }
+            if (-not $publishedAt) { $publishedAt = Get-DotNetSDKPublishedAt -Version $candidate -LatestSdkByChannel $latestSdkByChannel }
+            $eligible = Set-ToolReleaseInformation -ToolName $name -LatestVersion $candidate -PublishedAt $publishedAt -CooldownDays $config.CooldownDays
+            if (-not $eligible) { $hasBlockedRelease = $true }
+            $eligible
+        })
         foreach ($m in $newerMajors) {
             $versionLabel = if ($newerMajorVersions[$m]) { " (WinGet: $($newerMajorVersions[$m]))" } else { "" }
             Write-Warning "    Newer .NET major version available: $m$versionLabel (you have up to $maxInstalledMajor)"
@@ -214,19 +264,19 @@ function Test-Tool {
             foreach ($maj in $byMajor.Keys) {
                 $highest = Sort-SemanticVersions $byMajor[$maj] | Select-Object -Last 1
                 $latest  = (Get-ToolState 'dotnet-sdk')[$highest].Latest
-                if ($latest -and $latest -ne "-" -and (Compare-SemanticVersions $latest $highest) -gt 0) {
+                if ($eligibleByMajor[$maj] -and $latest -and $latest -ne "-" -and (Compare-SemanticVersions $latest $highest) -gt 0) {
                     $upgradeId = $releasePlan.WingetPackageIds[$maj]
                     if (-not $upgradeId) { $upgradeId = "Microsoft.DotNet.SDK.$maj" }
-                    Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade $upgradeId --silent" -Type 'winget' -Details "$highest -> $latest"
+                    Add-AvailableUpdate -Name ".NET SDK $highest" -Command "winget upgrade $upgradeId --silent" -Type 'winget' -Details "$highest -> $latest" -Version $latest
                 }
             }
             foreach ($m in $newerMajors) {
                 $details = if ($newerMajorVersions[$m]) { "Latest in WinGet: $($newerMajorVersions[$m])" } else { 'New major version' }
                 $installId = $releasePlan.WingetPackageIds["$m"]
                 if (-not $installId) { $installId = "Microsoft.DotNet.SDK.$m" }
-                Add-AvailableUpdate -Name ".NET SDK $m (new major version)" -Command "winget install $installId --silent" -Type 'winget-new' -Details $details
+                Add-AvailableUpdate -Name ".NET SDK $m (new major version)" -Command "winget install $installId --silent" -Type 'winget-new' -Details $details -Version $results.Tools[".NET SDK $m (new major version)"].Latest
             }
-        } else {
+        } elseif (-not $hasBlockedRelease) {
             Write-Success "All .NET SDKs are up to date with their latest patches"
         }
     } catch {
@@ -244,16 +294,22 @@ function Refresh-ToolStatus {
     $sdkRecords = ConvertFrom-DotNetSDKList -OutputLines $sdkList
     if ($sdkRecords.Count -eq 0) { return }
 
-    # Rebuild installed-SDK inventory from scratch so stale versions disappear
-    # and newly-installed patch releases show up.
+    # Keep the checked candidate and its release fields while replacing installed rows.
+    $previousRows = @{}
     $staleKeys = @($results.Tools.Keys | Where-Object { $_ -like ".NET SDK*" })
-    foreach ($k in $staleKeys) { $results.Tools.Remove($k) | Out-Null }
+    foreach ($k in $staleKeys) {
+        $previousRows[$k] = $results.Tools[$k]
+        $results.Tools.Remove($k) | Out-Null
+    }
+    $wingetReleases = (Get-ToolState 'dotnet-sdk').WingetReleases
     (Get-ToolState 'dotnet-sdk').Clear()
+    if ($wingetReleases) { (Get-ToolState 'dotnet-sdk').WingetReleases = $wingetReleases }
 
     # Re-fetch latest-per-channel so Latest / HighestInstalled are accurate
     # in the summary table after an upgrade (fixes blank Latest column when
     # multiple minor versions of the same major are installed).
     $cfg = $toolsConfig[".NET SDK"]
+    $releasePlan = $null
     $latestSdkByChannel = @{}
     if ($cfg -and $cfg.ApiUrl) {
         try {
@@ -261,14 +317,47 @@ function Refresh-ToolStatus {
             $releasePlan = Get-DotNetSDKReleasePlan -InstalledVersions @($sdkRecords.Version) -ReleasesIndex $releasesIndex -ProductionReleasesOnly $cfg.ProductionReleasesOnly
             $latestSdkByChannel = $releasePlan.LatestSdkByChannel
         } catch {
-            # Network hiccup on refresh is non-fatal; leave Latest blank.
+            # Network hiccups must not erase the previously checked release.
         }
     }
 
-    $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel
+    $latestSdkByMajor = @{}
+    foreach ($row in $previousRows.Values) {
+        if ($row.Installed -and $row.Latest) {
+            $major = ($row.Installed -split '\.')[0]
+            $latestSdkByMajor[$major] = $row.Latest
+        }
+    }
+    $inventory = Get-DotNetSDKInventory -SdkRecords $sdkRecords -LatestSdkByChannel $latestSdkByChannel -LatestSdkByMajor $latestSdkByMajor
     foreach ($entry in $inventory.DotNetSDKs.GetEnumerator()) { (Get-ToolState 'dotnet-sdk')[$entry.Key] = $entry.Value }
     foreach ($entry in $inventory.Tools.GetEnumerator()) { $results.Tools[$entry.Key] = $entry.Value }
     $byMajor = $inventory.ByMajor
+    foreach ($entry in $inventory.Tools.GetEnumerator()) {
+        $row = $entry.Value
+        $major = ($row.Installed -split '\.')[0]
+        $previous = $previousRows.Values | Where-Object {
+            $_.Installed -and ($_.Installed -split '\.')[0] -eq $major -and $_.Latest -eq $row.Latest
+        } | Select-Object -First 1
+        foreach ($property in @('LatestCooldown', 'LatestReleased', 'AgeDays', 'Installable', 'BlockReason')) {
+            if ($previous -and $previous.ContainsKey($property)) { $row[$property] = $previous[$property] }
+        }
+        $publishedAt = $null
+        if (Test-IsWindowsPlatform) {
+            $packageId = if ($releasePlan) { $releasePlan.WingetPackageIds[$major] }
+            if (-not $packageId) { $packageId = "Microsoft.DotNet.SDK.$major" }
+            $publishedAt = Get-WingetReleaseDate -ToolName $entry.Key -PackageId $packageId -Version $row.Latest
+        }
+        if (-not $publishedAt) { $publishedAt = Get-DotNetSDKPublishedAt -Version $row.Latest -LatestSdkByChannel $latestSdkByChannel }
+        if ($row.Latest -and ($publishedAt -or -not $previous)) {
+            $null = Set-ToolReleaseInformation -ToolName $entry.Key -LatestVersion $row.Latest -PublishedAt $publishedAt -CooldownDays $cfg.CooldownDays
+        }
+        foreach ($property in @('LatestCooldown', 'LatestReleased', 'AgeDays', 'Installable', 'BlockReason')) {
+            if ($row.ContainsKey($property)) { (Get-ToolState 'dotnet-sdk')[$row.Installed][$property] = $row[$property] }
+        }
+    }
+    foreach ($name in $previousRows.Keys | Where-Object { $_ -like '* (new major version)' }) {
+        if (-not $byMajor.ContainsKey($previousRows[$name].ItemId)) { $results.Tools[$name] = $previousRows[$name] }
+    }
 
     # Prune .NET items from Updates / AvailableUpdates that are now satisfied
     # (either the patch landed or an equal/higher SDK in the same channel is

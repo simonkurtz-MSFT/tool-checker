@@ -72,10 +72,19 @@ catalog casing, including lowercase `enabled`.
 
 ## Tool-specific file template
 
-Keep the npm cooldown default in catalog `settings.CooldownDays`, not in script
-or tool-file constants. The runtime `-CooldownDays` override takes precedence;
-reuse the resolved `$script:ReleaseCooldownDays` in tool and worker checks.
-Cover catalog values, overrides (including zero), and worker propagation in tests.
+Keep cooldown policy in the catalog: `settings.CooldownDays` supplies the default
+and `settings.MaximumCooldownDays` supplies the maximum. Both are required; do not
+add script fallbacks or upper-bound constants. Runtime `-CooldownDays` overrides a
+tool's optional `CooldownDays`, which overrides the catalog default.
+The configuration reader validates all values against the catalog maximum through
+`Assert-CooldownDays`, including catalog values overridden at runtime. The schema
+validates types; cross-field upper bounds are enforced at runtime.
+Use each configuration's resolved `CooldownDays` in tools and workers.
+Cover alternate catalog defaults and maxima, zero overrides, and worker propagation.
+
+For dated candidates, call `Set-ToolReleaseInformation` before registering updates.
+`Register-ToolUpdate` rejects rows marked non-installable, keeping cooldown-blocked
+releases out of both interactive and automatic updates.
 
 Use [tools/_tool-template.ps1](tools/_tool-template.ps1) when extracting or adding
 tool-unique behavior. Prefer `tools/<catalog-id>.ps1` and explicitly set

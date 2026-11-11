@@ -20,15 +20,24 @@ function Test-Tool {
 
         Write-Host "  Checking for PowerShell updates..."
         try {
+            $publishedAt = $null
             $latestVersion = if ((Test-IsWindowsPlatform) -and $config.WingetId) {
-                Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
+                $candidate = Get-WingetLatestVersion -ToolName 'PowerShell' -PackageId $config.WingetId
+                $publishedAt = Get-WingetReleaseDate -ToolName 'PowerShell' -PackageId $config.WingetId -Version $candidate
+                $candidate
             } else {
                 $releases = Invoke-SafeApiRequest -Uri $config.ApiUrl
+                $publishedAt = $releases.published_at
                 $releases.tag_name -replace 'v', ''
             }
             $latestToolNames = @('PowerShell')
             if ($results.Tools['PowerShell Core']) { $latestToolNames += 'PowerShell Core' }
             if (-not (Set-LatestToolVersion -ToolNames $latestToolNames -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly)) { return }
+            $installable = $true
+            foreach ($name in $latestToolNames) {
+                if (-not (Set-ToolReleaseInformation -ToolName $name -LatestVersion $latestVersion -PublishedAt $publishedAt -CooldownDays $config.CooldownDays)) { $installable = $false }
+            }
+            if (-not $installable) { return }
 
             if (Register-ToolUpdate -Name 'PowerShell' -InstalledVersion $pwshVersion -LatestVersion $latestVersion -Command $config.UpdateCommand -Type $config.UpdateType) {
                 $sourceLabel = if (Test-IsWindowsPlatform) { ' in WinGet' } else { '' }

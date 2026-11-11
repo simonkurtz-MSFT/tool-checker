@@ -11,7 +11,8 @@
 .PARAMETER Timeout
     Maximum seconds allowed for each tool check. Default: 60.
 .PARAMETER CooldownDays
-    Override the catalog release cooldown with a nonnegative number of full days.
+    Override all tool release cooldowns, up to catalog settings.MaximumCooldownDays.
+    Otherwise use each tool's CooldownDays, then catalog settings.CooldownDays.
 .PARAMETER EnvFile
     Optional registry policy and tool-selection file. Defaults to the sibling .env.
 .PARAMETER Version
@@ -25,7 +26,7 @@ param(
     [Alias('CheckOnly')][switch]$SkipUpdate,
     [switch]$Force,
     [int]$Timeout = 60,
-    [ValidateRange(0, 2147483647)][int]$CooldownDays,
+    [int]$CooldownDays,
     [string]$EnvFile = (Join-Path $PSScriptRoot '.env'),
     [switch]$Version
 )

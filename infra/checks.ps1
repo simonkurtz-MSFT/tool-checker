@@ -45,6 +45,69 @@ function Invoke-SafeApiRequest {
     }
 }
 
+function Get-ReleaseAgeInfo {
+    param([object]$PublishedAt, [int]$CooldownDays)
+
+    $published = [DateTimeOffset]::MinValue
+    if ($PublishedAt -is [DateTimeOffset] -or $PublishedAt -is [DateTime]) {
+        $published = [DateTimeOffset]$PublishedAt
+    } elseif (-not [DateTimeOffset]::TryParse("$PublishedAt", [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$published)) {
+        Write-Warning "Could not determine release age from publish date '$PublishedAt'."
+        return $null
+    }
+    $age = [DateTimeOffset]::UtcNow - $published.ToUniversalTime()
+    @{
+        PublishedAt = $published
+        AgeDays = [Math]::Max(0, [Math]::Floor($age.TotalDays))
+        Installable = $age.TotalDays -ge $CooldownDays
+    }
+}
+
+function Set-ToolReleaseInformation {
+    # Date-less sources keep their existing policy; a supplied but invalid date is never safe.
+    param(
+        [string]$ToolName,
+        [string]$LatestVersion,
+        [object]$PublishedAt,
+        [int]$CooldownDays
+    )
+
+    $row = $results.Tools[$ToolName]
+    $row.Latest = $LatestVersion
+    if ([string]::IsNullOrWhiteSpace("$PublishedAt")) { return $true }
+
+    $age = Get-ReleaseAgeInfo -PublishedAt $PublishedAt -CooldownDays $CooldownDays
+    $installable = $null -ne $age -and $age.Installable
+    $row.LatestReleased = $LatestVersion
+    $row.LatestCooldown = if ($installable) { $LatestVersion } else { $null }
+    $row.AgeDays = if ($age) { $age.AgeDays } else { $null }
+    $row.Installable = $installable
+    $row.BlockReason = if ($age) { "this release requires $CooldownDays full days of cooldown." } else { 'the release age could not be verified.' }
+    if (-not $installable -and (Test-UpdateAvailable -InstalledVersion $row.Installed -LatestVersion $LatestVersion -ToolName $ToolName)) {
+        if ($age) {
+            $results.MaturityBlockedUpdates += @{ Name = $ToolName; AgeDays = $age.AgeDays; RequiredAgeDays = $CooldownDays }
+        }
+        Write-Host "  FYI only: $ToolName release $LatestVersion; $($row.BlockReason)"
+    }
+    [bool]$installable
+}
+
+function Get-ApiReleasePublishedAt {
+    # Associate dates only with the checked candidate, not an unrelated upstream release.
+    param([object]$ApiData, [string]$Version, [string]$ToolName)
+
+    if ($ApiData.releases) {
+        $files = $ApiData.releases.PSObject.Properties[$Version].Value
+        $date = $files | ForEach-Object { if ($_.upload_time_iso_8601) { $_.upload_time_iso_8601 } else { $_.upload_time } } |
+            Where-Object { $_ } | Sort-Object | Select-Object -First 1
+        if ($date) { return $date }
+    }
+    $apiVersion = Get-LatestVersionFromApi -ApiData $ApiData -ToolName $ToolName
+    if (-not $apiVersion -or (Compare-SemanticVersions -Version1 $apiVersion -Version2 $Version) -ne 0) { return $null }
+    $ApiData.published_at
+}
+
 function Add-NotInstalledTool {
     param([string]$ToolName)
     if ($results.NotInstalled | Where-Object { $_.Name -eq $ToolName }) { return }
@@ -110,6 +173,9 @@ function Register-ToolUpdate {
         [ValidateNotNullOrEmpty()]
         [string]$Type
     )
+
+    $row = $results.Tools[$Name]
+    if ($row -and $row.ContainsKey('Installable') -and -not $row.Installable) { return $false }
 
     if (-not (Test-UpdateAvailable -InstalledVersion $InstalledVersion -LatestVersion $LatestVersion -ToolName $Name)) {
         return $false
@@ -241,6 +307,7 @@ function Get-StandardToolUpdates {
 
     # Resolve the latest version from self-reported output or the API, then register once.
     try {
+        $publishedAt = $null
         $versionLabel = 'version'
         if ($config.UpdateParseRegex) {
             $outputStr = if ($RawOutput -is [array]) { $RawOutput -join ' ' } else { "$RawOutput" }
@@ -251,15 +318,21 @@ function Get-StandardToolUpdates {
             }
             $latestVersion = "$($Matches[1])".Trim().TrimEnd('.')
             $versionLabel = 'reported version'
+            if ($config.ApiUrl) {
+                $apiData = Invoke-SafeApiRequest -Uri $config.ApiUrl
+                if ($apiData) { $publishedAt = Get-ApiReleasePublishedAt -ApiData $apiData -Version $latestVersion -ToolName $ToolName }
+            }
         } else {
             if (-not $config.ApiUrl) { Write-Warning "  No API endpoint configured for $ToolName"; return }
             $apiData = Invoke-SafeApiRequest -Uri $config.ApiUrl
             if (-not $apiData) { return }
             $latestVersion = Get-LatestVersionFromApi -ToolName $ToolName -ApiData $apiData
             if (-not $latestVersion) { Write-Warning "  Could not determine latest version"; return }
+            $publishedAt = Get-ApiReleasePublishedAt -ApiData $apiData -Version $latestVersion -ToolName $ToolName
         }
 
         if (-not (Set-LatestToolVersion -ToolNames $ToolName -LatestVersion $latestVersion -ProductionReleasesOnly $config.ProductionReleasesOnly -VersionLabel $versionLabel)) { return }
+        if (-not (Set-ToolReleaseInformation -ToolName $ToolName -LatestVersion $latestVersion -PublishedAt $publishedAt -CooldownDays $config.CooldownDays)) { return }
         $updateCommand = Get-UpdateCommand -ToolName $ToolName -Installed $InstalledVersion -Latest $latestVersion
         if (Register-ToolUpdate -Name $ToolName -InstalledVersion $InstalledVersion -LatestVersion $latestVersion -Command $updateCommand -Type $config.UpdateType) {
             Write-Warning "  $ToolName has available updates: $InstalledVersion -> $latestVersion"
@@ -346,6 +419,7 @@ function Get-UpdateCommand {
     param([string]$ToolName, [string]$Installed, [string]$Latest)
     if (-not $Latest -or $Latest -eq "-" -or -not (Test-UpdateAvailable -InstalledVersion $Installed -LatestVersion $Latest -ToolName $ToolName)) { return "" }
     if ($ToolName -in $results.MaturityBlockedUpdates.Name) { return "" }
+    if ($results.Tools.ContainsKey($ToolName) -and $results.Tools[$ToolName].ContainsKey('Installable') -and -not $results.Tools[$ToolName].Installable) { return "" }
 
     # A planned command can pin a verified release; never replace it with a moving tag.
     $availableUpdate = $results.AvailableUpdates | Where-Object { $_.Name -eq $ToolName } | Select-Object -First 1

@@ -19,6 +19,23 @@ Describe '.NET SDK tool integration' {
                 param($path, $envFile)
                 . $path -EnvFile $envFile
                 Assert-ToolConfigurations
+                $checks = @(@{ Name = '.NET SDK'; Block = {
+                    function Test-CommandExists { $true }
+                    function Test-IsWindowsPlatform { $false }
+                    function dotnet { '8.0.301 [C:\dotnet\sdk]' }
+                    function Invoke-RestMethod {
+                        [PSCustomObject]@{ 'releases-index' = @(
+                            [PSCustomObject]@{
+                                'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'
+                                'latest-release-date' = [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o')
+                                'support-phase' = 'active'
+                            }
+                        ) }
+                    }
+                    $SkipUpdate = $false
+                    Invoke-ToolEntryPoint -ToolId 'dotnet-sdk' -EntryPoint 'Test-Tool'
+                } })
+                Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 10
                 [PSCustomObject]@{
                     LoadedFiles = @($script:ToolDefinitionFiles.Name)
                     EntryPoints = @($script:ToolDefinitions['dotnet-sdk'].Keys)
@@ -27,6 +44,7 @@ Describe '.NET SDK tool integration' {
                         'Get-DotNetSDKInventory', 'Get-DotNetSDKReleasePlan'
                     ))
                     WorkerDefinitions = Get-ParallelCheckFunctionBlock
+                    Results = $results
                 }
             }).AddArgument($scriptPath).AddArgument($selectionFile)
             $observed = @($session.Invoke())
@@ -39,6 +57,10 @@ Describe '.NET SDK tool integration' {
             $observed[0].LeakedFunctions.Count | Should Be 0
             $observed[0].WorkerDefinitions | Should Match 'function Get-DotNetSDKReleasePlan'
             $observed[0].WorkerDefinitions | Should Not Match 'function Get-NodeReleasePlan'
+            $observed[0].Results.Tools['.NET SDK 8.0.301'].LatestReleased | Should Be '8.0.410'
+            $observed[0].Results.Tools['.NET SDK 8.0.301'].Installable | Should Be $false
+            $observed[0].Results.AvailableUpdates.Count | Should Be 0
+            $observed[0].Results.Errors.Count | Should Be 0
         } finally { $session.Dispose() }
     }
 
@@ -54,8 +76,8 @@ Describe '.NET SDK tool integration' {
                 }
                 function Invoke-RestMethod {
                     [PSCustomObject]@{ 'releases-index' = @(
-                        [PSCustomObject]@{ 'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'; 'support-phase' = 'active' },
-                        [PSCustomObject]@{ 'channel-version' = '9.0'; 'latest-sdk' = '9.0.203'; 'support-phase' = 'active' }
+                        [PSCustomObject]@{ 'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'; 'latest-release-date' = '2000-01-01'; 'support-phase' = 'active' },
+                        [PSCustomObject]@{ 'channel-version' = '9.0'; 'latest-sdk' = '9.0.203'; 'latest-release-date' = '2000-01-01'; 'support-phase' = 'active' }
                     ) }
                 }
                 $SkipUpdate = $false
@@ -67,6 +89,8 @@ Describe '.NET SDK tool integration' {
         (Get-ToolState 'dotnet-sdk')['8.0.100'].HighestInstalled | Should Be '8.0.301'
         $results.Tools['.NET SDK 8.0.100'].Latest | Should Be '8.0.410'
         $results.Tools['.NET SDK 8.0.301'].Latest | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.301'].LatestReleased | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.301'].LatestCooldown | Should Be '8.0.410'
         $results.Updates -contains '.NET SDK: 8.0.301 -> 8.0.410' | Should Be $true
         $results.Updates -contains '.NET SDK: Major version 9 available' | Should Be $true
         $results.AvailableUpdates.Count | Should Be 2
@@ -200,7 +224,154 @@ Describe '.NET SDK tool integration' {
         Refresh-ToolVersion -ToolName '.NET SDK 8.0.301' | Should Be $true
         (Get-ToolState 'dotnet-sdk').Count | Should Be 1
         $results.Tools['.NET SDK 8.0.410'].Installed | Should Be '8.0.410'
-        $results.Tools['.NET SDK 8.0.410'].Latest | Should Be ''
+        $results.Tools['.NET SDK 8.0.410'].Latest | Should Be '8.0.410'
+    }
+}
+
+Describe '.NET SDK release cooldown' {
+    function dotnet { }
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools\dotnet-sdk.ps1')
+        $previousResults = $results
+        $previousCooldown = $toolsConfig['.NET SDK'].CooldownDays
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
+        Mock Test-CommandExists { $true }
+        Mock Test-IsWindowsPlatform { $false }
+        Mock dotnet { @('8.0.100 [C:\dotnet\sdk]', '8.0.301 [C:\dotnet\sdk]') }
+        Mock Write-Warning {}
+    }
+
+    AfterEach {
+        $results = $previousResults
+        $toolsConfig['.NET SDK'].CooldownDays = $previousCooldown
+    }
+
+    It 'enforces <Cooldown> days for a release <Age> days old' -TestCases @(
+        @{ Cooldown = 8; Age = 7.999; Eligible = $false },
+        @{ Cooldown = 8; Age = 8; Eligible = $true },
+        @{ Cooldown = 0; Age = 0.001; Eligible = $true },
+        @{ Cooldown = 3; Age = 2.999; Eligible = $false }
+    ) {
+        param($Cooldown, $Age, $Eligible)
+        $toolsConfig['.NET SDK'].CooldownDays = $Cooldown
+        $publishedAt = [DateTimeOffset]::UtcNow.AddDays(-$Age).ToString('o')
+        Mock Invoke-SafeApiRequest {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{
+                    'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'
+                    'latest-release-date' = $publishedAt; 'support-phase' = 'active'
+                }
+            ) }
+        }
+
+        Test-Tool 6>$null
+
+        foreach ($version in @('8.0.100', '8.0.301')) {
+            $row = $results.Tools[".NET SDK $version"]
+            $row.Latest | Should Be '8.0.410'
+            $row.LatestReleased | Should Be '8.0.410'
+            $row.Installable | Should Be $Eligible
+            $row.LatestCooldown | Should Be $(if ($Eligible) { '8.0.410' } else { $null })
+            (Get-ToolState 'dotnet-sdk')[$version].Installable | Should Be $Eligible
+        }
+        $results.Updates.Count | Should Be $(if ($Eligible) { 1 } else { 0 })
+        $results.AvailableUpdates.Count | Should Be $(if ($Eligible) { 1 } else { 0 })
+        if ($Eligible) { $results.AvailableUpdates[0].Version | Should Be '8.0.410' }
+        else { $results.MaturityBlockedUpdates.Count | Should Be 2 }
+    }
+
+    It 'does not apply the upstream latest SDK date to a lagging WinGet candidate' {
+        Mock Test-IsWindowsPlatform { $true }
+        Mock Get-WingetLatestVersion { '8.0.410' }
+        Mock Get-WingetReleaseDate { $null }
+        Mock Invoke-SafeApiRequest {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{
+                    'channel-version' = '8.0'; 'latest-sdk' = '8.0.411'
+                    'latest-release-date' = [DateTimeOffset]::UtcNow.ToString('o'); 'support-phase' = 'active'
+                }
+            ) }
+        }
+
+        Test-Tool 6>$null
+
+        $results.Tools['.NET SDK 8.0.301'].Latest | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.301'].LatestReleased | Should BeNullOrEmpty
+        $results.MaturityBlockedUpdates.Count | Should Be 0
+        $results.AvailableUpdates[0].Version | Should Be '8.0.410'
+    }
+
+    It 'uses the checked WinGet candidate date when its upstream channel is newer' {
+        $toolsConfig['.NET SDK'].CooldownDays = 8
+        Mock Test-IsWindowsPlatform { $true }
+        Mock Get-WingetLatestVersion { '8.0.410' }
+        Mock Get-WingetReleaseDate { [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o') }
+        Mock Invoke-SafeApiRequest {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{
+                    'channel-version' = '8.0'; 'latest-sdk' = '8.0.411'
+                    'latest-release-date' = '2000-01-01'; 'support-phase' = 'active'
+                }
+            ) }
+        }
+
+        Test-Tool 6>$null
+
+        $results.Tools['.NET SDK 8.0.301'].LatestReleased | Should Be '8.0.410'
+        $results.Tools['.NET SDK 8.0.301'].Installable | Should Be $false
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+
+    It 'blocks a young go-live new major even when another SDK has an eligible patch' {
+        $toolsConfig['.NET SDK'].CooldownDays = 8
+        Mock Invoke-SafeApiRequest {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{
+                    'channel-version' = '8.0'; 'latest-sdk' = '8.0.410'
+                    'latest-release-date' = '2000-01-01'; 'support-phase' = 'active'
+                },
+                [PSCustomObject]@{
+                    'channel-version' = '11.0'; 'latest-sdk' = '11.0.100-rc.1'
+                    'latest-release-date' = [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o'); 'support-phase' = 'go-live'
+                }
+            ) }
+        }
+
+        Test-Tool 6>$null
+
+        $results.Updates -contains '.NET SDK: Major version 11 available' | Should Be $false
+        $results.AvailableUpdates.Count | Should Be 1
+        $results.AvailableUpdates[0].Type | Should Be 'winget'
+        $results.Tools['.NET SDK 11 (new major version)'].Installable | Should Be $false
+    }
+
+    It 'retains the checked candidate and its release fields after refreshing installed SDKs' {
+        Mock dotnet { '8.0.410 [C:\dotnet\sdk]' }
+        Mock Invoke-RestMethod {
+            [PSCustomObject]@{ 'releases-index' = @(
+                [PSCustomObject]@{
+                    'channel-version' = '8.0'; 'latest-sdk' = '8.0.412'
+                    'latest-release-date' = '2000-01-01'; 'support-phase' = 'active'
+                }
+            ) }
+        }
+        $results.Tools['.NET SDK 8.0.301'] = @{
+            ToolId = 'dotnet-sdk'; Installed = '8.0.301'; Latest = '8.0.411'
+            LatestCooldown = $null; LatestReleased = '8.0.411'; AgeDays = 2
+            Installable = $false; BlockReason = 'cooldown'
+        }
+
+        Refresh-ToolStatus
+
+        $row = $results.Tools['.NET SDK 8.0.410']
+        $row.Installed | Should Be '8.0.410'
+        $row.Latest | Should Be '8.0.411'
+        $row.LatestReleased | Should Be '8.0.411'
+        $row.LatestCooldown | Should BeNullOrEmpty
+        $row.Installable | Should Be $false
+        (Get-ToolState 'dotnet-sdk')['8.0.410'].AgeDays | Should Be 2
     }
 }
 

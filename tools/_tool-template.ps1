@@ -65,9 +65,14 @@
     Functions run in the main script or an isolated check worker. They use the
     existing toolsConfig, results, SkipUpdate, and script-scoped platform/timeout
     settings. Do not initialize shared state in this file.
-    For npm maturity checks, reuse script:ReleaseCooldownDays, resolved from
-    catalog settings.CooldownDays or the runtime -CooldownDays override. Do not
-    hard-code a cooldown in tool files; workers receive the same resolved value.
+    Reuse the configuration's CooldownDays: runtime -CooldownDays overrides a tool's
+    CooldownDays, then the required catalog settings.CooldownDays.
+    Never hard-code tool cooldowns. Workers receive the resolved configuration.
+    The reader validates all values against catalog settings.MaximumCooldownDays.
+    Use Set-ToolReleaseInformation to gate dated candidates before registering actions.
+    Register-ToolUpdate rejects rows marked non-installable, including in workers.
+    Dates must match the candidate; absent dates preserve the source's policy, while
+    invalid supplied dates block updates. Get-WingetReleaseDate reuses checked metadata.
     Cooldown-aware rows also retain LatestReleased before filtering and LatestCooldown
     (null if no safe release is verified). Latest remains the checked candidate used
     for update planning; LatestReleased is informational only. Refresh only installed

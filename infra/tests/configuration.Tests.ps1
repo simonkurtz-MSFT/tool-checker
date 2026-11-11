@@ -13,7 +13,7 @@ Describe 'Configuration infrastructure' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($configurationPath, [ref]$null, [ref]$parseErrors)
         $parseErrors.Count | Should Be 0
         @($ast.EndBlock.Statements | Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] }).Count | Should Be 0
-        $ast.EndBlock.Statements.Count | Should Be 7
+        $ast.EndBlock.Statements.Count | Should Be 8
         foreach ($definition in $ast.EndBlock.Statements) {
             (Get-Command $definition.Name).ScriptBlock.File | Should Be $configurationPath
         }
@@ -63,7 +63,7 @@ Describe 'Configuration snapshots' {
         $fixtureCatalog = Join-Path $TestDrive 'catalog.json'
         $fixtureEnv = Join-Path $TestDrive 'selection.env'
         $catalog = [ordered]@{
-            settings = @{ CooldownDays = 8 }
+            settings = @{ CooldownDays = 8; MaximumCooldownDays = 30 }
             tools = [ordered]@{
                 zulu = @{ Name = 'Zulu CLI'; ToolFile = 'missing.ps1'; Enabled = $false; ProductionReleasesOnly = $false }
                 alpha = @{ Name = 'Alpha CLI'; InstallCommands = [ordered]@{ 'Windows (amd64)' = 'install alpha'; Linux = 'install-alpha' } }
@@ -106,6 +106,7 @@ Describe 'Configuration snapshots' {
             $observed.Count | Should Be 1
             $observed[0].ToolsConfiguration.Count | Should Be 2
             $observed[0].CooldownDays | Should Be 8
+            $observed[0].MaximumCooldownDays | Should Be 30
         } finally {
             $session.Dispose()
         }
@@ -161,6 +162,93 @@ Describe 'Configuration snapshots' {
         { Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -HasCooldownOverride $true -CooldownDays 0 } | Should Throw 'Catalog settings.CooldownDays'
     }
 
+    It 'resolves per-tool cooldowns with <Case>' -TestCases @(
+        @{ Case = 'a catalog default'; Settings = @{ CooldownDays = 12 }; ToolDays = $null; OverrideDays = $null; Expected = 12; OtherExpected = 12 },
+        @{ Case = 'the maximum catalog default'; Settings = @{ CooldownDays = 30 }; ToolDays = $null; OverrideDays = $null; Expected = 30; OtherExpected = 30 },
+        @{ Case = 'a tool override'; Settings = @{ CooldownDays = 12 }; ToolDays = 3; OverrideDays = $null; Expected = 3; OtherExpected = 12 },
+        @{ Case = 'the maximum tool override'; Settings = $null; ToolDays = 30; OverrideDays = $null; Expected = 30; OtherExpected = 8 },
+        @{ Case = 'a zero-day tool override'; Settings = $null; ToolDays = 0; OverrideDays = $null; Expected = 0; OtherExpected = 8 },
+        @{ Case = 'a runtime override'; Settings = @{ CooldownDays = 12 }; ToolDays = 3; OverrideDays = 5; Expected = 5; OtherExpected = 5 },
+        @{ Case = 'the maximum runtime override'; Settings = $null; ToolDays = 3; OverrideDays = 30; Expected = 30; OtherExpected = 30 },
+        @{ Case = 'a zero-day runtime override'; Settings = @{ CooldownDays = 12 }; ToolDays = 3; OverrideDays = 0; Expected = 0; OtherExpected = 0 }
+    ) {
+        param($Case, $Settings, $ToolDays, $OverrideDays, $Expected, $OtherExpected)
+        if ($null -ne $Settings) { $catalog.settings.CooldownDays = $Settings.CooldownDays }
+        if ($null -ne $ToolDays) { $catalog.tools.alpha.CooldownDays = $ToolDays }
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        $options = @{ ConfigPath = $fixtureCatalog; EnvFile = $fixtureEnv }
+        if ($null -ne $OverrideDays) { $options.HasCooldownOverride = $true; $options.CooldownDays = $OverrideDays }
+        $snapshot = Read-ToolCheckerConfiguration @options
+        $snapshot.ToolsConfiguration['Alpha CLI'].CooldownDays | Should Be $Expected
+        $snapshot.ToolsConfiguration['Zulu CLI'].CooldownDays | Should Be $OtherExpected
+    }
+
+    It 'rejects invalid tool cooldown <Value> even when overridden' -TestCases @(
+        @{ Value = $null }, @{ Value = -1 }, @{ Value = 1.5 }, @{ Value = '8' },
+        @{ Value = $true }, @{ Value = 31 }, @{ Value = 2147483648 }
+    ) {
+        param($Value)
+        $catalog.tools.alpha.CooldownDays = $Value
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        { Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -HasCooldownOverride $true -CooldownDays 0 } |
+            Should Throw "Tool 'Alpha CLI' property 'CooldownDays'"
+    }
+
+    It 'requires catalog <Property> even when a runtime override is supplied' -TestCases @(
+        @{ Property = 'CooldownDays' }, @{ Property = 'MaximumCooldownDays' }
+    ) {
+        param($Property)
+        $catalog.settings.Remove($Property)
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        { Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -HasCooldownOverride $true -CooldownDays 0 } |
+            Should Throw "Catalog settings.$Property"
+    }
+
+    It 'rejects invalid maximum <Value>' -TestCases @(
+        @{ Value = $null }, @{ Value = -1 }, @{ Value = 1.5 }, @{ Value = '30' }, @{ Value = $true }
+    ) {
+        param($Value)
+        $catalog.settings.MaximumCooldownDays = $Value
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        { Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv } |
+            Should Throw 'Catalog settings.MaximumCooldownDays must be a nonnegative integer.'
+    }
+
+    It 'reads the default and maximum from the supplied catalog without script fallbacks' {
+        $catalog.settings = @{ CooldownDays = 40; MaximumCooldownDays = 45 }
+        $catalog.tools.alpha.CooldownDays = 45
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        $snapshot = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv
+        $snapshot.ToolsConfiguration['Alpha CLI'].CooldownDays | Should Be 45
+        $snapshot.ToolsConfiguration['Zulu CLI'].CooldownDays | Should Be 40
+        $snapshot.MaximumCooldownDays | Should Be 45
+        $override = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv -HasCooldownOverride $true -CooldownDays 45
+        $override.ToolsConfiguration['Alpha CLI'].CooldownDays | Should Be 45
+        $override.ToolsConfiguration['Zulu CLI'].CooldownDays | Should Be 45
+    }
+
+    It 'enforces a changed catalog maximum for <Source>' -TestCases @(
+        @{ Source = 'default' }, @{ Source = 'tool' }, @{ Source = 'runtime' }
+    ) {
+        param($Source)
+        $catalog.settings.MaximumCooldownDays = 12
+        $options = @{ ConfigPath = $fixtureCatalog; EnvFile = $fixtureEnv }
+        switch ($Source) {
+            'default' { $catalog.settings.CooldownDays = 13 }
+            'tool' { $catalog.tools.alpha.CooldownDays = 13 }
+            'runtime' { $options.HasCooldownOverride = $true; $options.CooldownDays = 13 }
+        }
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        { Read-ToolCheckerConfiguration @options } | Should Throw 'no greater than 12'
+    }
+
+    It 'allows a zero maximum when all cooldowns are zero' {
+        $catalog.settings = @{ CooldownDays = 0; MaximumCooldownDays = 0 }
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        $snapshot = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv
+        $snapshot.ToolsConfiguration['Alpha CLI'].CooldownDays | Should Be 0
+    }
+
     It 'accepts a missing optional env file and resolves relative paths from the caller location' {
         Push-Location $TestDrive
         try {
@@ -193,7 +281,7 @@ Describe 'Interactive environment setup' {
         $fixtureTemplate = Join-Path $TestDrive '.env.example'
         Remove-Item -LiteralPath $fixtureEnv -Force -ErrorAction SilentlyContinue
         [ordered]@{
-            settings = @{ CooldownDays = 8 }
+            settings = @{ CooldownDays = 8; MaximumCooldownDays = 30 }
             tools = [ordered]@{
                 zulu = @{ Name = 'Zulu CLI'; enabled = $true }
                 disabled = @{ Name = 'Disabled CLI'; enabled = $false }
@@ -357,7 +445,7 @@ Describe 'Tool catalog selection' {
     It 'selects the complete catalog when no IDs are requested' {
         $selection = Get-ToolCatalogSelection -Tools $toolsJson.tools
 
-        $selection.CatalogToolIds.Count | Should Be 20
+        $selection.CatalogToolIds.Count | Should Be @($toolsJson.tools.PSObject.Properties).Count
         $selection.SelectedEntries.Count | Should Be $selection.CatalogToolIds.Count
     }
 
@@ -416,15 +504,21 @@ Describe 'Cooldown configuration' {
         $cooldownCatalog.tools.git.PackageManagerFiles = @('npm.ps1')
     }
 
-    It 'uses catalog <CatalogDays> and runtime <OverrideDays> consistently in the main session and workers' -TestCases @(
-        @{ CatalogDays = 8; OverrideDays = $null; ExpectedDays = 8; ExpectedInstallable = $false },
-        @{ CatalogDays = 12; OverrideDays = $null; ExpectedDays = 12; ExpectedInstallable = $false },
-        @{ CatalogDays = 8; OverrideDays = 2; ExpectedDays = 2; ExpectedInstallable = $true },
-        @{ CatalogDays = 8; OverrideDays = 0; ExpectedDays = 0; ExpectedInstallable = $true }
+    It 'uses catalog <CatalogDays>, tool <ToolDays>, runtime <OverrideDays> consistently in the main session and workers' -TestCases @(
+        @{ CatalogDays = 8; ToolDays = $null; OverrideDays = $null; ExpectedDays = 8; ExpectedInstallable = $false },
+        @{ CatalogDays = 12; ToolDays = $null; OverrideDays = $null; ExpectedDays = 12; ExpectedInstallable = $false },
+        @{ CatalogDays = 8; ToolDays = 2; OverrideDays = $null; ExpectedDays = 2; ExpectedInstallable = $true },
+        @{ CatalogDays = 8; ToolDays = 0; OverrideDays = $null; ExpectedDays = 0; ExpectedInstallable = $true },
+        @{ CatalogDays = 8; ToolDays = 12; OverrideDays = 2; ExpectedDays = 2; ExpectedInstallable = $true },
+        @{ CatalogDays = 8; ToolDays = 12; OverrideDays = 0; ExpectedDays = 0; ExpectedInstallable = $true },
+        @{ CatalogDays = 40; ToolDays = 45; OverrideDays = $null; MaximumDays = 45; ExpectedDays = 45; ExpectedInstallable = $false },
+        @{ CatalogDays = 8; ToolDays = 3; OverrideDays = 45; MaximumDays = 45; ExpectedDays = 45; ExpectedInstallable = $false }
     ) {
-        param($CatalogDays, $OverrideDays, $ExpectedDays, $ExpectedInstallable)
+        param($CatalogDays, $ToolDays, $OverrideDays, $MaximumDays, $ExpectedDays, $ExpectedInstallable)
 
         $cooldownCatalog.settings.CooldownDays = $CatalogDays
+        if ($null -ne $MaximumDays) { $cooldownCatalog.settings.MaximumCooldownDays = $MaximumDays }
+        if ($null -ne $ToolDays) { $cooldownCatalog.tools.git.CooldownDays = $ToolDays }
         $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
         $session = [powershell]::Create()
         try {
@@ -438,9 +532,10 @@ Describe 'Cooldown configuration' {
                         versions = [PSCustomObject]@{ '1.1.0' = @{} }
                         time = [PSCustomObject]@{ '1.1.0' = [DateTimeOffset]::UtcNow.AddDays(-3).ToString('O') }
                     }
-                    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion '1.0.0' -MaximumVersion '1.1.0'
+                    $days = (Get-ToolConfiguration -ToolName 'Git').CooldownDays
+                    $release = Get-LatestMatureNpmRelease -ApiData $apiData -MinimumVersion '1.0.0' -MaximumVersion '1.1.0' -CooldownDays $days
                     $results.Tools['Cooldown probe'] = @{
-                        Days = $script:ReleaseCooldownDays
+                        Days = $days
                         Installable = $null -ne $release -and $release.Installable
                     }
                 }
@@ -466,10 +561,9 @@ Describe 'Cooldown configuration' {
         }
     }
 
-    It 'rejects missing and invalid catalog cooldown values' {
-        foreach ($invalidValue in @($null, -1, 1.5, '8', $true, 2147483648)) {
-            $cooldownCatalog.settings = @{ CooldownDays = $invalidValue }
-            if ($null -eq $invalidValue) { $cooldownCatalog.Remove('settings') | Out-Null }
+    It 'rejects invalid catalog cooldown values' {
+        foreach ($invalidValue in @($null, -1, 1.5, '8', $true, 31, 2147483648)) {
+            $cooldownCatalog.settings = @{ CooldownDays = $invalidValue; MaximumCooldownDays = 30 }
             $cooldownCatalog | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $cooldownDirectory 'tool-checker.json')
             $session = [powershell]::Create()
             try {
@@ -487,17 +581,18 @@ Describe 'Cooldown configuration' {
         }
     }
 
-    It 'rejects a negative runtime override' {
+    It 'rejects out-of-range runtime override <Days>' -TestCases @(@{ Days = -1 }, @{ Days = 31 }) {
+        param($Days)
         $session = [powershell]::Create()
         try {
             $null = $session.AddScript({
-                param($path)
-                try { . $path -CooldownDays -1 -Version } catch { $_.FullyQualifiedErrorId }
-            }).AddArgument($scriptPath)
+                param($path, $envFile, $days)
+                try { . $path -EnvFile $envFile -CooldownDays $days } catch { $_.Exception.Message }
+            }).AddArgument($scriptPath).AddArgument($testEnvFile).AddArgument($Days)
             $observed = @($session.Invoke())
 
             $observed.Count | Should Be 1
-            $observed[0] | Should Match 'ParameterArgumentValidationError'
+            $observed[0] | Should Match 'Runtime CooldownDays must be a nonnegative integer no greater than 30'
         } finally {
             $session.Dispose()
         }

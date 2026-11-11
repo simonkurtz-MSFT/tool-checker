@@ -14,6 +14,7 @@ Describe 'Python selected-only worker' {
                 . $path -EnvFile $envFile -SkipUpdate:$checkOnly
                 $checks = @(@{ Name = 'Python'; Block = {
                     function Test-CommandExists { $true }
+                    function Invoke-RestMethod { throw 'Launcher inventory must not request release metadata.' }
                     function py {
                         if ($args -contains '--online') {
                             if ($SkipUpdate) { throw 'Unexpected online lookup' }
@@ -32,7 +33,43 @@ Describe 'Python selected-only worker' {
             $observed[0].Results.Tools['Python 3.12'].Installed | Should Be '3.12.1'
             $observed[0].Results.AvailableUpdates.Count | Should Be $(if ($CheckOnly) { 0 } else { 1 })
             if (-not $CheckOnly) { $observed[0].Results.AvailableUpdates[0].Version | Should Be '3.12.2' }
+            $observed[0].Results.Tools['Python 3.12'].LatestReleased | Should BeNullOrEmpty
             $observed[0].Results.Errors.Count | Should Be 0
+        } finally { $session.Dispose() }
+    }
+
+    It 'blocks a dated conventional release in a selected-only network-free worker' {
+        $selectionFile = Join-Path $TestDrive 'python-conventional.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=python'
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile)
+                . $path -EnvFile $envFile
+                $checks = @(@{ Name = 'Python'; Block = {
+                    function Test-CommandExists { param($Command) $Command -eq 'python' }
+                    function Test-IsWindowsPlatform { $false }
+                    function Get-CommandVersion { 'Python 3.12.1' }
+                    function Invoke-RestMethod {
+                        @([PSCustomObject]@{
+                            cycle = '3.12'; latest = '3.12.2'; eol = $false
+                            latestReleaseDate = [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o')
+                        })
+                    }
+                    $SkipUpdate = $false
+                    Invoke-ToolEntryPoint -ToolId 'python' -EntryPoint 'Test-Tool'
+                } })
+                Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 10
+                $results
+            }).AddArgument($scriptPath).AddArgument($selectionFile)
+            $observed = @($session.Invoke())
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].Tools['Python 3.12'].LatestReleased | Should Be '3.12.2'
+            $observed[0].Tools['Python 3.12'].Installable | Should Be $false
+            $observed[0].AvailableUpdates.Count | Should Be 0
+            $observed[0].MaturityBlockedUpdates[0].Name | Should Be 'Python 3.12'
+            $observed[0].Errors.Count | Should Be 0
         } finally { $session.Dispose() }
     }
 }
@@ -80,7 +117,10 @@ Describe 'Python launcher planning' {
         $plan.LatestByChannel['3.15'] | Should Be '3.15.0'
     }
 
-    It 'compares conventional release cycles as versions on non-Windows platforms' {
+    It 'compares conventional release cycles with DedicatedChannelEnabled=<DedicatedChannelEnabled>' -TestCases @(
+        @{ DedicatedChannelEnabled = $false }, @{ DedicatedChannelEnabled = $true }
+    ) {
+        param($DedicatedChannelEnabled)
         Mock Test-IsWindowsPlatform { $false }
         Mock Invoke-SafeApiRequest { @(
             [PSCustomObject]@{ cycle = '3.15'; latest = '3.15.0'; eol = $false },
@@ -93,13 +133,134 @@ Describe 'Python launcher planning' {
         $results.Tools['Python 3.10'] = @{ ToolId = 'python'; Installed = '3.10.11'; Latest = '' }
         $SkipUpdate = $false
 
-        Get-PythonUpdateConventional -InstalledVersion '3.10.11' 6>$null
+        $previousEnabled = $toolsConfig['Python 3.15'].Enabled
+        $toolsConfig['Python 3.15'].Enabled = $DedicatedChannelEnabled
+        try {
+            Get-PythonUpdateConventional -InstalledVersion '3.10.11' 6>$null
 
-        $results.Tools['Python 3.10'].Latest | Should Be '3.10.12'
+            $results.Tools['Python 3.10'].Latest | Should Be '3.10.12'
+            $results.AvailableUpdates.Count | Should Be 1
+            $results.AvailableUpdates[0].Version | Should Be '3.10.12'
+            $results.Tools.ContainsKey('Python 3.15') | Should Be (-not $DedicatedChannelEnabled)
+            Assert-MockCalled Write-Warning $(if ($DedicatedChannelEnabled) { 0 } else { 1 }) -Scope It -ParameterFilter { $Text -match 'Newer Python major version available: 3\.15 ' }
+            Assert-MockCalled Write-Warning 0 -Scope It -ParameterFilter { $Text -match 'major version available: 3\.9 ' }
+        } finally {
+            $toolsConfig['Python 3.15'].Enabled = $previousEnabled
+        }
+    }
+}
+
+Describe 'Python conventional release cooldown' {
+    BeforeEach {
+        . (Join-Path (Split-Path -Parent $scriptPath) 'tools\python.ps1')
+        $previousResults = $results
+        $previousCooldown = $toolsConfig['Python'].CooldownDays
+        $results = New-ToolCheckResults
+        $results.Tools['Python 3.12'] = @{ ToolId = 'python'; Installed = '3.12.1'; Latest = '' }
+        $SkipUpdate = $false
+        Mock Test-IsWindowsPlatform { $false }
+        Mock Write-Warning {}
+    }
+
+    AfterEach {
+        $results = $previousResults
+        $toolsConfig['Python'].CooldownDays = $previousCooldown
+    }
+
+    It 'enforces <Cooldown> days for the exact latest patch <Age> days old' -TestCases @(
+        @{ Cooldown = 8; Age = 7.999; Eligible = $false },
+        @{ Cooldown = 8; Age = 8; Eligible = $true },
+        @{ Cooldown = 0; Age = 0.001; Eligible = $true },
+        @{ Cooldown = 3; Age = 2.999; Eligible = $false }
+    ) {
+        param($Cooldown, $Age, $Eligible)
+        $toolsConfig['Python'].CooldownDays = $Cooldown
+        $releaseDate = [DateTimeOffset]::UtcNow.AddDays(-$Age).ToString('o')
+        Mock Invoke-SafeApiRequest {
+            @([PSCustomObject]@{ cycle = '3.12'; latest = '3.12.2'; latestReleaseDate = $releaseDate; eol = $false })
+        }
+
+        Get-PythonUpdateConventional -InstalledVersion '3.12.1' 6>$null
+
+        $row = $results.Tools['Python 3.12']
+        $row.Latest | Should Be '3.12.2'
+        $row.LatestReleased | Should Be '3.12.2'
+        $row.LatestCooldown | Should Be $(if ($Eligible) { '3.12.2' } else { $null })
+        $row.Installable | Should Be $Eligible
+        $results.Updates.Count | Should Be $(if ($Eligible) { 1 } else { 0 })
+        $results.AvailableUpdates.Count | Should Be $(if ($Eligible) { 1 } else { 0 })
+        if ($Eligible) { $results.AvailableUpdates[0].Version | Should Be '3.12.2' }
+        else { $results.MaturityBlockedUpdates[0].Name | Should Be 'Python 3.12' }
+    }
+
+    It 'does not borrow a cycle initial-release date for an undated latest patch' {
+        Mock Invoke-SafeApiRequest {
+            @([PSCustomObject]@{
+                cycle = '3.12'; latest = '3.12.2'
+                releaseDate = [DateTimeOffset]::UtcNow.ToString('o'); eol = $false
+            })
+        }
+
+        Get-PythonUpdateConventional -InstalledVersion '3.12.1' 6>$null
+
+        $results.Tools['Python 3.12'].Latest | Should Be '3.12.2'
+        $results.Tools['Python 3.12'].LatestReleased | Should BeNullOrEmpty
         $results.AvailableUpdates.Count | Should Be 1
-        $results.AvailableUpdates[0].Version | Should Be '3.10.12'
-        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -match 'Newer Python major version available: 3\.15 ' }
-        Assert-MockCalled Write-Warning 0 -Scope It -ParameterFilter { $Text -match 'major version available: 3\.9 ' }
+        $results.MaturityBlockedUpdates.Count | Should Be 0
+    }
+
+    It 'keeps the installed channel date separate from a young newer-channel suggestion' {
+        $toolsConfig['Python'].CooldownDays = 8
+        Mock Invoke-SafeApiRequest {
+            @(
+                [PSCustomObject]@{ cycle = '3.12'; latest = '3.12.2'; latestReleaseDate = '2000-01-01'; eol = $false },
+                [PSCustomObject]@{
+                    cycle = '3.13'; latest = '3.13.0'
+                    latestReleaseDate = [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o'); eol = $false
+                }
+            )
+        }
+
+        Get-PythonUpdateConventional -InstalledVersion '3.12.1' 6>$null
+
+        $results.Tools['Python 3.12'].LatestReleased | Should Be '3.12.2'
+        $results.Tools['Python 3.12'].Installable | Should Be $true
+        $results.Tools['Python 3.13'].LatestReleased | Should Be '3.13.0'
+        $results.Tools['Python 3.13'].Installable | Should Be $false
+        $results.AvailableUpdates.Count | Should Be 1
+        Assert-MockCalled Write-Warning 0 -Scope It -ParameterFilter { $Text -match 'Newer Python major version available' }
+    }
+
+    It 'blocks an invalid supplied patch-release date' {
+        Mock Invoke-SafeApiRequest {
+            @([PSCustomObject]@{ cycle = '3.12'; latest = '3.12.2'; latestReleaseDate = 'invalid-date'; eol = $false })
+        }
+
+        Get-PythonUpdateConventional -InstalledVersion '3.12.1' 6>$null
+
+        $results.Tools['Python 3.12'].Installable | Should Be $false
+        $results.Tools['Python 3.12'].LatestCooldown | Should BeNullOrEmpty
+        $results.Updates.Count | Should Be 0
+        $results.AvailableUpdates.Count | Should Be 0
+        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -match 'Could not determine release age' }
+    }
+
+    It 'uses the same WinGet package candidate date without a separate API request' {
+        $toolsConfig['Python'].CooldownDays = 8
+        Mock Test-IsWindowsPlatform { $true }
+        Mock Get-WingetLatestVersion { '3.12.2' }
+        Mock Get-WingetReleaseDate { [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o') }
+        Mock Invoke-SafeApiRequest { throw 'Windows must use WinGet metadata.' }
+
+        Get-PythonUpdateConventional -InstalledVersion '3.12.1' 6>$null
+
+        $results.Tools['Python 3.12'].LatestReleased | Should Be '3.12.2'
+        $results.Tools['Python 3.12'].Installable | Should Be $false
+        $results.AvailableUpdates.Count | Should Be 0
+        Assert-MockCalled Get-WingetReleaseDate 1 -Scope It -ParameterFilter {
+            $ToolName -eq 'Python 3.12' -and $PackageId -eq 'Python.Python.3.12' -and $Version -eq '3.12.2'
+        }
+        Assert-MockCalled Invoke-SafeApiRequest 0 -Scope It
     }
 }
 

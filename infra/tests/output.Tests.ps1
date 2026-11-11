@@ -598,7 +598,7 @@ Describe 'Update legend' {
         $before = ConvertTo-Json $results -Depth 10 -Compress
         Show-UpdateLegend
         $expected = @(
-            "  npm release cooldown: $script:ReleaseCooldownDays full days"
+            "  Release cooldown default: $script:ReleaseCooldownDays full days"
             ''
             "  ${ColorCyan}Legend$ColorReset"
             "    $ColorYellow■ Installable update / version unknown$ColorReset"

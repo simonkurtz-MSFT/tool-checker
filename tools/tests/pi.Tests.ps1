@@ -10,6 +10,7 @@ Describe 'Pi npm support' {
         $results = New-ToolCheckResults
         $SkipUpdate = $false
         $script:ReleaseCooldownDays = 8
+        $toolsConfig.Pi.CooldownDays = 8
         Mock Test-CommandExists { $true }
         Mock Get-CommandVersion { '0.60.0' }
         Mock Get-GlobalNpmInstalledVersion { '0.60.0' }
@@ -102,6 +103,7 @@ Describe 'Pi npm support' {
 
     It 'uses the runtime cooldown override without making GitHub installable' {
         $script:ReleaseCooldownDays = 0
+        $toolsConfig.Pi.CooldownDays = 0
         Test-StandardTool -ToolName Pi
         $results.Tools.Pi.LatestCooldown | Should Be '0.63.0'
         $results.Tools.Pi.LatestReleased | Should Be '0.64.0'

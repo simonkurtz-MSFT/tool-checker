@@ -54,9 +54,18 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
 - Give scripts a concise purpose comment; explain non-obvious parsing, ownership,
   scope/serialization, eligibility, and side effects near the code. Keep comments
   accurate and avoid restating obvious statements; document strict JSON in Markdown.
-- Keep cooldown defaults in catalog `settings.CooldownDays`. Reuse the resolved
-  `$script:ReleaseCooldownDays` (runtime `-CooldownDays` takes precedence),
-  including in workers; never hard-code cooldown periods in tool files.
+- Resolve cooldowns as runtime `-CooldownDays` > optional tool `CooldownDays` >
+  required catalog `settings.CooldownDays`. The required catalog
+  `settings.MaximumCooldownDays` supplies the maximum; do not hard-code either
+  setting in scripts. Validate all values through `Assert-CooldownDays` in the
+  configuration reader, including catalog values overridden at runtime.
+  The schema validates types and required settings; runtime enforces cross-field bounds.
+  Reuse each configuration's resolved `CooldownDays`
+  in tools and workers; `$script:ReleaseCooldownDays` is only the shared default.
+  Gate dated candidates with `Set-ToolReleaseInformation` or equivalent
+  package-manager plan metadata, matching dates to the exact checked version.
+  Reuse `Get-WingetReleaseDate` for cached package metadata. Undated sources
+  retain their policy; invalid supplied dates block updates.
 - Exclude `_tool-template.ps1` from runtime loading and parallel function
   discovery. The template must remain safe to dot-source and must not silently
   report success when its unfinished checker is invoked.

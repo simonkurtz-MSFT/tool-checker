@@ -74,11 +74,11 @@ function Test-Tool {
             }
             if (-not $pkg.Latest) { continue }
             $pkg.LatestReleased = $pkg.Latest
-            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly
+            $release = Get-LatestMatureNpmRelease -ApiData $metadata -MaximumVersion $pkg.Latest -ProductionReleasesOnly $productionReleasesOnly -CooldownDays $config.CooldownDays
             if ($release) {
                 $pkg.Latest = $release.Version
             } else {
-                $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest
+                $release = Get-NpmVersionReleaseInfo -PackageName $pkg.Name -Version $pkg.Latest -CooldownDays $config.CooldownDays
             }
             $pkg.PublishedAt = $release.PublishedAt
             $pkg.AgeDays = $release.AgeDays
@@ -88,7 +88,7 @@ function Test-Tool {
                 $results.MaturityBlockedUpdates += @{
                     Name = $pkg.Name
                     AgeDays = $release.AgeDays
-                    RequiredAgeDays = $script:ReleaseCooldownDays
+                    RequiredAgeDays = $config.CooldownDays
                 }
             }
         }

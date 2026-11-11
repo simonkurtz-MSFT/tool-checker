@@ -51,7 +51,10 @@ function Show-ApplicationBanner {
 function Show-UpdateLegend {
     if ($results.Updates.Count -eq 0 -and $results.Tools.Count -eq 0) { return }
 
-    Write-Host "  npm release cooldown: $script:ReleaseCooldownDays full days"
+    Write-Host "  Release cooldown default: $script:ReleaseCooldownDays full days"
+    $overrides = @($toolsConfig.Keys | Where-Object { $toolsConfig[$_].Enabled -and $toolsConfig[$_].CooldownDays -ne $script:ReleaseCooldownDays } |
+        ForEach-Object { "$_=$($toolsConfig[$_].CooldownDays)d" })
+    if ($overrides) { Write-Host "  Tool cooldown overrides: $($overrides -join ', ')" }
     Write-Host ''
     Write-Host "  ${ColorCyan}Legend$ColorReset"
     Write-Host "    $ColorYellow■ Installable update / version unknown$ColorReset"

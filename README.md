@@ -350,17 +350,37 @@ configured npm registry that has completed the cooldown. Upstream GitHub release
 are informational only: Tool Checker never clones or builds Pi from Git to bypass
 the registry or cooldown.
 
-The catalog defines the npm release cooldown at the top level, alongside `tools`:
+### Release cooldowns
+
+The catalog defines the default cooldown and its maximum alongside `tools`:
 
 ```json
 "settings": {
-  "CooldownDays": 8
+  "CooldownDays": 8,
+  "MaximumCooldownDays": 30
 }
 ```
 
-`settings.CooldownDays` is required and must be a nonnegative integer (at most 2147483647). There is no hard-coded script fallback. `-CooldownDays <days>` takes precedence for the current run without modifying the catalog; `0` removes the age delay but retains version filtering and release-metadata checks. The resolved value applies to npm-hosted CLI updates and global npm package updates, including parallel checks and action eligibility. It does not add cooldowns to other release sources. `-Force` still respects the resolved cooldown.
+Both settings are required nonnegative integers. There are no hard-coded script
+fallbacks. `MaximumCooldownDays` limits the default, every tool override, and the
+runtime override. The shipped catalog uses an eight-day default and a 30-day maximum.
 
-The cooldown applies after release filtering, before newly published npm package versions become actionable. Younger releases remain visible as informational updates but are not installed.
+Set an optional `CooldownDays` inside a tool's catalog entry to override the default:
+
+```json
+"CooldownDays": 3
+```
+
+Precedence is `-CooldownDays` > tool `CooldownDays` > `settings.CooldownDays`.
+Catalog values are validated even when overridden. `0` removes the age delay but
+retains version filtering and date validation. Parallel checks use the resolved
+per-tool value, and `-Force` still respects the cooldown.
+
+Cooldowns apply wherever a release source supplies publish dates. Younger dated
+releases remain informational and do not become update actions. Sources without
+dates retain their existing policy; invalid supplied dates block updates.
+The JSON schema validates types and required settings; runtime validation enforces
+the catalog-defined maximum across fields.
 
 ### Add a custom tool
 

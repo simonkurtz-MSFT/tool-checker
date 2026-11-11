@@ -277,11 +277,14 @@ Operation-specific messages remain with their checks and actions.
 Keep the legend's cooldown, indented color key, and informational notes in
 separate groups, with one color-key entry per line.
 
-The table contains Name, Installed, Latest Cooldown, Age, and Latest Released only.
+The table contains Name, Installed, Latest Cooldown, Age, Cooldown, and Latest Released only.
 Separate column fields with three spaces, retaining the two-space table indent.
 Age renders the checked candidate's `AgeDays` as right-aligned `Nd`, including `0d`
 for a newly published candidate. Show `-` when age is unavailable or Installed is
 current/newer than `Latest`; do not associate registry age with upstream Latest Released.
+Cooldown renders the owning configuration's resolved `CooldownDays` as
+right-aligned `Nd`, including `0d`, even in check-only mode or when Age is unavailable.
+Use catalog-ID ownership for managed rows; show `-` when no owning configuration exists.
 `Show-ToolDetails` renders update/install commands and release-note links as labeled
 lines; `Invoke-ActionMenu` owns the read-only `[D]` selection. Normal interactive
 runs may offer details without executable actions; do not add prompts to check-only

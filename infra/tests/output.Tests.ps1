@@ -240,7 +240,7 @@ Describe 'Output rendering' {
         (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
     }
 
-    It 'renders exactly five columns and keeps newer released versions informational' {
+    It 'renders exactly six columns and keeps newer released versions informational' {
         $results.Tools = @{
             Current = @{ Installed = '1.1.0'; Latest = '1.1.0'; LatestCooldown = '1.1.0'; LatestReleased = '1.2.0' }
             Ready = @{ Installed = '1.0.0'; Latest = '1.1.0'; LatestCooldown = '1.1.0'; LatestReleased = '1.2.0' }
@@ -251,13 +251,44 @@ Describe 'Output rendering' {
         Show-ResultsTable
         $rendered = $script:OutputLines -join "`n"
         $plain = $rendered -replace '\x1b\[[0-9;]*m', ''
-        $plain | Should Match 'Name\s+Installed\s+Latest Cooldown\s+Age\s+Latest Released'
+        $plain | Should Match 'Name\s+Installed\s+Latest Cooldown\s+Age\s+Cooldown\s+Latest Released'
         $plain | Should Not Match 'Update / Install|Release Notes'
-        $plain | Should Match 'Current\s+1.1.0\s+1.1.0\s+-\s+1.2.0'
-        $plain | Should Match 'Unverified\s+1.0.0\s+-\s+-\s+1.2.0'
+        $plain | Should Match 'Current\s+1.1.0\s+1.1.0\s+-\s+-\s+1.2.0'
+        $plain | Should Match 'Unverified\s+1.0.0\s+-\s+-\s+-\s+1.2.0'
         $rendered | Should Match ([regex]::Escape($ColorGreen) + '  Current')
         $rendered | Should Match ([regex]::Escape($ColorYellow) + '  Ready')
         $rendered | Should Match ([regex]::Escape($ColorReset) + '\s+1.2.0')
+    }
+
+    It 'shows resolved cooldowns for owned rows with CheckOnly=<CheckOnly>' -TestCases @(
+        @{ CheckOnly = $false }, @{ CheckOnly = $true }
+    ) {
+        param($CheckOnly)
+        $SkipUpdate = $CheckOnly
+        $toolsConfig = [ordered]@{
+            Default = @{ Id = 'default'; CooldownDays = 8 }
+            Custom = @{ Id = 'custom'; CooldownDays = 3 }
+            NoDelay = @{ Id = 'no-delay'; CooldownDays = 0 }
+        }
+        $results.Tools = @{
+            Inherited = @{ ToolId = 'default'; Installed = '1.0.0'; Latest = '' }
+            'Managed item' = @{ ToolId = 'custom'; Installed = '1.0.0'; Latest = '' }
+            SDK = @{ ToolId = 'no-delay'; Installed = '1.0.0'; Latest = '' }
+            Unowned = @{ Installed = '1.0.0'; Latest = '' }
+        }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        $beforeConfig = ConvertTo-Json $toolsConfig -Depth 10 -Compress
+        Show-ResultsTable
+        $expected = @{ Inherited = '8d'; 'Managed item' = '3d'; SDK = '0d'; Unowned = '-' }
+        foreach ($name in $expected.Keys) {
+            $row = ($script:OutputLines | Where-Object { $_ -match ('^.*  ' + [regex]::Escape($name) + '\s') }) -replace '\x1b\[[0-9;]*m', ''
+            $cells = $row.Trim() -split '\s{3,}'
+            $cells.Count | Should Be 6
+            $cells[3] | Should Be '-'
+            $cells[4] | Should Be $expected[$name]
+        }
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+        (ConvertTo-Json $toolsConfig -Depth 10 -Compress) | Should Be $beforeConfig
     }
 
     It 'preserves candidate age display for <Case>' -TestCases @(
@@ -304,9 +335,9 @@ Describe 'Output rendering' {
         $header = $plain | Where-Object { $_ -match 'Name\s+Installed' }
         $divider = $plain | Where-Object { $_ -match '^  -{7} ' }
         $row = $plain | Where-Object { $_ -match '^  Example ' }
-        $header | Should Be ('  ' + (@('Name'.PadRight(7), 'Installed', 'Latest Cooldown', 'Age', 'Latest Released') -join '   '))
-        $divider | Should Be ('  ' + (@(('-' * 7), ('-' * 9), ('-' * 15), ('-' * 3), ('-' * 15)) -join '   '))
-        $row | Should Be ('  ' + (@('Example', '1.0.0'.PadRight(9), '1.1.0'.PadRight(15), '8d'.PadLeft(3), '1.1.0') -join '   '))
+        $header | Should Be ('  ' + (@('Name'.PadRight(7), 'Installed', 'Latest Cooldown', 'Age', 'Cooldown', 'Latest Released') -join '   '))
+        $divider | Should Be ('  ' + (@(('-' * 7), ('-' * 9), ('-' * 15), ('-' * 3), ('-' * 8), ('-' * 15)) -join '   '))
+        $row | Should Be ('  ' + (@('Example', '1.0.0'.PadRight(9), '1.1.0'.PadRight(15), '8d'.PadLeft(3), '-'.PadLeft(8), '1.1.0') -join '   '))
     }
 
     It 'colors Latest Released by its relation to Installed (<Installed>, <Released>)' -TestCases @(
@@ -344,7 +375,7 @@ Describe 'Output rendering' {
         $row = $script:OutputLines | Where-Object { $_ -match ('  ' + [regex]::Escape($Name) + '\s') }
         $cells = (($row -replace '\x1b\[[0-9;]*m', '').Trim() -split '\s{3,}')
         $cells[2] | Should Be $ExpectedCooldown
-        $cells[4] | Should Be $ExpectedReleased
+        $cells[5] | Should Be $ExpectedReleased
         foreach ($expected in @($ExpectedCooldown, $ExpectedReleased) | Where-Object { $_.EndsWith('*') }) {
             $row | Should Match ([regex]::Escape("$ColorCyan$expected") + '\s*' + [regex]::Escape($ColorReset))
         }
@@ -364,7 +395,7 @@ Describe 'Output rendering' {
         $divider = $plain | Where-Object { $_ -match '^  -+ ' }
         $columns = [regex]::Matches($divider, '-+')
         $columns[2].Length | Should Be ($version.Length + 1)
-        $columns[4].Length | Should Be ($version.Length + 1)
+        $columns[5].Length | Should Be ($version.Length + 1)
         $row.LastIndexOf("$version*") | Should Be $header.IndexOf('Latest Released')
         $row.Substring($columns[2].Index, $columns[2].Length + 3) | Should Be "$version*   "
         Show-UpdateLegend
@@ -574,6 +605,9 @@ Describe 'Application banner' {
 Describe 'Update legend' {
     BeforeEach {
         $results = New-ToolCheckResults
+        $toolsConfig = @{
+            'Example CLI' = @{ Enabled = $true; CooldownDays = $script:ReleaseCooldownDays }
+        }
         Mock Write-Host { }
     }
 

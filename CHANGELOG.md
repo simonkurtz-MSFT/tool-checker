@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Show each tool's resolved Cooldown after Age in the status table.
 - Allow per-tool release cooldowns with the default and maximum defined in the
   catalog (shipped as eight and 30 days). The runtime override still takes
   precedence for every tool.

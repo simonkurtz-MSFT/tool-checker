@@ -6,7 +6,7 @@ Checks npm releases from newest to oldest and selects the newest production vers
 
 ## Summary and details
 
-The summary table contains five columns:
+The summary table contains six columns:
 
 - **Name**: the tool or managed package.
 - **Installed**: the detected local version.
@@ -17,6 +17,8 @@ The summary table contains five columns:
   preserving the previous behavior. Shows `-` when already current or newer, or when
   age is unavailable. A blocked candidate can still show its age; this is not the
   age of an independently sourced upstream release.
+- **Cooldown**: the tool's resolved cooldown in full days (for example,
+  `8d` or `0d`), including per-tool and runtime overrides. Shows `-` for an unowned row.
 - **Latest Released**: the newest version reported by the tool's configured release
   source and channel, respecting its production-release policy. This column is
   informational, never an update target by itself. It is green when it matches the

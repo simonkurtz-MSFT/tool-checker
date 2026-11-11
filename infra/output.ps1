@@ -75,6 +75,7 @@ function Show-ResultsTable {
     # Older/non-cooldown checks supply Latest only; explicit null means no verified safe release.
     $rows = @($results.Tools.GetEnumerator() | ForEach-Object {
         $row = $_.Value
+        $configuration = Get-OwnedConfiguration -ToolId (Get-ResultToolId -Name $_.Key)
         $latest = if ($row.Latest) { $row.Latest } elseif ($SkipUpdate) { '-' } else { 'unknown' }
         $cooldown = if ($row.ContainsKey('LatestCooldown')) {
             if ($row.LatestCooldown) { $row.LatestCooldown } else { '-' }
@@ -103,6 +104,7 @@ function Show-ResultsTable {
             CooldownComparison = $comparisons.Cooldown
             CooldownDisplay = if ($comparisons.Cooldown -gt 0) { "$cooldown*" } else { $cooldown }
             Age = $age
+            CooldownPeriod = if ($null -ne $configuration.CooldownDays) { "$($configuration.CooldownDays)d" } else { '-' }
             ReleasedComparison = $comparisons.Released
             ReleasedDisplay = if ($comparisons.Released -gt 0) { "$released*" } else { $released }
         }
@@ -114,12 +116,13 @@ function Show-ResultsTable {
     $maxInst = [Math]::Max(9, ($rows | ForEach-Object { "$($_.Row.Installed)".Length } | Measure-Object -Maximum).Maximum)
     $maxCooldown = [Math]::Max(15, ($rows.CooldownDisplay | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
     $maxAge = [Math]::Max(3, ($rows.Age | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
+    $maxCooldownPeriod = [Math]::Max(8, ($rows.CooldownPeriod | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
     $maxReleased = [Math]::Max(15, ($rows.ReleasedDisplay | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum)
 
     Write-Host ""
-    $hdr = "  {0,-$maxName}   {1,-$maxInst}   {2,-$maxCooldown}   {3,$maxAge}   {4,-$maxReleased}" -f "Name","Installed","Latest Cooldown","Age","Latest Released"
+    $hdr = "  {0,-$maxName}   {1,-$maxInst}   {2,-$maxCooldown}   {3,$maxAge}   {4,$maxCooldownPeriod}   {5,-$maxReleased}" -f "Name","Installed","Latest Cooldown","Age","Cooldown","Latest Released"
     Write-Host "$ColorCyan$hdr$ColorReset"
-    Write-Host ("  {0}   {1}   {2}   {3}   {4}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxCooldown),("-"*$maxAge),("-"*$maxReleased))
+    Write-Host ("  {0}   {1}   {2}   {3}   {4}   {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxCooldown),("-"*$maxAge),("-"*$maxCooldownPeriod),("-"*$maxReleased))
 
     $rows | ForEach-Object {
         $inst = $_.Row.Installed
@@ -136,7 +139,7 @@ function Show-ResultsTable {
                 else { $ColorYellow }
         $cooldownCell = "{0,-$maxCooldown}" -f $_.CooldownDisplay
         if ($_.CooldownComparison -gt 0) { $cooldownCell = "$ColorCyan$cooldownCell$ColorReset$clr" }
-        $row = "  {0,-$maxName}   {1,-$maxInst}   {2}   {3,$maxAge}" -f $_.Name,$inst,$cooldownCell,$_.Age
+        $row = "  {0,-$maxName}   {1,-$maxInst}   {2}   {3,$maxAge}   {4,$maxCooldownPeriod}" -f $_.Name,$inst,$cooldownCell,$_.Age,$_.CooldownPeriod
         $releasedColor = if ($_.ReleasedComparison -gt 0) { $ColorCyan }
             elseif ($null -ne $_.ReleasedComparison -and $_.ReleasedComparison -eq 0) { $ColorGreen } else { '' }
         Write-Host "$clr$row$ColorReset   $releasedColor$($_.ReleasedDisplay)$ColorReset"

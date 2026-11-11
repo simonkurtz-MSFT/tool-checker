@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-11
+
 ### Added
 
 - Show each tool's resolved Cooldown after Age in the status table.
@@ -306,7 +308,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.9.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.10.0...HEAD
+[2.10.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.9.0...2.10.0
 [2.9.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.1...2.8.0
 [2.7.1]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.0...2.7.1

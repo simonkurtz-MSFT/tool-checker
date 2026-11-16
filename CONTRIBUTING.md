@@ -293,7 +293,13 @@ matches Installed; newer or unknown versions remain neutral. In both latest
 columns, versions older than Installed are cyan with an asterisk, using the same
 owner-aware comparison. Include the marker in column widths without changing
 stored version strings or action eligibility, and explain it in the legend. It never drives
-update status.
+update eligibility.
+When Latest Cooldown is unavailable, render the row green if Installed matches or
+exceeds the known Latest Released, retaining failed/timeout and unknown-version
+precedence. Orange rows get read-only Release eligibility notes below the six-column
+table: distinguish a known age awaiting cooldown from an unverified age, and reuse
+the stored BlockReason. Do not change source policy, result state, or action plans
+to improve display status.
 
 Pass the current remaining action count to `Read-ActionMenuResponse` on every menu
 rebuild. Numeric choices execute as soon as they match an option with no longer

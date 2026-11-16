@@ -260,6 +260,60 @@ Describe 'Output rendering' {
         $rendered | Should Match ([regex]::Escape($ColorReset) + '\s+1.2.0')
     }
 
+    It 'renders current releases without a safe candidate as <Color> for <Case>' -TestCases @(
+        @{ Case = 'current young uv'; Name = 'uv'; Installed = '1.2.0'; Released = '1.2.0'; Color = 'Green'; Failed = $false; TimedOut = $false },
+        @{ Case = 'newer installed uv'; Name = 'uv'; Installed = '1.3.0'; Released = '1.2.0'; Color = 'Green'; Failed = $false; TimedOut = $false },
+        @{ Case = 'owner-equivalent Git'; Name = 'Git'; Installed = '2.55.0.windows.3'; Released = '2.55.0.3'; Color = 'Green'; Failed = $false; TimedOut = $false },
+        @{ Case = 'unknown released version'; Name = 'uv'; Installed = '1.2.0'; Released = 'unknown'; Color = 'Orange'; Failed = $false; TimedOut = $false },
+        @{ Case = 'failed update'; Name = 'uv'; Installed = '1.2.0'; Released = '1.2.0'; Color = 'Red'; Failed = $true; TimedOut = $false },
+        @{ Case = 'timed-out check'; Name = 'uv'; Installed = '1.2.0'; Released = '1.2.0'; Color = 'Red'; Failed = $false; TimedOut = $true }
+    ) {
+        param($Case, $Name, $Installed, $Released, $Color, $Failed, $TimedOut)
+        $results.Tools[$Name] = @{
+            Installed = $Installed; Latest = $Released; LatestReleased = $Released
+            LatestCooldown = $null; AgeDays = 2; Installable = $false; CheckTimedOut = $TimedOut
+        }
+        if ($Failed) { $results.UpdateFailed = @($Name) }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ResultsTable
+        $row = $script:OutputLines | Where-Object { $_ -match ('  ' + [regex]::Escape($Name) + '\s') }
+        $expectedColor = Get-Variable -Name "Color$Color" -ValueOnly
+        $row | Should Match ('^' + [regex]::Escape("$expectedColor  $Name") + '\s')
+        (($row -replace '\x1b\[[0-9;]*m', '').Trim() -split '\s{3,}').Count | Should Be 6
+        if ($Color -ne 'Orange') {
+            ($script:OutputLines -join "`n") | Should Not Match 'Release eligibility|Cooldown pending|Release age unknown'
+        }
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+    }
+
+    It 'explains pending cooldown and unknown age separately without changing actions' {
+        $results.Tools = @{
+            Young = @{
+                Installed = '1.0.0'; Latest = '1.2.0'; LatestReleased = '1.2.0'
+                LatestCooldown = $null; AgeDays = 2; Installable = $false
+                BlockReason = 'this release requires 8 full days of cooldown.'
+            }
+            Unverified = @{
+                Installed = '1.0.0'; Latest = '1.2.0'; LatestReleased = '1.2.0'
+                LatestCooldown = $null; AgeDays = $null; Installable = $false
+                BlockReason = 'the release age could not be verified.'
+            }
+            Undated = @{ Installed = '1.0.0'; Latest = '1.2.0'; Installable = $true }
+        }
+        $results.AvailableUpdates = @(@{ Name = 'Undated'; Command = 'update undated'; Version = '1.2.0' })
+        Mock Invoke-ActionCommand { throw 'Rendering must not execute actions' }
+        $before = ConvertTo-Json $results -Depth 10 -Compress
+        Show-ResultsTable
+        $rendered = $script:OutputLines -join "`n"
+        $rendered | Should Match 'Release eligibility'
+        $rendered | Should Match 'Young: Cooldown pending \(release age: 2d\); this release requires 8 full days of cooldown\.'
+        $rendered | Should Match 'Unverified: Release age unknown; the release age could not be verified\.'
+        $rendered | Should Not Match 'Undated:'
+        $rendered | Should Match ([regex]::Escape($ColorYellow) + '  Undated')
+        (ConvertTo-Json $results -Depth 10 -Compress) | Should Be $before
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It
+    }
+
     It 'shows resolved cooldowns for owned rows with CheckOnly=<CheckOnly>' -TestCases @(
         @{ CheckOnly = $false }, @{ CheckOnly = $true }
     ) {
@@ -622,7 +676,7 @@ Describe 'Update legend' {
 
         Show-UpdateLegend
 
-        Assert-MockCalled Write-Host 9 -Exactly -Scope It
+        Assert-MockCalled Write-Host 10 -Exactly -Scope It
     }
 
     It 'groups the cooldown color key and notes with consistent indentation' {
@@ -635,8 +689,9 @@ Describe 'Update legend' {
             "  Release cooldown default: $script:ReleaseCooldownDays full days"
             ''
             "  ${ColorCyan}Legend$ColorReset"
+            "    $ColorGreen■ Current / newer installed / check-only$ColorReset"
             "    $ColorYellow■ Installable update / version unknown$ColorReset"
-            "    $ColorOrange■ No verified installable release$ColorReset"
+            "    $ColorOrange■ Cooldown pending / release age unverified$ColorReset"
             "    ${ColorCyan}* Older than installed; informational only, no downgrade offered.$ColorReset"
             ''
             '  Latest Released is informational only.'

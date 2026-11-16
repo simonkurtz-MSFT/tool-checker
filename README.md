@@ -31,6 +31,12 @@ source reports an older version, and no downgrade is offered.
 For sources without a cooldown policy, both latest columns show the same checked
 release. Existing source, platform, and release-channel restrictions still apply.
 
+An installed version that matches or exceeds Latest Released remains green even
+when Latest Cooldown is `-`. Orange rows have a **Release eligibility** explanation
+below the table: **Cooldown pending** includes the known release age, while
+**Release age unknown** indicates that the age could not be verified. These display
+statuses do not change update eligibility; undated sources retain their existing policy.
+
 For pnpm, npm-check-updates (`ncu`), Pi, and GitHub Copilot CLI, **Latest Released**
 comes from the upstream GitHub release endpoint, independently of the configured
 npm registry or proxy. **Latest Cooldown** and update commands still use versions
@@ -429,7 +435,8 @@ If normal semantic version comparison applies, call `Register-ToolUpdate`; it ad
 
 - Green rows are installed and current, or were run in check-only mode without an update lookup.
 - Yellow rows have an actionable install or update, or the latest version could not be determined.
-- Orange rows identify npm releases still in cooldown.
+- Orange rows identify releases still in cooldown or without a verified age.
+  The Release eligibility notes below the table distinguish the two.
 - Red rows identify failed updates, missing tools, or checks that timed out before inventory completed.
 - A timed-out check is stopped and reported without preventing other checks from completing. A whole-check timeout shows `unknown` in red; an installed tool whose latest-version lookup did not complete shows `unknown` in yellow rather than appearing current.
 - After an interactive action, Tool Checker refreshes the displayed version when a refresh handler is available.

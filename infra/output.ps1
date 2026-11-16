@@ -57,8 +57,9 @@ function Show-UpdateLegend {
     if ($overrides) { Write-Host "  Tool cooldown overrides: $($overrides -join ', ')" }
     Write-Host ''
     Write-Host "  ${ColorCyan}Legend$ColorReset"
+    Write-Host "    $ColorGreen■ Current / newer installed / check-only$ColorReset"
     Write-Host "    $ColorYellow■ Installable update / version unknown$ColorReset"
-    Write-Host "    $ColorOrange■ No verified installable release$ColorReset"
+    Write-Host "    $ColorOrange■ Cooldown pending / release age unverified$ColorReset"
     Write-Host "    ${ColorCyan}* Older than installed; informational only, no downgrade offered.$ColorReset"
     Write-Host ''
     Write-Host '  Latest Released is informational only.'
@@ -124,12 +125,15 @@ function Show-ResultsTable {
     Write-Host "$ColorCyan$hdr$ColorReset"
     Write-Host ("  {0}   {1}   {2}   {3}   {4}   {5}" -f ("-"*$maxName),("-"*$maxInst),("-"*$maxCooldown),("-"*$maxAge),("-"*$maxCooldownPeriod),("-"*$maxReleased))
 
+    $eligibilityNotes = [System.Collections.Generic.List[string]]::new()
     $rows | ForEach-Object {
         $inst = $_.Row.Installed
         $installedUnknown = [string]::IsNullOrWhiteSpace($inst) -or $inst -in @('unknown', 'Unable to retrieve version')
         $latestUnknown = $_.Cooldown -eq 'unknown'
-        $currentOrNewer = $null -ne $_.CooldownComparison -and $_.CooldownComparison -ge 0
         $noSafeRelease = $_.Cooldown -eq '-' -and ($_.Row.ContainsKey('LatestCooldown') -or $_.Name -in $results.MaturityBlockedUpdates.Name -or ($_.Row.ContainsKey('Installable') -and -not $_.Row.Installable))
+        # Release eligibility does not make an already-current installation outdated.
+        $currentOrNewer = ($null -ne $_.CooldownComparison -and $_.CooldownComparison -ge 0) -or
+            ($noSafeRelease -and $null -ne $_.ReleasedComparison -and $_.ReleasedComparison -ge 0)
         $clr  = if ($_.Name -in $results.UpdateFailed) { $ColorRed }
             elseif ($_.Row.CheckTimedOut) { $ColorRed }
             elseif ($installedUnknown -or $latestUnknown) { $ColorYellow }
@@ -143,6 +147,16 @@ function Show-ResultsTable {
         $releasedColor = if ($_.ReleasedComparison -gt 0) { $ColorCyan }
             elseif ($null -ne $_.ReleasedComparison -and $_.ReleasedComparison -eq 0) { $ColorGreen } else { '' }
         Write-Host "$clr$row$ColorReset   $releasedColor$($_.ReleasedDisplay)$ColorReset"
+        if ($clr -eq $ColorOrange) {
+            $status = if ($null -ne $_.Row.AgeDays) { "Cooldown pending (release age: $($_.Row.AgeDays)d)" } else { 'Release age unknown' }
+            $reason = if ($_.Row.BlockReason) { $_.Row.BlockReason } else { 'no verified cooldown-safe release.' }
+            $eligibilityNotes.Add("    $($_.Name): $status; $reason")
+        }
+    }
+    if ($eligibilityNotes.Count -gt 0) {
+        Write-Host ''
+        Write-Host "  ${ColorCyan}Release eligibility$ColorReset"
+        foreach ($note in $eligibilityNotes) { Write-Host "$ColorOrange$note$ColorReset" }
     }
     $installationOwners = @($results.ToolState.Keys | Where-Object {
         $results.ToolState[$_].ContainsKey('Installations') -and

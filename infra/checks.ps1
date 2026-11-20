@@ -376,13 +376,19 @@ function Register-ReleasePlan {
 
 function Refresh-ToolVersion {
     # Dynamic rows route by owner ID; a tool may refresh its entire managed inventory.
-    param([string]$ToolName)
+    param([string]$ToolName, [switch]$InitializeInventory)
     try {
         $owner = Get-ResultToolId -Name $ToolName
         $config = Get-OwnedConfiguration -ToolId $owner
         if (-not $config) { Write-Warning "  Tool configuration not found: $ToolName"; return $false }
 
-        if ($config.Id -and $script:ToolDefinitions.ContainsKey($config.Id) -and $script:ToolDefinitions[$config.Id].ContainsKey('Refresh-ToolStatus')) {
+        if ($InitializeInventory -and $config.CheckType -eq 'custom' -and $config.Id -and
+            $script:ToolDefinitions.ContainsKey($config.Id) -and $script:ToolDefinitions[$config.Id].ContainsKey('Test-Tool')) {
+            & {
+                $SkipUpdate = $true
+                Invoke-ToolEntryPoint -ToolId $config.Id -EntryPoint 'Test-Tool' | Out-Null
+            }
+        } elseif ($config.Id -and $script:ToolDefinitions.ContainsKey($config.Id) -and $script:ToolDefinitions[$config.Id].ContainsKey('Refresh-ToolStatus')) {
             Invoke-ToolEntryPoint -ToolId $config.Id -EntryPoint 'Refresh-ToolStatus' -Arguments @{ ToolName = $ToolName }
         } else {
             Refresh-StandardVersion -ToolName $ToolName -Config $config

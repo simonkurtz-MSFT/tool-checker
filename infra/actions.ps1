@@ -198,6 +198,36 @@ function Complete-UpdateExecution {
     $false
 }
 
+function Add-InstalledCommandPath {
+    param([string]$Command, [string[]]$Paths)
+
+    $originalPath = "$env:Path"
+    $knownPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in ($originalPath -split ';')) {
+        $normalized = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\', '/')
+        if ($normalized) { [void]$knownPaths.Add($normalized) }
+    }
+
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        foreach ($entry in ($path -split ';')) {
+            $directory = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"'))
+            if ([string]::IsNullOrWhiteSpace($directory) -or -not $knownPaths.Add($directory.TrimEnd('\', '/'))) { continue }
+
+            $separator = if (-not $originalPath -or $originalPath.EndsWith(';')) { '' } else { ';' }
+            $found = $false
+            try {
+                $env:Path = "$originalPath$separator$directory"
+                $found = Test-CommandExists -Command $Command
+            } finally {
+                if (-not $found) { $env:Path = $originalPath }
+            }
+            if ($found) { return $true }
+        }
+    }
+    $false
+}
+
 function Complete-InstallExecution {
     param(
         [Parameter(Mandatory)][object]$Action,
@@ -212,6 +242,17 @@ function Complete-InstallExecution {
     $config = Get-OwnedConfiguration -ToolId $Action.ToolId
     if (-not $config) { $config = $toolsConfig[$Action.Name] }
     $commandVerified = $config -and $config.Command -and (Test-CommandExists $config.Command)
+    if (-not $commandVerified -and $exitCode -eq 0 -and $config.Command -and (Test-IsWindowsPlatform)) {
+        try {
+            $paths = @(
+                [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+                [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            )
+            $commandVerified = Add-InstalledCommandPath -Command $config.Command -Paths $paths
+        } catch [System.Security.SecurityException], [System.UnauthorizedAccessException] {
+            Write-Warning "Unable to inspect Windows PATH for $($Action.Name): $($_.Exception.Message)"
+        }
+    }
     if ($commandVerified -or $exitCode -eq 0) {
         Write-Success "Install completed: $($Action.Name)"
         if ($commandVerified) {
@@ -219,7 +260,28 @@ function Complete-InstallExecution {
         } else {
             Write-Warning "Command could not be verified yet for $($Action.Name) — you may need to restart your shell"
         }
-        Refresh-ToolVersion -ToolName $Action.Name | Out-Null
+        $previousNames = @($results.Tools.Keys)
+        $hasPriorInventory = $results.Tools.ContainsKey($Action.Name) -or (
+            $Action.ToolId -and @($results.Tools.Values | Where-Object { $_.ToolId -eq $Action.ToolId }).Count -gt 0
+        )
+        $placeholder = $null
+        if (-not $results.Tools.ContainsKey($Action.Name)) {
+            $placeholder = @{ ToolId = $Action.ToolId; Installed = 'unknown'; Latest = ''; ReleaseNotesUrl = $config.ReleaseNotesUrl }
+            $results.Tools[$Action.Name] = $placeholder
+        }
+        $refreshed = Refresh-ToolVersion -ToolName $Action.Name -InitializeInventory:(-not $hasPriorInventory)
+        if ($placeholder -and $refreshed -and $Action.ToolId -and
+            $results.Tools.ContainsKey($Action.Name) -and
+            [object]::ReferenceEquals($results.Tools[$Action.Name], $placeholder) -and $placeholder.Installed -eq 'unknown') {
+            $newRows = @($results.Tools.GetEnumerator() | Where-Object {
+                $_.Key -ne $Action.Name -and $_.Key -notin $previousNames -and $_.Value.ToolId -eq $Action.ToolId
+            })
+            if ($newRows.Count -gt 0) { $results.Tools.Remove($Action.Name) }
+        }
+        if ($commandVerified -and $results.Tools.ContainsKey($Action.Name) -and
+            $results.Tools[$Action.Name].Installed -in @('', 'unknown', 'Unable to retrieve version')) {
+            Write-Warning "Installed version could not be determined for $($Action.Name); re-check later"
+        }
         $results.NotInstalled = @($results.NotInstalled | Where-Object { $_.Name -ne $Action.Name })
         return $true
     }

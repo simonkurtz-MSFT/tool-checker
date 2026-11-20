@@ -442,6 +442,139 @@ Describe 'Sequential bulk actions' {
     }
 }
 
+Describe 'Post-install inventory' {
+    BeforeEach {
+        $results = New-ToolCheckResults
+        $SkipUpdate = $false
+    }
+
+    It 'adds only the Windows PATH directory that makes the installed command available' {
+        $originalPath = $env:Path
+        try {
+            $env:Path = 'C:\existing;C:\TOOLS\'
+            function Test-CommandExists {
+                param([string]$Command)
+                $Command -eq 'example' -and $env:Path -match '(?i);C:\\new-tools$'
+            }
+
+            Add-InstalledCommandPath -Command 'example' -Paths @('c:\tools;C:\unrelated;C:\new-tools;C:\later') | Should Be $true
+            $env:Path | Should Be 'C:\existing;C:\TOOLS\;C:\new-tools'
+        } finally {
+            $env:Path = $originalPath
+        }
+    }
+
+    It 'leaves the process PATH unchanged when no persisted directory contains the command' {
+        $originalPath = $env:Path
+        try {
+            $env:Path = 'C:\existing'
+            function Test-CommandExists { $false }
+
+            Add-InstalledCommandPath -Command 'example' -Paths @('C:\unrelated;C:\another') | Should Be $false
+            $env:Path | Should Be 'C:\existing'
+        } finally {
+            $env:Path = $originalPath
+        }
+    }
+
+    It 'shows the detected version in the table immediately after an install action' {
+        $results.NotInstalled = @([pscustomobject]@{
+            Name = 'Dapr CLI'; ToolId = 'dapr-cli'
+            InstallCommands = @{ $script:PlatformKey = 'synthetic install' }
+        })
+        $script:PostInstallCommandFound = $false
+        $script:PostInstallResponses = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($response in @('1', '0')) { $script:PostInstallResponses.Enqueue($response) }
+        function Read-ActionMenuResponse { $script:PostInstallResponses.Dequeue() }
+        function Invoke-ActionCommand { @{ Output = 'synthetic install'; ExitCode = 0 } }
+        function Test-IsWindowsPlatform { $true }
+        function Test-CommandExists { $script:PostInstallCommandFound }
+        function Add-InstalledCommandPath { $script:PostInstallCommandFound = $true; $true }
+        function Get-CommandVersion { 'CLI version: 1.19.1' }
+
+        $rendered = @(Invoke-ActionMenu 6>&1) -join "`n"
+
+        $rendered | Should Match 'Dapr CLI\s+1\.19\.1'
+        $results.Tools['Dapr CLI'].Installed | Should Be '1.19.1'
+        $results.Tools['Dapr CLI'].ToolId | Should Be 'dapr-cli'
+        $results.NotInstalled.Count | Should Be 0
+    }
+
+    It 'shows an unknown version and warns when the installed command cannot be verified' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+        function Test-IsWindowsPlatform { $false }
+        function Test-CommandExists { $false }
+        $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+        $rendered = @(Show-ResultsTable 6>&1) -join "`n"
+
+        $messages | Should Match 'Command could not be verified yet for Dapr CLI'
+        $results.Tools['Dapr CLI'].Installed | Should Be 'unknown'
+        $rendered | Should Match 'Dapr CLI\s+unknown'
+        $results.NotInstalled.Count | Should Be 0
+    }
+
+    It 'does not create an installed row after a failed and unverified install' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+        function Test-CommandExists { $false }
+        $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 1 } | Should Be $false
+
+        $results.Tools.ContainsKey('Dapr CLI') | Should Be $false
+        $results.NotInstalled.Count | Should Be 1
+        $results.Errors.Count | Should Be 1
+    }
+
+    It 'uses the custom package inventory rather than the runtime version after installation' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Python Install Manager (py)'; ToolId = 'python-install-manager' })
+        function Test-IsWindowsPlatform { $true }
+        function Test-CommandExists { $true }
+        function Get-AppxPackage { [pscustomobject]@{ Version = [version]'26.4.240.0' } }
+        function Get-CommandVersion { throw 'The Python runtime is not the install-manager package' }
+        $action = @{ Name = 'Python Install Manager (py)'; ToolId = 'python-install-manager'; Command = 'synthetic install'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } | Should Be $true
+
+        $results.Tools['Python Install Manager (py)'].Installed | Should Be '26.4.240.0'
+        $SkipUpdate | Should Be $false
+        $results.AvailableUpdates.Count | Should Be 0
+    }
+
+    It 'keeps custom multi-version inventory without an extra placeholder row' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Python'; ToolId = 'python' })
+        function Test-CommandExists { param([string]$Command) $Command -eq 'py' }
+        function py { $global:LASTEXITCODE = 0; '3.14 * Python 3.14.2' }
+        $action = @{ Name = 'Python'; ToolId = 'python'; Command = 'synthetic install'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } | Should Be $true
+
+        $results.Tools.ContainsKey('Python') | Should Be $false
+        $results.Tools['Python 3.14'].Installed | Should Be '3.14.2'
+        $results.Tools['Python 3.14'].ToolId | Should Be 'python'
+        $SkipUpdate | Should Be $false
+    }
+
+    It 'preserves previously checked release information for an existing custom-tool row' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'NodeJS'; ToolId = 'nodejs' })
+        $results.Tools.NodeJS = @{
+            ToolId = 'nodejs'; Installed = 'v1.0.0'; Latest = 'v2.0.0'
+            LatestCooldown = 'v2.0.0'; LatestReleased = 'v2.1.0'; AgeDays = 10
+        }
+        function Test-CommandExists { $true }
+        function Get-CommandVersion { 'v2.0.0' }
+        $action = @{ Name = 'NodeJS'; ToolId = 'nodejs'; Command = 'synthetic install'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } | Should Be $true
+
+        $results.Tools.NodeJS.Latest | Should Be 'v2.0.0'
+        $results.Tools.NodeJS.LatestCooldown | Should Be 'v2.0.0'
+        $results.Tools.NodeJS.LatestReleased | Should Be 'v2.1.0'
+        $results.Tools.NodeJS.AgeDays | Should Be 10
+    }
+}
+
 Describe 'Action execution' {
     BeforeEach {
         $results.UpdateFailed = @()

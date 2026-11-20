@@ -60,6 +60,11 @@ even when no actions exist; check-only and Force runs do not gain an extra promp
 When an install/update action starts, the console prints the tool name and its
 command in both interactive and Force mode.
 
+After an install, the next table includes the tool and its detected version. If
+the version cannot be verified, it shows `unknown` with a warning. On Windows,
+Tool Checker can add the command's directory from the persisted PATH to the
+current process; this refresh does not change the persistent PATH.
+
 When at least two runnable installs or updates remain, select **[A] Install /
 Update all** to run them sequentially, with unattended operations first and
 potentially interactive operations last. Catalog order is preserved within each

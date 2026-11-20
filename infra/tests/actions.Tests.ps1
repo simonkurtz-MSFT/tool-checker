@@ -477,6 +477,19 @@ Describe 'Post-install inventory' {
         }
     }
 
+    It 'restores the process PATH if command discovery throws' {
+        $originalPath = $env:Path
+        try {
+            $env:Path = 'C:\existing'
+            function Test-CommandExists { throw 'synthetic discovery failure' }
+
+            { Add-InstalledCommandPath -Command 'example' -Paths @('C:\new-tools') } | Should Throw 'synthetic discovery failure'
+            $env:Path | Should Be 'C:\existing'
+        } finally {
+            $env:Path = $originalPath
+        }
+    }
+
     It 'shows the detected version in the table immediately after an install action' {
         $results.NotInstalled = @([pscustomobject]@{
             Name = 'Dapr CLI'; ToolId = 'dapr-cli'
@@ -513,6 +526,18 @@ Describe 'Post-install inventory' {
         $results.Tools['Dapr CLI'].Installed | Should Be 'unknown'
         $rendered | Should Match 'Dapr CLI\s+unknown'
         $results.NotInstalled.Count | Should Be 0
+    }
+
+    It 'warns and keeps the version unknown when the command output cannot be parsed' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+        function Test-CommandExists { $true }
+        function Get-CommandVersion { 'not a Dapr version' }
+        $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+        $messages | Should Match 'Installed version could not be determined for Dapr CLI'
+        $results.Tools['Dapr CLI'].Installed | Should Be 'unknown'
     }
 
     It 'does not create an installed row after a failed and unverified install' {
@@ -553,6 +578,22 @@ Describe 'Post-install inventory' {
         $results.Tools.ContainsKey('Python') | Should Be $false
         $results.Tools['Python 3.14'].Installed | Should Be '3.14.2'
         $results.Tools['Python 3.14'].ToolId | Should Be 'python'
+        $SkipUpdate | Should Be $false
+    }
+
+    It 'initializes all .NET SDK rows without checking releases after installation' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = '.NET SDK'; ToolId = 'dotnet-sdk' })
+        function Test-CommandExists { $true }
+        function dotnet { '8.0.301 [C:\synthetic]'; '9.0.102 [C:\synthetic]' }
+        function Invoke-SafeApiRequest { throw 'Post-install inventory must not check releases' }
+        $action = @{ Name = '.NET SDK'; ToolId = 'dotnet-sdk'; Command = 'synthetic install'; Type = 'install' }
+
+        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } | Should Be $true
+
+        $results.Tools.ContainsKey('.NET SDK') | Should Be $false
+        $results.Tools['.NET SDK 8.0.301'].Installed | Should Be '8.0.301'
+        $results.Tools['.NET SDK 9.0.102'].Installed | Should Be '9.0.102'
+        $results.AvailableUpdates.Count | Should Be 0
         $SkipUpdate | Should Be $false
     }
 

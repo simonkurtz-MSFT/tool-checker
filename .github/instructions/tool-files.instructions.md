@@ -83,9 +83,11 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   Invoke-ToolEntryPoint by catalog ID, dot-sourcing definitions only in its local
   call scope so names do not collide or leak. Prefer tool-qualified private names;
   do not call another tool's helpers or assume an unselected file is loaded.
-- A loaded `Refresh-ToolStatus` is selected automatically, with optional
-  `[string]$ToolName`; it may refresh one row or the whole tool inventory.
-  Do not reintroduce `RefreshMethod` fields or a named-handler switch.
+- After a new custom-tool install with no existing inventory, initialize its rows
+  by running `Test-Tool` in check-only mode. Otherwise, a loaded
+  `Refresh-ToolStatus` is selected automatically, with optional `[string]$ToolName`;
+  it may refresh one row or the whole tool inventory. Do not reintroduce
+  `RefreshMethod` fields or a named-handler switch.
 - Shared version policy belongs in `infra/versions.ps1`. Optional public
   `Compare-ToolVersions` accepts Version1, Version2, Version1Source, Version2Source
   strings and returns exactly one integer (-1/0/1). Keep overrides pure; use

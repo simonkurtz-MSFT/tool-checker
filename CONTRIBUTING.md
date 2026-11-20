@@ -171,9 +171,12 @@ Other locations retain the npm update command. Refresh reads the active command,
 not a potentially shadowed npm-global package. Cover these paths, cooldown
 blocking, and check-only behavior in synthetic selected-only workers.
 
-`Refresh-ToolVersion` calls a loaded `Refresh-ToolStatus` automatically, passing
-the optional `[string]$ToolName` parameter. A handler may refresh one row or its
-whole inventory. Dynamic SDK, Python, and npm rows route to their owning tool.
+For a newly installed custom tool without existing inventory,
+`Refresh-ToolVersion -InitializeInventory` runs `Test-Tool` in check-only mode to
+create the tool's own rows. Otherwise, it calls a loaded `Refresh-ToolStatus`
+automatically, passing the optional `[string]$ToolName` parameter. A handler may
+refresh one row or its whole inventory. Dynamic SDK, Python, and npm rows route to
+their owning tool.
 No `RefreshMethod` field or named-handler switch is needed. Specialized actions
 remain behind the shared dispatcher and approval gates.
 Python refresh uses the same `py list` parser as discovery, queries legacy launcher

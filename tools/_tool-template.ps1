@@ -25,8 +25,10 @@
             and OutputText and returns a Message/Status object or nothing.
     Keep platform-specific details behind these names, not in public names.
     Action parameters and results must match infra/actions.ps1's dispatcher.
-    A loaded Refresh-ToolStatus is used automatically; do not add a RefreshMethod
-    catalog field or a tool-specific refresh switch in the main script.
+    For a newly installed custom tool without existing inventory, Test-Tool runs
+    in check-only mode to create its rows. Otherwise, a loaded Refresh-ToolStatus
+    is used automatically; do not add a RefreshMethod catalog field or a
+    tool-specific refresh switch in the main script.
 
     Put public functions in '#region Public entry points' and private helpers in
     '#region Private helpers'. Private names may vary; prefer tool-qualified names

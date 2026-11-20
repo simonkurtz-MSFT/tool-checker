@@ -241,6 +241,7 @@ function Complete-InstallExecution {
     $Action = Resolve-ActionMetadata -Action $Action
     $config = Get-OwnedConfiguration -ToolId $Action.ToolId
     if (-not $config) { $config = $toolsConfig[$Action.Name] }
+    $mayRequireTerminalRestart = $config -and (Get-PlatformConfigurationValue -Configuration $config -Property 'InstallMayRequireTerminalRestart') -eq $true
     $commandVerified = $config -and $config.Command -and (Test-CommandExists $config.Command)
     if (-not $commandVerified -and $exitCode -eq 0 -and $config.Command -and (Test-IsWindowsPlatform)) {
         try {
@@ -257,6 +258,11 @@ function Complete-InstallExecution {
         Write-Success "Install completed: $($Action.Name)"
         if ($commandVerified) {
             Write-Success "Verified command found: $($config.Command)"
+            if ($mayRequireTerminalRestart) {
+                Write-Warning "To use $($Action.Name) in other terminals, you may need to update PATH or restart your terminal"
+            }
+        } elseif ($mayRequireTerminalRestart) {
+            Write-Warning "Command could not be verified yet for $($Action.Name) — check PATH or restart your terminal"
         } else {
             Write-Warning "Command could not be verified yet for $($Action.Name) — you may need to restart your shell"
         }

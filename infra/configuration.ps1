@@ -216,7 +216,10 @@ function Read-ToolCheckerConfiguration {
         if ($HasCooldownOverride -or -not $toolEntry.ContainsKey('CooldownDays')) {
             $toolEntry['CooldownDays'] = $resolvedCooldownDays
         }
-        foreach ($property in @('InstallUnattended', 'UpdateUnattended', 'WindowsInstallUnattended', 'WindowsUpdateUnattended')) {
+        foreach ($property in @(
+            'InstallUnattended', 'UpdateUnattended', 'WindowsInstallUnattended', 'WindowsUpdateUnattended',
+            'InstallMayRequireTerminalRestart', 'WindowsInstallMayRequireTerminalRestart'
+        )) {
             if ($toolEntry.ContainsKey($property) -and $toolEntry[$property] -isnot [bool]) {
                 throw "Tool '$toolName' property '$property' must be a boolean."
             }

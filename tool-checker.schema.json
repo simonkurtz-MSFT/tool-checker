@@ -152,6 +152,8 @@
         "UpdateUnattended": { "type": "boolean", "default": false, "description": "Update normally needs no input or elevation prompt. Bulk actions run unattended operations first; omitted means potentially interactive." },
         "WindowsInstallUnattended": { "type": "boolean", "description": "Windows override for InstallUnattended, including an explicit false." },
         "WindowsUpdateUnattended": { "type": "boolean", "description": "Windows override for UpdateUnattended, including an explicit false." },
+        "InstallMayRequireTerminalRestart": { "type": "boolean", "default": false, "description": "Warn after installation when a terminal restart or PATH update may be needed." },
+        "WindowsInstallMayRequireTerminalRestart": { "type": "boolean", "description": "Windows override for InstallMayRequireTerminalRestart, including an explicit false." },
         "WindowsInstallExecutor": { "$ref": "#/definitions/executor" },
         "UpdateExecutor": { "$ref": "#/definitions/executor" },
         "WindowsUpdateExecutor": { "$ref": "#/definitions/executor" },

@@ -63,7 +63,12 @@ command in both interactive and Force mode.
 After an install, the next table includes the tool and its detected version. If
 the version cannot be verified, it shows `unknown` with a warning. On Windows,
 Tool Checker can add the command's directory from the persisted PATH to the
-current process; this refresh does not change the persistent PATH.
+current process; this refresh does not change the persistent PATH. Installers
+marked as potentially requiring a restart also show a reminder, even if the
+command is detected. Other terminals may need a restart or a PATH update; an
+editor may also need to be restarted to pass on updated environment variables.
+The [Linux .NET install script](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
+does not persist its install directory on PATH, so add it manually when needed.
 
 When at least two runnable installs or updates remain, select **[A] Install /
 Update all** to run them sequentially, with unattended operations first and
@@ -215,7 +220,7 @@ The first-run setup creates `.env` from [`.env.example`](.env.example) and sets 
 
 ```text
 nodejs, npm-check-updates, npm-global-packages, pi, pnpm, deno, uv
-azure-cli, azure-dev-cli, azure-cli-extensions, azure-bicep-cli
+azure-cli, azure-dev-cli, azure-cli-extensions, azure-bicep-cli, dapr-cli
 dotnet-sdk, python-install-manager, python
 git, github-cli, github-copilot-cli, ripgrep, wsl, powershell
 ```
@@ -337,6 +342,7 @@ The generic API parser recognizes common `tag_name`, `version`, or `release` pro
 | `WindowsUpdateCommand`                                        | No                    | Windows-only override for `UpdateCommand`.                                                                                                  |
 | `InstallCommands`                                             | No                    | Platform-specific commands offered when the tool is missing.                                                                                |
 | `InstallUnattended`, `UpdateUnattended`                       | No                    | Boolean ordering hints for bulk actions; omitted means `false`. Supports `Windows` prefix overrides, including explicit `false`. |
+| `InstallMayRequireTerminalRestart`                            | No                    | Warn after installation if PATH or a terminal may need refreshing. Defaults to `false`; supports a `Windows` prefix override.               |
 | `ReleaseNotesUrl`                                             | No                    | Link displayed when an update is actionable.                                                                                                |
 | `ToolFile`                                                    | No for standard tools | Filename under `tools/`. Required for `custom` checks (must define `Test-Tool`); a loaded `Refresh-ToolStatus` overrides standard refresh.  |
 | `PackageManagerFiles`, `WindowsPackageManagerFiles`           | No                    | Explicit filenames under `infra/PackageManagers/`, loaded only for selected tools and applicable platforms.                                 |

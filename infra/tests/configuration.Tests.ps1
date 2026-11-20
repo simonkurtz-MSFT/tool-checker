@@ -73,18 +73,23 @@ Describe 'Configuration snapshots' {
         Set-Content -LiteralPath $fixtureEnv -Value ''
     }
 
-    It 'preserves unattended booleans without converting explicit false values' {
+    It 'preserves operation hints without converting explicit false values' {
         $catalog.tools.alpha.InstallUnattended = $true
         $catalog.tools.alpha.WindowsInstallUnattended = $false
+        $catalog.tools.alpha.InstallMayRequireTerminalRestart = $true
+        $catalog.tools.alpha.WindowsInstallMayRequireTerminalRestart = $false
         $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
         $snapshot = Read-ToolCheckerConfiguration -ConfigPath $fixtureCatalog -EnvFile $fixtureEnv
         $snapshot.ToolsConfiguration['Alpha CLI'].InstallUnattended | Should Be $true
         $snapshot.ToolsConfiguration['Alpha CLI'].WindowsInstallUnattended | Should Be $false
+        $snapshot.ToolsConfiguration['Alpha CLI'].InstallMayRequireTerminalRestart | Should Be $true
+        $snapshot.ToolsConfiguration['Alpha CLI'].WindowsInstallMayRequireTerminalRestart | Should Be $false
     }
 
     It 'rejects non-boolean <Property> at runtime' -TestCases @(
         @{ Property = 'InstallUnattended' }, @{ Property = 'UpdateUnattended' },
-        @{ Property = 'WindowsInstallUnattended' }, @{ Property = 'WindowsUpdateUnattended' }
+        @{ Property = 'WindowsInstallUnattended' }, @{ Property = 'WindowsUpdateUnattended' },
+        @{ Property = 'InstallMayRequireTerminalRestart' }, @{ Property = 'WindowsInstallMayRequireTerminalRestart' }
     ) {
         param($Property)
         $catalog.tools.alpha[$Property] = 'false'

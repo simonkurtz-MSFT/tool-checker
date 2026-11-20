@@ -33,6 +33,9 @@ the tool, such as a tool that manages several installed release channels.
    or elevation prompts may be required; silent installer flags alone do not
    guarantee unattended execution. These flags only prioritize bulk actions;
    they do not suppress prompts or authorize registry repairs and duplicate cleanup.
+   Set `InstallMayRequireTerminalRestart` when installation may require a PATH
+   update or a new terminal; use `WindowsInstallMayRequireTerminalRestart` for a
+   Windows-specific override. Omitted values default to `false`.
 5. Set `ProductionReleasesOnly` deliberately. Keep it enabled unless users are
    expected to track prerelease versions.
 6. Add or update focused Pester coverage. Put new custom checks in

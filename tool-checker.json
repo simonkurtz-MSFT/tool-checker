@@ -7,6 +7,7 @@
   "tools": {
     "nodejs": {
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "WindowsInstallExecutor": "winget.ps1",
@@ -107,6 +108,7 @@
     },
     "deno": {
       "InstallUnattended": true,
+      "InstallMayRequireTerminalRestart": true,
       "WindowsInstallUnattended": false,
       "UpdateUnattended": true,
       "WindowsPackageManagerFiles": ["winget.ps1"],
@@ -130,6 +132,7 @@
     },
     "uv": {
       "InstallUnattended": true,
+      "InstallMayRequireTerminalRestart": true,
       "UpdateUnattended": true,
       "WindowsInstallExecutor": "tool",
       "WindowsInstallEntryPoint": "Invoke-ToolInstall",
@@ -165,6 +168,7 @@
     "azure-cli": {
       "CooldownDays": 0,
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -195,6 +199,7 @@
     "azure-dev-cli": {
       "CooldownDays": 0,
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "ToolFile": "azure-dev-cli.ps1",
       "WindowsInstallExecutor": "winget.ps1",
@@ -266,6 +271,7 @@
     },
     "dapr-cli": {
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -295,6 +301,7 @@
     "dotnet-sdk": {
       "CooldownDays": 0,
       "InstallUnattended": false,
+      "InstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "SortGroup": ".NET SDK",
@@ -321,6 +328,7 @@
     },
     "python-install-manager": {
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "PackageName", "WingetId"],
       "WindowsInstallExecutor": "winget.ps1",
@@ -344,6 +352,7 @@
     },
     "python": {
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "RequiredProperties": ["Command", "ApiUrl"],
       "SortGroup": "Python",
@@ -368,6 +377,7 @@
     "git": {
       "CooldownDays": 0,
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "ToolFile": "git.ps1",
       "WindowsInstallExecutor": "winget.ps1",
@@ -396,6 +406,7 @@
     "github-cli": {
       "CooldownDays": 0,
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "WindowsInstallExecutor": "winget.ps1",
       "WindowsUpdateExecutor": "winget.ps1",
@@ -485,6 +496,7 @@
     },
     "ripgrep": {
       "InstallUnattended": false,
+      "WindowsInstallMayRequireTerminalRestart": true,
       "UpdateUnattended": false,
       "WindowsPackageManagerFiles": ["winget.ps1"],
       "WindowsReleasePackageManager": "winget.ps1",

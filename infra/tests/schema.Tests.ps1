@@ -41,6 +41,11 @@ Describe 'Catalog JSON Schema' {
             $catalog.tools.example.WindowsInstallUnattended = $false
             $catalog.tools.example.WindowsUpdateUnattended = $true
         } },
+        @{ Name = 'restart hints with an explicit false Windows override'; Change = {
+            param($catalog)
+            $catalog.tools.example.InstallMayRequireTerminalRestart = $true
+            $catalog.tools.example.WindowsInstallMayRequireTerminalRestart = $false
+        } },
         @{ Name = 'maximum cooldown'; Change = { param($catalog) $catalog.settings.CooldownDays = 30 } },
         @{ Name = 'an upstream informational release endpoint'; Change = { param($catalog) $catalog.tools.example.LatestReleaseApiUrl = 'https://api.github.com/repos/example/cli/releases/latest' } },
         @{ Name = 'an explicit version command'; Change = { param($catalog) $catalog.tools.example.Remove('VersionFlag'); $catalog.tools.example.VersionCommand = 'example version --json' } },
@@ -94,6 +99,8 @@ Describe 'Catalog JSON Schema' {
         @{ Name = 'numeric update unattended hints'; Change = { param($catalog) $catalog.tools.example.UpdateUnattended = 1 } },
         @{ Name = 'string Windows install unattended hints'; Change = { param($catalog) $catalog.tools.example.WindowsInstallUnattended = 'true' } },
         @{ Name = 'null Windows update unattended hints'; Change = { param($catalog) $catalog.tools.example.WindowsUpdateUnattended = $null } },
+        @{ Name = 'string install restart hints'; Change = { param($catalog) $catalog.tools.example.InstallMayRequireTerminalRestart = 'true' } },
+        @{ Name = 'null Windows install restart hints'; Change = { param($catalog) $catalog.tools.example.WindowsInstallMayRequireTerminalRestart = $null } },
         @{ Name = 'missing check type'; Change = { param($catalog) $catalog.tools.example.Remove('CheckType') } },
         @{ Name = 'unsupported check type'; Change = { param($catalog) $catalog.tools.example.CheckType = 'other' } },
         @{ Name = 'missing standard command'; Change = { param($catalog) $catalog.tools.example.Remove('Command') } },

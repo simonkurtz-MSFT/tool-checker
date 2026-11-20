@@ -508,9 +508,68 @@ Describe 'Post-install inventory' {
         $rendered = @(Invoke-ActionMenu 6>&1) -join "`n"
 
         $rendered | Should Match 'Dapr CLI\s+1\.19\.1'
+        $rendered | Should Match 'To use Dapr CLI in other terminals, you may need to update PATH or restart your terminal'
         $results.Tools['Dapr CLI'].Installed | Should Be '1.19.1'
         $results.Tools['Dapr CLI'].ToolId | Should Be 'dapr-cli'
         $results.NotInstalled.Count | Should Be 0
+    }
+
+    It 'reports restart guidance when a configured installer cannot yet be verified' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+        function Test-IsWindowsPlatform { $true }
+        function Test-CommandExists { $false }
+        function Add-InstalledCommandPath { $false }
+        $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+        $messages | Should Match 'Command could not be verified yet for Dapr CLI.*check PATH or restart your terminal'
+        @($messages -split "`n" | Where-Object { $_ -match 'restart' }).Count | Should Be 1
+        $results.Tools['Dapr CLI'].Installed | Should Be 'unknown'
+    }
+
+    It 'uses the cross-platform restart hint after a Linux install' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Deno'; ToolId = 'deno' })
+        function Test-IsWindowsPlatform { $false }
+        function Test-CommandExists { $true }
+        function Get-CommandVersion { 'deno 2.0.0' }
+        $action = @{ Name = 'Deno'; ToolId = 'deno'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+        $messages | Should Match 'To use Deno in other terminals, you may need to update PATH or restart your terminal'
+    }
+
+    It 'does not show the Windows-only restart hint after a verified Linux install' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+        function Test-IsWindowsPlatform { $false }
+        function Test-CommandExists { $true }
+        function Get-CommandVersion { 'CLI version: 1.19.1' }
+        $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+        $messages | Should Not Match 'restart your terminal'
+    }
+
+    It 'honors an explicit false Windows restart override' {
+        $originalConfig = $toolsConfig['Dapr CLI']
+        $toolsConfig['Dapr CLI'] = $originalConfig.Clone()
+        $toolsConfig['Dapr CLI'].InstallMayRequireTerminalRestart = $true
+        $toolsConfig['Dapr CLI'].WindowsInstallMayRequireTerminalRestart = $false
+        try {
+            $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
+            function Test-IsWindowsPlatform { $true }
+            function Test-CommandExists { $true }
+            function Get-CommandVersion { 'CLI version: 1.19.1' }
+            $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
+
+            $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+            $messages | Should Not Match 'restart your terminal'
+        } finally {
+            $toolsConfig['Dapr CLI'] = $originalConfig
+        }
     }
 
     It 'shows an unknown version and warns when the installed command cannot be verified' {
@@ -557,8 +616,10 @@ Describe 'Post-install inventory' {
         function Test-CommandExists { $false }
         $action = @{ Name = 'Dapr CLI'; ToolId = 'dapr-cli'; Command = 'synthetic install'; Type = 'install' }
 
-        Complete-InstallExecution -Action $action -Execution @{ ExitCode = 1 } | Should Be $false
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 1 } 6>&1)
 
+        $messages[-1] | Should Be $false
+        ($messages -join "`n") | Should Not Match 'restart your terminal'
         $results.Tools.ContainsKey('Dapr CLI') | Should Be $false
         $results.NotInstalled.Count | Should Be 1
         $results.Errors.Count | Should Be 1

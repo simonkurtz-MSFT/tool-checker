@@ -540,6 +540,18 @@ Describe 'Post-install inventory' {
         $results.Tools['Dapr CLI'].Installed | Should Be 'unknown'
     }
 
+    It 'reports an unknown Node.js version after installation when the command fails' {
+        $results.NotInstalled = @([pscustomobject]@{ Name = 'NodeJS'; ToolId = 'nodejs' })
+        function Test-CommandExists { $true }
+        function Get-CommandVersion { 'Unable to retrieve version' }
+        $action = @{ Name = 'NodeJS'; ToolId = 'nodejs'; Command = 'synthetic install'; Type = 'install' }
+
+        $messages = @(Complete-InstallExecution -Action $action -Execution @{ ExitCode = 0 } 6>&1) -join "`n"
+
+        $messages | Should Match 'Installed version could not be determined for NodeJS'
+        $results.Tools.NodeJS.Installed | Should Be 'unknown'
+    }
+
     It 'does not create an installed row after a failed and unverified install' {
         $results.NotInstalled = @([pscustomobject]@{ Name = 'Dapr CLI'; ToolId = 'dapr-cli' })
         function Test-CommandExists { $false }

@@ -59,8 +59,14 @@ function Test-Tool {
         Write-Error "NodeJS not installed"; Add-NotInstalledTool "NodeJS"; return
     }
 
-    $versionOutput  = Get-CommandVersion $config.Command "--version"
-    $currentVersion = $versionOutput -replace 'v', ''
+    $versionOutput = Get-CommandVersion $config.Command "--version"
+    if (-not ($versionOutput -match '^v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$')) {
+        Write-Warning "Could not parse NodeJS version"
+        $results.Tools["NodeJS"] = @{ Installed = "unknown"; Latest = "" }
+        return
+    }
+
+    $currentVersion = $Matches[1]
     Write-Success "NodeJS installed: v$currentVersion"
     $results.Tools["NodeJS"] = @{ Installed = "v$currentVersion"; Latest = "" }
 

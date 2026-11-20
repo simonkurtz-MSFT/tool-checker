@@ -45,6 +45,65 @@ Describe 'Node release planning' {
 }
 
 Describe 'Node.js tool integration' {
+    It 'reports an unknown version for invalid Node.js output: <VersionOutput>' -TestCases @(
+        @{ VersionOutput = 'Unable to retrieve version' },
+        @{ VersionOutput = 'access denied' }
+    ) {
+        param($VersionOutput)
+        $results = New-ToolCheckResults
+        $SkipUpdate = $true
+        $script:NodeVersionOutput = $VersionOutput
+        Mock Test-CommandExists { $true }
+        Mock Get-CommandVersion { $script:NodeVersionOutput }
+        try {
+            $messages = @(Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' 6>&1) -join "`n"
+
+            $results.Tools.NodeJS.Installed | Should Be 'unknown'
+            $messages | Should Match 'Could not parse NodeJS version'
+        } finally {
+            Remove-Variable -Name NodeVersionOutput -Scope Script -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'preserves a valid Node.js prerelease version' {
+        $results = New-ToolCheckResults
+        $SkipUpdate = $true
+        Mock Test-CommandExists { $true }
+        Mock Get-CommandVersion { 'v23.0.0-dev.20250101' }
+
+        Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool'
+
+        $results.Tools.NodeJS.Installed | Should Be 'v23.0.0-dev.20250101'
+    }
+
+    It 'reports an unknown version in a selected-only check worker' {
+        $selectionFile = Join-Path $TestDrive 'nodejs-only.env'
+        Set-Content -LiteralPath $selectionFile -Value 'TOOL_CHECKER_TOOLS=nodejs'
+        $session = [powershell]::Create()
+        try {
+            $null = $session.AddScript({
+                param($path, $envFile)
+                . $path -EnvFile $envFile -SkipUpdate
+                $checks = @(@{ Name = 'NodeJS'; Block = {
+                    function Test-CommandExists { $true }
+                    function Get-CommandVersion { 'Unable to retrieve version' }
+                    function Get-WingetLatestVersion { throw 'Unexpected package lookup' }
+                    function Invoke-RestMethod { throw 'Unexpected release lookup' }
+                    Invoke-ToolEntryPoint -ToolId 'nodejs' -EntryPoint 'Test-Tool' -Arguments @{ Progress = $args[0] }
+                } })
+                Invoke-ParallelChecks -Checks $checks -Total 1 -TimeoutSec 10
+                [PSCustomObject]@{ Ids = @($script:ToolDefinitions.Keys); Results = $results }
+            }).AddArgument($scriptPath).AddArgument($selectionFile)
+            $observed = @($session.Invoke())
+            $session.HadErrors | Should Be $false
+            $observed.Count | Should Be 1
+            $observed[0].Ids | Should Be 'nodejs'
+            $observed[0].Results.Tools.NodeJS.Installed | Should Be 'unknown'
+            $observed[0].Results.AvailableUpdates.Count | Should Be 0
+            $observed[0].Results.Errors.Count | Should Be 0
+        } finally { $session.Dispose() }
+    }
+
     It 'enforces a <Days>-day cooldown on a release aged <Age> days' -TestCases @(
         @{ Days = 8; Age = 7.5; Actions = 0 },
         @{ Days = 8; Age = 8; Actions = 1 },

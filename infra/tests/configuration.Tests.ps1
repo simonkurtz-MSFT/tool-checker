@@ -274,6 +274,18 @@ Describe 'Configuration snapshots' {
     }
 }
 
+Describe 'Shipped environment template' {
+    It 'lists every catalog tool exactly once in the example selection' {
+        $selectionLines = @(Get-Content -LiteralPath (Join-Path $repositoryPath '.env.example') |
+            Where-Object { $_ -match '^\s*#\s*TOOL_CHECKER_TOOLS=' })
+        $selectionLines.Count | Should Be 1
+        $exampleIds = @(($selectionLines[0] -replace '^\s*#\s*TOOL_CHECKER_TOOLS=', '') -split ',' |
+            ForEach-Object { $_.Trim() } | Sort-Object)
+        $catalogIds = @($toolsJson.tools.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object)
+        ($exampleIds -join ',') | Should Be ($catalogIds -join ',')
+    }
+}
+
 Describe 'Interactive environment setup' {
     BeforeEach {
         $fixtureCatalog = Join-Path $TestDrive 'setup-catalog.json'

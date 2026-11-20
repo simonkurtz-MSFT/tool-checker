@@ -75,11 +75,17 @@ The included configuration checks:
 - Node.js and global npm packages
 - npm-check-updates (`ncu`), pnpm, Deno, and uv
 - Azure CLI, Azure Developer CLI, Azure CLI extensions, and Bicep
+- Dapr CLI
 - .NET SDKs, Python Install Manager (`py`), and Python installations
 - Git, GitHub CLI, GitHub Copilot CLI, and ripgrep
 - WSL and PowerShell
 
 Tool Checker supports Windows and Linux on AMD64 and ARM64. Some configured tools or update commands are platform-specific; for example, WSL is checked only on Windows and several Windows updates use WinGet.
+
+Dapr CLI checks and updates the CLI, not the Dapr runtime or control plane.
+Windows actions use the `Dapr.CLI` WinGet package; Linux actions use the
+[Dapr installer](https://docs.dapr.io/getting-started/install-dapr-cli/), which
+defaults to `/usr/local/bin` and respects `DAPR_INSTALL_DIR`.
 
 ## See it in action
 

@@ -1,6 +1,6 @@
 ---
 description: "Maintain tool-specific PowerShell files, shared configuration, registry and output infrastructure, and their loading boundaries."
-applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-checker.schema.json,CONTRIBUTING.md"
+applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-checker.schema.json,.env.example,CONTRIBUTING.md"
 ---
 
 # Tool-specific files
@@ -26,6 +26,10 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   `infra/package-managers.ps1` resolves only selected PackageManagerFiles and
   WindowsPackageManagerFiles. Accept filenames only, not paths or folder scans.
   Dispatch `*-PackageManager` operations locally; share only named helpers.
+- When adding or removing a catalog tool, update the `TOOL_CHECKER_TOOLS` example
+  in `.env.example` to include every catalog ID exactly once. If a local `.env`
+  exists, ask the user whether to update it too; only modify it with their approval,
+  preserve unrelated settings, and do not expose secrets.
 - Explicitly dot-source the fixed generic infrastructure list via `$PSScriptRoot`, independently
   of catalog selection; do not scan the folder or register it as a tool.
   Infrastructure files define functions only and reuse main-script state.

@@ -39,7 +39,10 @@ the tool, such as a tool that manages several installed release channels.
    a file directly under `tools/` and declare its filename with `ToolFile`,
    starting from the tool-specific template below.
 7. Update the catalog ID list or other affected documentation in
-   [README.md](README.md).
+   [README.md](README.md). When adding or removing a tool, keep the example
+   selection in [.env.example](.env.example) aligned with the catalog. If a
+   local `.env` exists, ask its owner whether to update their selection; do not
+   change it without approval.
 
 When proposing a tool, include sanitized examples of its installed-version
 output and upstream release response. The configured parser must extract a

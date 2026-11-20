@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-20
+
+### Added
+
+- Check, install, and update Dapr CLI on Windows and Linux.
+- Explain whether releases are awaiting cooldown or have an unverified age below
+  the status table.
+
+### Changed
+
+- Show newly installed tools and their detected versions in the next table, warning
+  when the version cannot be verified. On Windows, refresh the current process
+  PATH from persisted entries when needed to detect the installed command.
+
+### Fixed
+
+- Keep installed versions that match or exceed the latest release green even when
+  no cooldown-safe release is available.
+
 ## [2.10.0] - 2026-11-11
 
 ### Added
@@ -308,7 +327,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.10.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.11.0...HEAD
+[2.11.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.10.0...2.11.0
 [2.10.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.9.0...2.10.0
 [2.9.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.7.1...2.8.0

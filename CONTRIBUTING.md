@@ -31,8 +31,9 @@ the tool, such as a tool that manages several installed release channels.
    separately, using `WindowsInstallUnattended` / `WindowsUpdateUnattended` when
    needed. Use `false` (also the default) if input, agreements, sudo credentials,
    or elevation prompts may be required; silent installer flags alone do not
-   guarantee unattended execution. These flags only prioritize bulk actions;
-   they do not suppress prompts or authorize registry repairs and duplicate cleanup.
+   guarantee unattended execution. These flags prioritize interactive bulk actions
+   and gate `-Unattended` execution; they do not suppress prompts or authorize
+   registry repairs and duplicate cleanup.
    Set `InstallMayRequireTerminalRestart` when installation may require a PATH
    update or a new terminal; use `WindowsInstallMayRequireTerminalRestart` for a
    Windows-specific override. Omitted values default to `false`.
@@ -241,7 +242,8 @@ and replaces only the template's `TOOL_CHECKER_TOOLS` line. Enter selects all en
 tools, comma-separated numbers select a subset, and `0` returns false so the entry point
 exits without creating a file or starting checks. Existing environment files must never
 be overwritten by setup. Keep the application banner visible before this prompt, while
-`-Version` and dot-sourced loading remain noninteractive.
+`-Version` and dot-sourced loading remain noninteractive. `-Unattended` requires
+an existing environment file and fails rather than opening setup.
 
 Preserve relative env paths against the caller's working directory, optional
 missing env files, selection normalization, ordered install commands, explicit
@@ -340,6 +342,15 @@ definition loading and tool dispatch in `infra/runtime.ps1`, result ownership in
 `infra/results.ps1`, checking and release-plan consumption in `infra/checks.ps1`,
 action planning/execution in `infra/actions.ps1`, and check workers in
 `infra/parallel.ps1`. Infrastructure is loaded from an explicit list, never scanned.
+
+`-Unattended` takes one snapshot of available actions and runs only operations
+explicitly marked unattended-safe, sequentially, through the same dispatch and
+completion helpers as the interactive menu. Report exclusions; never run registry
+repairs or duplicate cleanup, retry failed actions, or open a menu. Finish remaining
+actions after a failure. Failed runs exit with code 1 after pausing only when console
+input/output are attached and PowerShell is interactive; redirected, headless, and
+`-NonInteractive` processes must not wait. Cover this with synthetic actions and
+isolated processes, never real installs or updates.
 
 Check-worker resources must be tracked as soon as they are created, before setup
 or invocation can fail. Keep pool opening, worker startup, and result collection

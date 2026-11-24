@@ -104,6 +104,10 @@
     Invoke-ToolUpdate. Return @{ Output = '...'; ExitCode = 0 } from executors.
     Catalog Install/UpdateExecutor, EntryPoint, ExecutionMode, and OutcomePackageManager
     settings support Windows overrides. Explicit action values take precedence.
+    InstallUnattended and UpdateUnattended (including Windows overrides) gate
+    -Unattended actions and prioritize interactive bulk actions. Mark true only
+    when input, agreements, sudo credentials, and elevation prompts are not needed.
+    These hints do not suppress prompts or authorize registry repairs or cleanup.
     Use Test-IsWindowsPlatform for platform branches, Get-PlatformConfigurationValue for
     Windows<Property> overrides, and Invoke-SafeApiRequest for release lookups so failed
     requests are reported and recorded consistently.

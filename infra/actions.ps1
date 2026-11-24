@@ -1,5 +1,5 @@
 # Action planning, approval, execution, and completion for both interactive and
-# Force workflows. Executors return Output/ExitCode; owners interpret failures.
+# automatic workflows. Executors return Output/ExitCode; owners interpret failures.
 function Get-InstallCommand {
     param([pscustomobject]$NotInstalledEntry)
     if (-not $NotInstalledEntry -or -not $NotInstalledEntry.InstallCommands) { return "" }
@@ -346,6 +346,59 @@ function Read-ActionMenuResponse {
     }
 }
 
+function Invoke-ActionExecution {
+    param([Parameter(Mandatory)][object]$Action)
+
+    try {
+        $execution = Invoke-ActionCommand -Action $Action
+        if ($Action.Type -eq 'registry') {
+            return Complete-RegistryExecution -Action $Action -Execution $execution
+        }
+        if ($Action.Type -eq 'install') {
+            return Complete-InstallExecution -Action $Action -Execution $execution
+        }
+        Complete-UpdateExecution -Action $Action -Execution $execution -Refresh
+    } catch {
+        $message = "$($Action.Type) failed for $($Action.Name). Command: $($Action.Command) | $(Get-DetailedErrorMessage $_)"
+        Write-Error $message
+        Register-UpdateFailure -Name $Action.Name -Message $message
+        $false
+    }
+}
+
+function Invoke-UnattendedActions {
+    Write-Header 'Install / Update (Unattended mode)'
+    $runnable = @()
+    # Snapshot once: a failed action remains pending but is never scheduled again in this run.
+    foreach ($action in @(Get-AvailableActions)) {
+        $reason = if ($action.Type -in @('registry', 'cleanup')) { 'requires explicit approval' }
+            elseif ([string]::IsNullOrWhiteSpace($action.Command)) { "no command configured for $script:PlatformKey" }
+            elseif ($action.Unattended -ne $true) { 'may require interaction' }
+        if ($reason) {
+            Write-Warning "Skipped $($action.Name): $reason."
+        } else {
+            $runnable += $action
+        }
+    }
+
+    if ($runnable.Count -eq 0) {
+        Write-Host ''
+        Write-Host 'No unattended installs or updates available.'
+        Write-Host ''
+        
+        return
+    }
+
+    for ($i = 0; $i -lt $runnable.Count; $i++) {
+        $action = $runnable[$i]
+        $verb = if ($action.Type -eq 'install') { 'Installing' } else { 'Updating' }
+        Write-Host "$($i + 1)/$($runnable.Count): $verb $($action.Name): $($action.Command)"
+        Invoke-ActionExecution -Action $action | Out-Null
+        Write-Host ''
+    }
+    Show-ResultsTable
+}
+
 function Invoke-ActionMenu {
     param([switch]$RegistryOnly, [switch]$ApprovalOnly)
 
@@ -436,24 +489,8 @@ function Invoke-ActionMenu {
             } else {
                 Write-Host "Executing $($a.Name): $($a.Command)"
             }
-            try {
-                $execution = Invoke-ActionCommand -Action $a
-
-                if ($a.Type -eq 'registry') {
-                    if (Complete-RegistryExecution -Action $a -Execution $execution) {
-                        $completedIdx += $remaining[$ri].Idx
-                    }
-                } elseif ($a.Type -eq "install") {
-                    if (Complete-InstallExecution -Action $a -Execution $execution) {
-                        $completedIdx += $remaining[$ri].Idx
-                    }
-                } elseif (Complete-UpdateExecution -Action $a -Execution $execution -Refresh) {
-                    $completedIdx += $remaining[$ri].Idx
-                }
-            } catch {
-                $message = "$($a.Type) failed for $($a.Name). Command: $($a.Command) | $(Get-DetailedErrorMessage $_)"
-                Write-Error $message
-                Register-UpdateFailure -Name $a.Name -Message $message
+            if (Invoke-ActionExecution -Action $a) {
+                $completedIdx += $remaining[$ri].Idx
             }
             Write-Host ""
             Show-ResultsTable

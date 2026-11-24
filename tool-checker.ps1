@@ -8,6 +8,9 @@
     Only check status; do not offer or execute updates. Alias: CheckOnly.
 .PARAMETER Force
     Execute available tool updates automatically. Registry changes still require approval.
+.PARAMETER Unattended
+    Install and update unattended-safe tools once, without menus or retries.
+    On failure, pause only in an interactive terminal, then exit with code 1.
 .PARAMETER Timeout
     Maximum seconds allowed for each tool check. Default: 60.
 .PARAMETER CooldownDays
@@ -21,10 +24,13 @@
     .\tool-checker.ps1 -SkipUpdate
 .EXAMPLE
     .\tool-checker.ps1 -Force -CooldownDays 8
+.EXAMPLE
+    .\tool-checker.ps1 -Unattended
 #>
 param(
     [Alias('CheckOnly')][switch]$SkipUpdate,
     [switch]$Force,
+    [switch]$Unattended,
     [int]$Timeout = 60,
     [int]$CooldownDays,
     [string]$EnvFile = (Join-Path $PSScriptRoot '.env'),
@@ -39,10 +45,27 @@ if ($Version) {
     return
 }
 
+trap {
+    if (-not $Unattended -or $script:IsDotSourced) { break }
+
+    Write-Host "Unattended run failed: $_" -ForegroundColor Red
+    # Schedulers and -NonInteractive must never wait for input or open a new window.
+    $nonInteractive = @([Environment]::GetCommandLineArgs() -match '^[-/]noni').Count -gt 0
+    if ([Environment]::UserInteractive -and -not $nonInteractive -and
+        -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
+        $null = Read-Host 'Press Enter to close after reviewing the failure'
+    }
+    exit 1
+}
+
+if ($Unattended -and ($Force -or $SkipUpdate)) {
+    throw '-Unattended cannot be combined with -Force or -SkipUpdate (including -CheckOnly).'
+}
+
 $startupEnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
 $requiresInteractiveSetup = -not (Test-Path -LiteralPath $startupEnvFile -PathType Leaf)
 
-if (-not $script:IsDotSourced) {
+if (-not $script:IsDotSourced -and -not $Unattended) {
     Clear-Host
 }
 
@@ -66,10 +89,14 @@ if (-not $script:IsDotSourced) {
 
 $configPath = Join-Path $PSScriptRoot 'tool-checker.json'
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    if ($Unattended) { throw "tool-checker.json not found at: $configPath" }
     Write-Error "tool-checker.json not found at: $configPath"
     exit 1
 }
 if ($requiresInteractiveSetup -and -not $script:IsDotSourced) {
+    if ($Unattended) {
+        throw "Unattended mode requires an existing environment file: $startupEnvFile. Run interactive setup first or supply -EnvFile."
+    }
     $setupCompleted = Initialize-ToolCheckerEnvironment -ConfigPath $configPath -EnvFile $startupEnvFile `
         -TemplatePath (Join-Path $PSScriptRoot '.env.example')
     if (-not $setupCompleted) { return }
@@ -113,6 +140,11 @@ function Main {
     Show-StartupInformation -IsElevated (Test-IsAdministrator)
     Invoke-CheckWorkflow
 
+    if ($Unattended) {
+        Invoke-UnattendedActions
+        return
+    }
+
     if (@(Get-AvailableActions).Count -eq 0 -and ($Force -or $SkipUpdate)) {
         Write-Host "`nNothing to do. Exiting.`n"
         return
@@ -132,5 +164,8 @@ function Main {
 
 if (-not $script:IsDotSourced) {
     Main
-    if ($results.Errors.Count -gt 0 -or $results.UpdateFailed.Count -gt 0) { exit 1 }
+    if ($results.Errors.Count -gt 0 -or $results.UpdateFailed.Count -gt 0) {
+        if ($Unattended) { throw 'Checks or actions failed. See the errors above; no actions will be retried.' }
+        exit 1
+    }
 }

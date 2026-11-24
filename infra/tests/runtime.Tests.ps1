@@ -217,3 +217,157 @@ Describe 'Tool definition loading' {
         $functionBlock | Should Not Match 'Implement the tool-specific check before registering this file'
     }
 }
+
+Describe 'Unattended process execution' {
+    BeforeEach {
+        $appRoot = Join-Path $TestDrive "unattended-$([guid]::NewGuid())"
+        $toolDirectory = Join-Path $appRoot 'tools'
+        $null = New-Item -ItemType Directory -Path $toolDirectory -Force
+        Copy-Item -LiteralPath $scriptPath -Destination $appRoot
+        Copy-Item -LiteralPath (Join-Path (Split-Path $scriptPath) 'infra') -Destination $appRoot -Recurse
+        $fixtureScript = Join-Path $appRoot 'tool-checker.ps1'
+        $fixtureCatalog = Join-Path $appRoot 'tool-checker.json'
+        $fixtureEnv = Join-Path $appRoot 'selection.env'
+        Set-Content -LiteralPath $fixtureEnv -Value 'TOOL_CHECKER_TOOLS=first,second,missing'
+        $catalog = @{
+            settings = @{ CooldownDays = 8; MaximumCooldownDays = 30 }
+            tools = [ordered]@{}
+        }
+        foreach ($id in @('first', 'second', 'missing')) {
+            $catalog.tools[$id] = @{
+                Name = $id; CheckType = 'custom'; ToolFile = 'probe.ps1'; Command = 'Write-Output'
+                UpdateType = 'direct'; UpdateCommand = 'synthetic update'; UpdateUnattended = $true
+                UpdateExecutor = 'tool'; UpdateEntryPoint = 'Invoke-ToolUpdate'
+                InstallUnattended = $true; InstallExecutor = 'tool'; InstallEntryPoint = 'Invoke-ToolInstall'
+                InstallCommands = @{ 'Windows (amd64)' = 'synthetic install'; 'Windows (arm64)' = 'synthetic install'; 'Linux (amd64)' = 'synthetic install'; 'Linux (arm64)' = 'synthetic install' }
+                AttemptFile = Join-Path $appRoot "$id.attempts"
+                InitiallyMissing = $id -eq 'missing'; Fail = $false; FailCheck = $false
+            }
+        }
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+        Set-Content -LiteralPath (Join-Path $toolDirectory 'probe.ps1') -Value @'
+function Test-Tool {
+    param([string]$Progress)
+    $config = Get-OwnedConfiguration -ToolId $ToolId
+    if ($config.FailCheck) {
+        $results.Errors += "Synthetic check failure: $($config.Name)"
+        return
+    }
+    $attempted = Test-Path -LiteralPath $config.AttemptFile
+    if ($config.InitiallyMissing -and -not $attempted) {
+        Add-NotInstalledTool -ToolName $config.Name
+        return
+    }
+    $results.Tools[$config.Name] = @{
+        ToolId = $config.Id; Installed = if ($attempted) { '2.0.0' } else { '1.0.0' }; Latest = '2.0.0'
+    }
+    if (-not $SkipUpdate -and -not $attempted) {
+        Add-AvailableUpdate -Name $config.Name -Command 'synthetic update' -Type 'direct' -Version '2.0.0'
+    }
+}
+function Invoke-ToolUpdate {
+    $config = Get-OwnedConfiguration -ToolId $ToolId
+    Add-Content -LiteralPath $config.AttemptFile -Value 'attempt'
+    @{ Output = "synthetic action: $($config.Name)"; ExitCode = if ($config.Fail) { 7 } else { 0 } }
+}
+function Invoke-ToolInstall { Invoke-ToolUpdate }
+function Refresh-ToolStatus { param([string]$ToolName) Test-Tool }
+'@
+
+        function Invoke-UnattendedTestProcess {
+            param([string[]]$ExtraArguments = @(), [string]$EnvironmentFile = $fixtureEnv)
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = Join-Path $PSHOME $(if (Test-IsWindowsPlatform) { 'pwsh.exe' } else { 'pwsh' })
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardInput = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in (@('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $fixtureScript, '-Unattended', '-EnvFile', $EnvironmentFile) + $ExtraArguments)) {
+                $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($startInfo)
+            try {
+                $stdout = $process.StandardOutput.ReadToEndAsync()
+                $stderr = $process.StandardError.ReadToEndAsync()
+                if (-not $process.WaitForExit(60000)) { throw 'Unattended process did not finish within 60 seconds.' }
+                [pscustomobject]@{
+                    ExitCode = $process.ExitCode
+                    Output = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
+                }
+            } finally {
+                if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+                $process.Dispose()
+            }
+        }
+    }
+
+    It 'installs and updates each synthetic tool once and exits successfully without input' {
+        $observed = Invoke-UnattendedTestProcess
+
+        $observed.ExitCode | Should Be 0
+        foreach ($id in @('first', 'second', 'missing')) {
+            @(Get-Content -LiteralPath $catalog.tools[$id].AttemptFile).Count | Should Be 1
+        }
+        $observed.Output | Should Match 'Installing missing: synthetic install'
+        $observed.Output | Should Not Match 'Press Enter|Select option:|Select tools|Unattended run failed'
+    }
+
+    It 'finishes remaining actions after failure and exits nonzero without waiting or retrying' {
+        $catalog.tools.first.Fail = $true
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+
+        $observed = Invoke-UnattendedTestProcess
+
+        $observed.ExitCode | Should Be 1
+        $observed.Output | Should Match 'Failed: first.*Exit code: 7'
+        $observed.Output | Should Match 'Unattended run failed:'
+        $observed.Output | Should Not Match 'Press Enter|Select option:'
+        foreach ($id in @('first', 'second', 'missing')) {
+            @(Get-Content -LiteralPath $catalog.tools[$id].AttemptFile).Count | Should Be 1
+        }
+    }
+
+    It 'returns failure for check errors while still completing eligible actions' {
+        $catalog.tools.first.FailCheck = $true
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fixtureCatalog
+
+        $observed = Invoke-UnattendedTestProcess
+
+        $observed.ExitCode | Should Be 1
+        Test-Path -LiteralPath $catalog.tools.first.AttemptFile | Should Be $false
+        foreach ($id in @('second', 'missing')) {
+            @(Get-Content -LiteralPath $catalog.tools[$id].AttemptFile).Count | Should Be 1
+        }
+    }
+
+    It 'fails clearly without creating a missing environment file or prompting for setup' {
+        $missingEnv = Join-Path $appRoot 'absent.env'
+
+        $observed = Invoke-UnattendedTestProcess -EnvironmentFile $missingEnv
+
+        $observed.ExitCode | Should Be 1
+        $observed.Output | Should Match 'Unattended mode requires an existing environment file'
+        $observed.Output | Should Not Match 'Press Enter|Select option:|Select tools'
+        Test-Path -LiteralPath $missingEnv | Should Be $false
+        @(Get-ChildItem -LiteralPath $appRoot -Filter '*.attempts').Count | Should Be 0
+    }
+
+    It 'rejects the conflicting <Option> option without running actions' -TestCases @(
+        @{ Option = '-Force' }, @{ Option = '-SkipUpdate' }, @{ Option = '-CheckOnly' }
+    ) {
+        param($Option)
+
+        $observed = Invoke-UnattendedTestProcess -ExtraArguments @($Option)
+
+        $observed.ExitCode | Should Be 1
+        $observed.Output | Should Match 'cannot be combined'
+        @(Get-ChildItem -LiteralPath $appRoot -Filter '*.attempts').Count | Should Be 0
+    }
+
+    It 'keeps Version independent of unattended startup requirements' {
+        $observed = Invoke-UnattendedTestProcess -EnvironmentFile (Join-Path $appRoot 'absent.env') -ExtraArguments @('-Version')
+
+        $observed.ExitCode | Should Be 0
+        $observed.Output.Trim() | Should Be $script:ToolCheckerVersion
+    }
+}

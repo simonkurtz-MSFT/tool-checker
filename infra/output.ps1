@@ -23,7 +23,7 @@ function Write-Header  { param([string]$Text, [string]$Progress = "")
     else           { Write-Host "`n$ColorBlue► $Text$ColorReset" }
 }
 function Write-Success { param([string]$Text) Write-Host "  $ColorGreen✓ $Text$ColorReset" }
-function Write-Warning { param([string]$Text) Write-Host "  $ColorYellow⚠ $Text$ColorReset" }
+function Write-Warning { param([string]$Text) Write-Host "  $ColorYellow⚠  $Text$ColorReset" }
 function Write-Error   { param([string]$Text) Write-Host "  $ColorRed✗ $Text$ColorReset" }
 
 function Get-ApplicationBannerLines {
@@ -212,11 +212,12 @@ function Show-ToolDetails {
 function Show-StartupInformation {
     param([bool]$IsElevated)
 
-    Write-Host "  Process elevated     : $(if ($IsElevated) { 'Yes' } else { 'No' })"
-
     if ($SkipUpdate) { Write-Warning "Running in check-only mode (updates disabled)" }
     if ($Force)      { Write-Warning "Running with automatic update (no prompts)" }
+    if ($Unattended) { Write-Warning 'Running unattended installs and updates (one attempt per safe action)' }
+    Write-Host ""
 
+    Write-Host "  Process elevated     : $(if ($IsElevated) { 'Yes' } else { 'No' })"
     Write-Host "  Registry policy file : $resolvedEnvFile"
     Write-Host "  Selected tool count  : $($toolsConfig.Count)/$($catalogToolIds.Count)"
 }

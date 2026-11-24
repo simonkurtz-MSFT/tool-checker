@@ -122,6 +122,10 @@ applyTo: "tools/**/*.ps1,infra/**/*.ps1,tool-checker.ps1,tool-checker.json,tool-
   same checked release shown in the action.
   Generic executors return Output/ExitCode; optional Get-ToolOutcome interprets
   failures. Keep eligibility decisions in the owning tool or package manager, not rendering.
+  `-Unattended` executes only explicitly unattended-safe installs/updates once,
+  sequentially, using the menu's dispatch/completion path. Report excluded actions;
+  never open menus or approve registry repairs/cleanup. Continue after failures;
+  pause at the end only in an interactive terminal, otherwise exit nonzero.
 - Reuse shared helpers instead of repeating idioms: branch on Test-IsWindowsPlatform,
   resolve Windows<Property> overrides only through Get-PlatformConfigurationValue, and
   record action failures through Register-UpdateFailure. Use Invoke-SafeApiRequest for

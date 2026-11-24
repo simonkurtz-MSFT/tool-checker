@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `-Unattended` to attempt unattended-safe installs and updates once each,
+  reporting skipped operations and continuing after failures. Failed runs pause
+  for inspection only in an interactive terminal; headless runs exit nonzero.
+
 ## [2.11.0] - 2026-11-20
 
 ### Added

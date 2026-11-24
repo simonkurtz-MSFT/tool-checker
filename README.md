@@ -166,6 +166,7 @@ To change the selection later, edit `TOOL_CHECKER_TOOLS` in the environment file
 | --- | --- |
 | `-SkipUpdate` | Check which tools are installed without querying for or applying updates. Alias: `-CheckOnly`. Missing tools can still appear in the action menu; exit without selecting an install for a read-only inventory. |
 | `-Force` | Apply every actionable update without prompting. Updates run in parallel. This does not automatically install missing tools. |
+| `-Unattended` | Run unattended-safe installs and updates sequentially, once each, without menus. Report skipped actions; pause after failures only in an interactive terminal. Requires an existing environment file; cannot combine with `-Force` or `-SkipUpdate`. |
 | `-Timeout <seconds>` | Set the maximum time for each individual check. The default is 60 seconds. |
 | `-CooldownDays <days>` | Override the catalog's npm release cooldown for this run. Nonnegative integer; `0` removes the age delay. |
 | `-EnvFile <path>` | Read tool selection and registry policy from a specific dotenv file instead of `.env` beside the script. |
@@ -183,6 +184,9 @@ Examples:
 # Apply all available updates without prompts
 ./tool-checker.ps1 -Force
 
+# Install missing tools and update tools that support unattended execution
+./tool-checker.ps1 -Unattended
+
 # Allow slower checks up to 60 seconds each
 ./tool-checker.ps1 -Timeout 60
 
@@ -196,7 +200,43 @@ Examples:
 ./tool-checker.ps1 -Version
 ```
 
-Tool Checker executes the commands shown in the summary or action menu. Review [`tool-checker.json`](tool-checker.json) before using interactive actions or `-Force`, especially on a shared or managed machine.
+Tool Checker executes the commands shown in the summary or action menu. Review [`tool-checker.json`](tool-checker.json) before using interactive actions, `-Force`, or `-Unattended`, especially on a shared or managed machine.
+
+### Scheduled unattended runs
+
+Run interactive setup once, or create an environment file and pass it with
+`-EnvFile`. `-Unattended` never opens setup or action menus, changes registries,
+or removes duplicate installations. It runs only selected tools' actions explicitly
+marked `InstallUnattended` / `UpdateUnattended` (including platform overrides).
+Operations that may prompt for input, agreements, sudo credentials, or elevation
+are skipped with an explanation, as are missing platform commands and actions
+requiring explicit approval. Existing cooldown and update-eligibility rules remain
+in effect; skipped operations are not failures.
+
+Each eligible action is attempted once, sequentially. A failure does not retry the
+action or prevent the remaining actions from running. Tool Checker exits with
+code `0` when no checks or actions failed, and `1` otherwise. After a failure,
+an interactive terminal waits for Enter so the output remains visible. Redirected,
+headless, and PowerShell `-NonInteractive` runs never wait and cannot keep a
+visible window open; retain their output in a log instead.
+
+For Windows Task Scheduler, choose **Start a program**, use the full path to
+`pwsh.exe`, and pass arguments such as:
+
+```text
+-NoLogo -NoProfile -File "C:\Tools\tool-checker\tool-checker.ps1" -Unattended -EnvFile "C:\Tools\tool-checker\.env"
+```
+
+Choose **Run only when user is logged on** for a visible console that can pause
+after a failure. For background scheduling, add PowerShell's `-NonInteractive`
+before `-File`; no window will be held open. The scheduled account must already
+have the required permissions and package managers available on PATH.
+
+For cron on Linux, use absolute paths and retain stdout/stderr:
+
+```cron
+0 9 * * * /usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File /home/me/tool-checker/tool-checker.ps1 -Unattended -EnvFile /home/me/tool-checker/.env >> /home/me/tool-checker-unattended.log 2>&1
+```
 
 For pnpm, an active command directly under `PNPM_HOME` or `PNPM_HOME/bin` is updated
 with `pnpm self-update <version>`, pinned to the cooldown-eligible release. Other

@@ -1,4 +1,4 @@
-# Action planning, dispatch, completion, and Force-mode contracts. Commands are mocked
+# Action planning, dispatch, completion, and automatic-mode contracts. Commands are mocked
 # or synthetic; no real installs, updates, or registry repairs execute.
 $scriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool-checker.ps1'
 . $scriptPath -EnvFile (Join-Path ([System.IO.Path]::GetTempPath()) "actions-tests-$([guid]::NewGuid()).env")
@@ -439,6 +439,135 @@ Describe 'Sequential bulk actions' {
         Invoke-ActionMenu -ApprovalOnly
         Assert-MockCalled Invoke-ActionCommand 0 -Scope It
         Assert-MockCalled Write-Host 0 -Scope It -ParameterFilter { $Object -eq '  [A] Install / Update all (sequential, unattended first)' }
+    }
+}
+
+Describe 'Unattended actions' {
+    BeforeEach {
+        $results = New-ToolCheckResults
+        $script:UnattendedActions = @(
+            @{ Name = 'Safe install'; ToolId = 'safe-install'; Type = 'install'; Command = 'synthetic install'; Unattended = $true },
+            @{ Name = 'Safe update'; ToolId = 'safe-update'; Type = 'direct'; Command = 'synthetic update'; Version = '2.0.0'; Unattended = $true },
+            @{ Name = 'Interactive'; Type = 'install'; Command = 'never run'; Unattended = $false },
+            @{ Name = 'Unknown'; Type = 'direct'; Command = 'never run' },
+            @{ Name = 'Registry'; Type = 'registry'; Command = 'never run'; Unattended = $true },
+            @{ Name = 'Cleanup'; Type = 'cleanup'; Command = 'never run'; Unattended = $true },
+            @{ Name = 'Unsupported'; Type = 'install'; Command = ''; Unattended = $true }
+        )
+        $results.Tools['Safe update'] = @{ ToolId = 'safe-update'; Installed = '1.0.0'; Latest = '2.0.0' }
+        $script:UnattendedEvents = [System.Collections.Generic.List[string]]::new()
+        Mock Get-AvailableActions { $script:UnattendedActions }
+        Mock Get-OwnedConfiguration { @{ Command = 'synthetic' } }
+        Mock Test-CommandExists { $true }
+        Mock Test-IsWindowsPlatform { $false }
+        Mock Refresh-ToolVersion {
+            $results.Tools[$ToolName].Installed = '2.0.0'
+            $true
+        }
+        Mock Invoke-ActionCommand {
+            $script:UnattendedEvents.Add($Action.Name)
+            @{ ExitCode = 0 }
+        }
+        Mock Write-Host {}
+        Mock Show-ResultsTable {}
+        Mock Invoke-ActionMenu { throw 'Unattended runs must not open a menu' }
+        Mock Invoke-ParallelUpdates { throw 'Unattended actions must be sequential' }
+    }
+
+    It 'runs safe installs and updates once in order, preserving completion and verification' {
+        Invoke-UnattendedActions
+
+        ($script:UnattendedEvents -join ',') | Should Be 'Safe install,Safe update'
+        $results.Tools['Safe install'].Installed | Should Be '2.0.0'
+        $results.Tools['Safe update'].Installed | Should Be '2.0.0'
+        $results.Errors.Count | Should Be 0
+        Assert-MockCalled Refresh-ToolVersion 2 -Exactly -Scope It
+        Assert-MockCalled Get-AvailableActions 1 -Exactly -Scope It
+        Assert-MockCalled Invoke-ActionMenu 0 -Scope It
+        Assert-MockCalled Invoke-ParallelUpdates 0 -Scope It
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter {
+            $Object -eq '1/2: Installing Safe install: synthetic install'
+        }
+        Assert-MockCalled Write-Host 1 -Scope It -ParameterFilter {
+            $Object -eq '2/2: Updating Safe update: synthetic update'
+        }
+    }
+
+    It 'reports every excluded operation without executing it' {
+        Mock Write-Warning {}
+        Invoke-UnattendedActions
+
+        foreach ($name in @('Interactive', 'Unknown')) {
+            Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -eq "Skipped ${name}: may require interaction." }
+        }
+        foreach ($name in @('Registry', 'Cleanup')) {
+            Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -eq "Skipped ${name}: requires explicit approval." }
+        }
+        Assert-MockCalled Write-Warning 1 -Scope It -ParameterFilter { $Text -like 'Skipped Unsupported: no command configured for *' }
+        Assert-MockCalled Invoke-ActionCommand 2 -Exactly -Scope It
+    }
+
+    It 'does not retry a failed <Kind> and still attempts the other safe action' -TestCases @(
+        @{ Kind = 'install'; FailedName = 'Safe install' },
+        @{ Kind = 'direct'; FailedName = 'Safe update' }
+    ) {
+        param($Kind, $FailedName)
+        $script:FailedKind = $Kind
+        $script:UnattendedActions = @($script:UnattendedActions | Sort-Object { if ($_.Type -eq $Kind) { 0 } else { 1 } })
+        Mock Test-CommandExists { $false }
+        Mock Invoke-ActionCommand {
+            $script:UnattendedEvents.Add($Action.Name)
+            @{ ExitCode = if ($Action.Type -eq $script:FailedKind) { 7 } else { 0 } }
+        }
+
+        Invoke-UnattendedActions
+
+        $script:UnattendedEvents.Count | Should Be 2
+        $script:UnattendedEvents[0] | Should Be $FailedName
+        @($script:UnattendedEvents | Where-Object { $_ -eq $FailedName }).Count | Should Be 1
+        $results.Errors.Count | Should Be 1
+        $results.Errors[0] | Should Match 'Exit code: 7'
+    }
+
+    It 'records an executor exception and continues without retrying or prompting' {
+        Mock Invoke-ActionCommand {
+            $script:UnattendedEvents.Add($Action.Name)
+            if ($Action.Type -eq 'install') { throw 'synthetic installer failure' }
+            @{ ExitCode = 0 }
+        }
+
+        Invoke-UnattendedActions
+
+        ($script:UnattendedEvents -join ',') | Should Be 'Safe install,Safe update'
+        $results.UpdateFailed[0] | Should Be 'Safe install'
+        $results.Errors[0] | Should Match 'synthetic installer failure'
+    }
+
+    It 'returns without a menu when every action is ineligible' {
+        $script:UnattendedActions = @($script:UnattendedActions | Select-Object -Skip 2)
+
+        Invoke-UnattendedActions
+
+        Assert-MockCalled Invoke-ActionCommand 0 -Scope It
+        Assert-MockCalled Show-ResultsTable 0 -Scope It
+        Assert-MockCalled Invoke-ActionMenu 0 -Scope It
+    }
+
+    It 'routes Main directly to one unattended pass even when checks recorded errors' {
+        $Unattended = $true
+        $Force = $false
+        $SkipUpdate = $false
+        Mock Assert-ToolConfigurations {}
+        Mock Show-StartupInformation {}
+        Mock Test-IsAdministrator { $false }
+        Mock Invoke-CheckWorkflow { $results.Errors += 'synthetic check failure' }
+
+        Main
+
+        Assert-MockCalled Invoke-CheckWorkflow 1 -Exactly -Scope It
+        Assert-MockCalled Get-AvailableActions 1 -Exactly -Scope It
+        ($script:UnattendedEvents -join ',') | Should Be 'Safe install,Safe update'
+        Assert-MockCalled Invoke-ActionMenu 0 -Scope It
     }
 }
 

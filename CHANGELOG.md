@@ -9,11 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-24
+
 ### Added
 
 - Add `-Unattended` to attempt unattended-safe installs and updates once each,
   reporting skipped operations and continuing after failures. Failed runs pause
   for inspection only in an interactive terminal; headless runs exit nonzero.
+
+### Changed
+
+- Remind users to check PATH or restart their terminal after installations that
+  may require it, even when the command is detected.
+
+### Fixed
+
+- Validate Node.js version output before using it, and report an unknown version
+  when it cannot be parsed.
 
 ## [2.11.0] - 2026-11-20
 
@@ -333,7 +345,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add the initial PowerShell tool inventory, version checking, and update workflow.
 - Add configuration for development tools, package managers, SDKs, and runtimes.
 
-[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.11.0...HEAD
+[Unreleased]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.12.0...HEAD
+[2.12.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.11.0...2.12.0
 [2.11.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.10.0...2.11.0
 [2.10.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.9.0...2.10.0
 [2.9.0]: https://github.com/simonkurtz-MSFT/tool-checker/compare/2.8.0...2.9.0

@@ -38,7 +38,7 @@
 - [ ] A targeted `-SkipUpdate` inventory reports the expected versions.
 - [ ] Install and update commands are non-interactive.
 - [ ] Commands are verified on each claimed platform, or exceptions are noted.
-- [ ] The README catalog ID list and affected configuration documentation are updated.
+- [ ] The [reference catalog ID list](../../docs/reference.md#tool-selection-and-registry-policy), README descriptions, and affected configuration documentation are updated.
 - [ ] No credentials, private registry URLs, or unrelated changes are included.
 
 ## Platform notes

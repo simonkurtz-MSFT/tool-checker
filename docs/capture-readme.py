@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import re
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -121,7 +122,8 @@ def main() -> None:
                     # Accept all enabled tools in the isolated first-run environment.
                     process.write("\r")
                     setup_answered = True
-                if ("Elapsed:" in display and "Completed:" in display and "Running:" in display
+                if ("Elapsed:" in display and re.search(r"Completed(?: with errors)?:", display)
+                        and re.search(r"Running\s*:", display)
                         and "tool-checker-execution.png" not in captures):
                     lines = trim(snapshot(screen))
                     startup_index = next(i for i, line in enumerate(lines)

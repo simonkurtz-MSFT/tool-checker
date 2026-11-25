@@ -43,17 +43,18 @@ The helper:
 
 It never passes `-Force` or selects install, update, or registry alignment actions.
 Checks query real local tools and remote release sources. They are not mocked.
-The capture expects an action menu; if no actions are available, it reports that
-not all four stages were captured rather than manufacturing an action.
+The action menu includes the details option even when no updates are available.
+If a required stage is missing, the helper reports an error rather than
+manufacturing output.
 
 ## Assets and framing
 
 | Asset | Recorded stage |
 | --- | --- |
-| `assets/tool-checker-setup.png` | Version banner and first-run selection prompt. |
-| `assets/tool-checker-execution.png` | Banner, startup diagnostics, registry metadata, and live parallel progress; the already pictured setup menu is omitted. |
-| `assets/tool-checker-summary.png` | Banner, cooldown legend, inventory table, and summary notices. |
-| `assets/tool-checker-post-execution-summary.png` | Banner and approval menu; the legacy filename is retained, but this image does **not** claim an update or repair was executed. |
+| [Setup](assets/tool-checker-setup.png) | Version banner and first-run selection prompt. |
+| [Parallel checks](assets/tool-checker-execution.png) | Banner, startup diagnostics, registry metadata, and live parallel progress; the already pictured setup menu is omitted. |
+| [Summary](assets/tool-checker-summary.png) | Banner, inventory table, release eligibility, and summary notices. |
+| [Action menu](assets/tool-checker-post-execution-summary.png) | Banner and approval menu; the legacy filename is retained, but this image does **not** claim an update or repair was executed. |
 
 The banner is copied from the same recorded screen for context in cropped views.
 Text, tool versions, release ages, durations, and available commands are not edited.
@@ -65,10 +66,12 @@ The helper writes its raw ANSI recording to
 That recording stays local because it can include machine-specific paths and
 registry diagnostics. Do not commit credentials or private registry endpoints.
 
-The current images were captured from **2.2.0 on September 15, 2026**, selecting
-19 enabled tools with registry policy left unset. The configured npm proxy was
-used for metadata. An available uv update and pnpm's release cooldown were real
-results of that run; they are examples, not assertions about today's releases.
+The current images were captured from **2.12.0 on November 25, 2026**, selecting
+all 21 enabled tools with registry policy left unset. The configured public npm
+proxy was used for metadata. The action menu was exited with `0`; no installs,
+updates, duplicate cleanup, or registry repairs were performed.
+Versions, release ages, actions, and timings are recorded results, not assertions
+about today's releases.
 
 ## Before publishing
 

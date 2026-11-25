@@ -21,7 +21,7 @@ the tool, such as a tool that manages several installed release channels.
 
 1. Choose a stable catalog ID made of lowercase letters, numbers, and hyphens.
 2. Add a unique human-readable `Name` and the fields required for the selected
-   check type. See the configuration reference in [README.md](README.md).
+   check type. See the [usage and configuration reference](docs/reference.md#configuration).
 3. Use an authoritative release API or package registry for `ApiUrl` and link
    to official release notes when available.
 4. Provide non-interactive install and update commands for each supported OS
@@ -42,8 +42,8 @@ the tool, such as a tool that manages several installed release channels.
 6. Add or update focused Pester coverage. Put new custom checks in
    a file directly under `tools/` and declare its filename with `ToolFile`,
    starting from the tool-specific template below.
-7. Update the catalog ID list or other affected documentation in
-   [README.md](README.md). When adding or removing a tool, keep the example
+7. Update the catalog ID list in the [reference](docs/reference.md#tool-selection-and-registry-policy)
+   and any affected [README](README.md) descriptions. When adding or removing a tool, keep the example
    selection in [.env.example](.env.example) aligned with the catalog. If a
    local `.env` exists, ask its owner whether to update their selection; do not
    change it without approval.
